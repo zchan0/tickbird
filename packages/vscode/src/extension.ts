@@ -1,0 +1,344 @@
+import * as vscode from 'vscode';
+import { randomBytes } from 'node:crypto';
+import { basename } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { discoverSessions, sessionKey, type DiscoveryOptions } from '../../core/src/sessions';
+import { openLiveSession, type LiveSession } from '../../core/src/live-session';
+import { LiveView } from './live-view';
+import type { SessionCandidate, SessionData, TimelineItem, Provider } from '../../core/src/model';
+import { renderDetail, renderSidecar, renderInlineEvidence, inlineRevision } from './render';
+import { hasReadableEvidence, outlineCoverage, resolveOutlineEvidence } from '../../core/src/outline';
+import { createSessionPickerMetadata, type SessionPickerEntry } from '../../core/src/session-picker';
+
+interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean }
+const observerType = 'agentSidecar.observer';
+
+export function activate(context: vscode.ExtensionContext) {
+  let observer: vscode.WebviewView | undefined;
+  let session: SessionData | undefined;
+  let live: LiveSession | undefined;
+  let liveView: LiveView | undefined;
+  let loading: AbortController | undefined;
+  let delivery: Promise<unknown> = Promise.resolve();
+  let candidate: SessionCandidate | undefined;
+  let candidates: SessionCandidate[] = [];
+  let preview: EvidenceView | undefined;
+  const evidence = new Set<EvidenceView>();
+  let generation = 0;
+  let scanGeneration = 0;
+  let disposed = false;
+  let resolved: (() => void) | undefined;
+  let opening: Promise<void> | undefined;
+  let detailOpening: Promise<void> = Promise.resolve();
+  let selectionPersistence: Promise<void> = Promise.resolve();
+  const nonce = () => randomBytes(18).toString('base64');
+  const coverageDocuments = new Map<string, string>();
+  const coverageChanged = new vscode.EventEmitter<vscode.Uri>();
+  const reportError = (error: unknown) => vscode.window.showWarningMessage(`Agent Sidecar：${error instanceof Error ? error.message : String(error)}`);
+
+  function projectPath(): string {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!vscode.workspace.isTrusted) throw new Error('请先确认工作区信任，才可读取本地会话。');
+    if (folders?.length !== 1 || folders[0].uri.scheme !== 'file') {
+      throw new Error('首轮开发验证只接入普通本地单文件夹；多根、空窗口和远程工作区规则仍待确认，本次不改动布局。');
+    }
+    return folders[0].uri.fsPath;
+  }
+  function discoveryOptions(): DiscoveryOptions {
+    const test = context.extensionMode === vscode.ExtensionMode.Test;
+    return { projectPath: projectPath(),
+      codexRoot: test ? process.env.SIDECAR_TEST_CODEX_ROOT : undefined,
+      claudeRoot: test ? process.env.SIDECAR_TEST_CLAUDE_ROOT : undefined };
+  }
+  async function scan() {
+    const token = ++scanGeneration;
+    const result = await discoverSessions(discoveryOptions());
+    if (!disposed && token === scanGeneration) candidates = result.candidates;
+    return result;
+  }
+  function renderObserver() {
+    if (observer) observer.webview.html = renderSidecar({ projectName: basename(projectPath()), session, nonce: nonce(), streamId: liveView?.streamId, locale: vscode.env?.language }, liveView?.current);
+  }
+  function publish(reset = false) {
+    const source = live, view = liveView, panel = observer;
+    if (!source || !view || !panel || disposed) return;
+    const message = view.update(source.session, source.health, reset);
+    delivery = delivery.catch(() => undefined).then(async () => {
+      if (!disposed && live === source && observer === panel) await panel.webview.postMessage(message);
+    });
+    // Delivery failure is recovered by the Webview's version/resync handshake.
+    void delivery.catch(() => undefined);
+  }
+  function stopObservation() {
+    loading?.abort(); loading = undefined;
+    const source = live; live = undefined; liveView = undefined;
+    if (source) void source.close().catch(() => undefined);
+  }
+  function renderEvidence(view: EvidenceView) {
+    view.panel.title = `${view.kept ? '已保留' : '预览'} · ${view.item.title}`;
+    view.panel.webview.html = renderDetail({ item: view.item, items: view.items, provider: view.provider, kept: view.kept, nonce: nonce(), locale: vscode.env?.language });
+  }
+  /**
+   * Switching sessions closes the temporary preview, which belongs to the old
+   * session. A kept detail is an independent snapshot of its own session and
+   * provider, so it stays open; nothing from it is carried into the new one.
+   */
+  function checkSessionChange(key: string) {
+    if (candidate && key !== sessionKey(candidate) && preview) preview.panel.dispose();
+  }
+  async function selectSession(key: string, token = ++generation) {
+    if (disposed || token !== generation) return;
+    checkSessionChange(key);
+    const selected = candidates.find(item => sessionKey(item) === key);
+    if (!selected) throw new Error('选定会话当前不可用；未自动替换或清除已保存选择。');
+    loading?.abort();
+    const controller = new AbortController(); loading = controller;
+    let opened: LiveSession;
+    try { opened = await openLiveSession(selected, { signal: controller.signal }); }
+    catch (error) { if (controller.signal.aborted) return; throw error; }
+    finally { if (loading === controller) loading = undefined; }
+    if (disposed || token !== generation || !observer) { await opened.close(); return; }
+    // A detail may have opened while the selected log was loading.
+    try { checkSessionChange(key); if (selected.projectPath !== await realpath(projectPath())) throw new Error('工作区已改变；未绑定旧项目会话。'); }
+    catch (error) { await opened.close(); throw error; }
+    if (disposed || token !== generation || !observer) { await opened.close(); return; }
+    const previous = live;
+    live = opened;
+    liveView = new LiveView(basename(projectPath()), opened.session, vscode.env?.language);
+    candidate = selected;
+    session = opened.session;
+    renderObserver();
+    opened.start(() => {
+      if (disposed || live !== opened || !observer) return;
+      publish();
+      if (coverageDocuments.has(coverageUri(opened.session).toString())) updateCoverageDocument(opened.session);
+    });
+    if (previous) void previous.close().catch(() => undefined);
+    if (coverageDocuments.has(coverageUri(session).toString())) updateCoverageDocument(session);
+    // Persist committed selections in commit order, even if storage resolves slowly.
+    const persisted = selectionPersistence.then(() => context.workspaceState.update('selectedSession', key));
+    selectionPersistence = persisted.then(() => undefined, () => undefined);
+    await persisted;
+  }
+  async function chooseSession() {
+    await openObserver();
+    const token = ++generation;
+    const result = await scan();
+    if (disposed || token !== generation) return;
+    if (!candidates.length) {
+      throw new Error(`没有取得可验证的当前项目候选。无候选恢复规则待确认，本次不自动选择其他项目。${result.warnings.join(' ')}`);
+    }
+    const choices = [...candidates];
+    const metadata = createSessionPickerMetadata();
+    const entries = new Map(choices.map(item => [sessionKey(item), metadata.base(item)]));
+    type Choice = vscode.QuickPickItem & { key: string };
+    const picker = vscode.window.createQuickPick<Choice>();
+    picker.title = '切换会话';
+    picker.placeholder = '搜索标题或最近对话 · 仅当前项目';
+    picker.matchOnDescription = true;
+    picker.matchOnDetail = true;
+    let closed = false;
+    const paint = () => {
+      if (closed || disposed || token !== generation) return;
+      const active = picker.activeItems[0]?.key;
+      picker.items = choices.map(item => {
+        const entry = entries.get(sessionKey(item))!;
+        return { key: entry.key, label: entry.title,
+          description: `${entry.providerLabel} · ${entry.shortId} · ${entry.updatedLabel}${candidate && entry.key === sessionKey(candidate) ? ' · 正在观察' : ''}`,
+          detail: entry.latestText || entry.reason };
+      });
+      const restored = picker.items.find(item => item.key === active);
+      if (restored) picker.activeItems = [restored];
+    };
+    const merge = (updates: SessionPickerEntry[]) => {
+      if (closed || disposed || token !== generation) return;
+      let changed = false;
+      for (const entry of updates) {
+        const previous = entries.get(entry.key);
+        if (previous?.metadataStatus === 'ready' && entry.metadataStatus !== 'ready') continue;
+        if (previous === entry) continue;
+        entries.set(entry.key, entry); changed = true;
+      }
+      if (changed) paint();
+    };
+    let closePicker: () => void = () => undefined;
+    const pickerLifetime = new vscode.Disposable(() => closePicker());
+    context.subscriptions.push(pickerLifetime);
+    const selected = new Promise<string | undefined>(resolve => {
+      const listeners: vscode.Disposable[] = [];
+      closePicker = () => {
+        if (closed) return;
+        closed = true;
+        resolve(undefined);
+        listeners.forEach(listener => listener.dispose());
+        picker.dispose();
+        const index = context.subscriptions.indexOf(pickerLifetime);
+        if (index >= 0) context.subscriptions.splice(index, 1);
+      };
+      listeners.push(picker.onDidChangeActive(items => {
+        const current = items[0] && choices.find(item => sessionKey(item) === items[0].key);
+        if (current && entries.get(sessionKey(current))?.metadataStatus === 'deferred')
+          void metadata.read(current).then(entry => merge([entry]));
+      }));
+      listeners.push(picker.onDidAccept(() => {
+        const choice = picker.selectedItems[0];
+        if (choice) { resolve(choice.key); picker.hide(); }
+      }));
+      listeners.push(picker.onDidHide(closePicker));
+    });
+    paint();
+    picker.busy = true;
+    picker.show();
+    void metadata.list(choices).then(merge).catch(() => undefined)
+      .finally(() => { if (!closed && !disposed && token === generation) picker.busy = false; });
+    const picked = await selected;
+    if (picked && !disposed && token === generation) await selectSession(picked, token);
+  }
+  async function refresh() {
+    const token = ++generation;
+    const key = candidate ? sessionKey(candidate) : context.workspaceState.get<string>('selectedSession');
+    await scan();
+    if (disposed || token !== generation) return;
+    if (key) await selectSession(key, token);
+    else renderObserver();
+  }
+
+  /** The Sidecar is a sidebar view: it owns no editor group and never changes the editor layout. */
+  function attachObserver(view: vscode.WebviewView) {
+    observer = view;
+    view.webview.options = { enableScripts: true, localResourceRoots: [] };
+    view.onDidDispose(() => { if (observer === view) { ++generation; stopObservation(); observer = undefined; } }, null, context.subscriptions);
+    view.onDidChangeVisibility(() => { if (observer === view && view.visible) publish(true); }, null, context.subscriptions);
+    view.webview.onDidReceiveMessage((message: unknown) => {
+      if (!message || typeof message !== 'object') return;
+      if (observer !== view) return;
+      const value = message as { type?: unknown; itemId?: unknown; streamId?: unknown; sessionId?: unknown; requestId?: unknown };
+      let action: Promise<unknown> | undefined;
+      if (value.type === 'observerReady' && value.streamId === liveView?.streamId && liveView) publish(true);
+      else if (value.type === 'chooseSession') action = chooseSession();
+      else if (value.type === 'refresh') action = refresh();
+      else if (value.type === 'coverage') action = showCoverage();
+      else if (value.type === 'keep') { keepEvidence(); }
+      else if (value.type === 'openDetail' && typeof value.itemId === 'string') action = openDetail(value.itemId);
+      else if (value.type === 'loadInlineEvidence' && session && value.sessionId === sessionKey(session) && typeof value.itemId === 'string' && typeof value.requestId === 'string' && value.requestId.length < 40) {
+        const evidence = resolveOutlineEvidence(session, value.itemId);
+        if (evidence) action = Promise.resolve(view.webview.postMessage({ type: 'inlineEvidence', sessionId: value.sessionId, itemId: value.itemId, requestId: value.requestId,
+          revision: inlineRevision(evidence.items ?? [evidence.item]), html: renderInlineEvidence(evidence) }));
+      }
+      if (action) void action.catch(reportError);
+    }, null, context.subscriptions);
+    renderObserver();
+  }
+  async function openObserver() {
+    if (observer) { observer.show(false); return; }
+    if (opening) return opening;
+    opening = (async () => {
+      projectPath();
+      const shown = new Promise<void>(done => { resolved = done; });
+      // `<viewId>.focus` is generated by VS Code for every contributed view.
+      await vscode.commands.executeCommand(`${observerType}.focus`);
+      await shown;
+    })();
+    try { await opening; } finally { opening = undefined; }
+  }
+  /** Details open in the editor area, where the reader already is; the preview stays where they put it. */
+  function detailColumn(): vscode.ViewColumn {
+    return preview?.panel.viewColumn ?? vscode.ViewColumn.Active;
+  }
+  function openDetail(id: string): Promise<void> {
+    const boundSession = session;
+    const boundObserver = observer;
+    // Capture before either the detail queue or a layout change can yield.
+    const resolved = boundSession && resolveOutlineEvidence(boundSession, id);
+    const snapshot = resolved && structuredClone(resolved);
+    const action = detailOpening.then(async () => {
+      if (disposed || !boundSession || session !== boundSession || observer !== boundObserver) return;
+      if (!snapshot || !(snapshot.items ?? [snapshot.item]).some(hasReadableEvidence)) return;
+      const { item, items } = snapshot;
+      const column = detailColumn();
+      if (!preview) {
+        const panel = vscode.window.createWebviewPanel('agentSidecar.evidence', '证据预览',
+          { viewColumn: column, preserveFocus: true }, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
+        const view: EvidenceView = { panel, item: structuredClone(item), ...(items ? { items: structuredClone(items) } : {}), provider: boundSession.provider, kept: false };
+        preview = view;
+        evidence.add(view);
+        panel.onDidDispose(() => { evidence.delete(view); if (preview === view) preview = undefined; }, null, context.subscriptions);
+        panel.webview.onDidReceiveMessage((message: unknown) => {
+          if (message && typeof message === 'object' && (message as { type?: unknown }).type === 'keep' && preview === view) keepEvidence();
+        }, null, context.subscriptions);
+      } else { preview.item = structuredClone(item); preview.items = items ? structuredClone(items) : undefined; preview.provider = boundSession.provider; preview.panel.reveal(column, true); }
+      renderEvidence(preview);
+    });
+    detailOpening = action.catch(() => undefined);
+    return action;
+  }
+  function keepEvidence() {
+    if (!preview) return;
+    const kept = preview;
+    kept.kept = true;
+    kept.panel.title = `已保留 · ${kept.item.title}`;
+    preview = undefined;
+    // Confirm the state in place: do not destroy the reader's DOM or scroll position.
+    void Promise.resolve(kept.panel.webview.postMessage({ type: 'kept' })).catch(reportError);
+  }
+  function coverageUri(snapshot: SessionData): vscode.Uri {
+    return vscode.Uri.parse(`agent-sidecar-coverage:/${encodeURIComponent(snapshot.provider + '-' + snapshot.id)}.json`);
+  }
+  function updateCoverageDocument(snapshot: SessionData): vscode.Uri {
+    const uri = coverageUri(snapshot);
+    // Metadata ledger only. Never copy raw tool output, instructions, or image bytes into reports.
+    coverageDocuments.set(uri.toString(), JSON.stringify({ provider: snapshot.provider, sessionId: snapshot.id,
+      warnings: snapshot.warnings, coverage: snapshot.coverage,
+      presentation: { note: '解析覆盖与呈现去向分开记录；同一会话的回合连续排列，左侧目录用于定位，动作详情按原始来源逐条核对。', items: outlineCoverage(snapshot) } }, null, 2));
+    coverageChanged.fire(uri);
+    return uri;
+  }
+  async function showCoverage() {
+    const snapshot = session;
+    if (!snapshot) return;
+    const column = detailColumn();
+    const uri = updateCoverageDocument(snapshot);
+    const doc = await vscode.workspace.openTextDocument(uri);
+    if (disposed || session !== snapshot) return;
+    await vscode.window.showTextDocument(doc, { viewColumn: column, preserveFocus: true, preview: false });
+  }
+  context.subscriptions.push(coverageChanged);
+  context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('agent-sidecar-coverage', {
+    onDidChange: coverageChanged.event,
+    provideTextDocumentContent: uri => coverageDocuments.get(uri.toString()) ?? 'Coverage is not loaded for this source.'
+  }));
+  const commands: Array<[string, () => Promise<unknown> | void]> = [
+    ['agentSidecar.open', openObserver], ['agentSidecar.chooseSession', chooseSession],
+    ['agentSidecar.refresh', refresh], ['agentSidecar.keepEvidence', keepEvidence], ['agentSidecar.coverage', showCoverage]
+  ];
+  for (const [name, handler] of commands) context.subscriptions.push(vscode.commands.registerCommand(name, async () => {
+    try { return await handler(); } catch (error) { await reportError(error); }
+  }));
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider(observerType, {
+    async resolveWebviewView(view) {
+      const token = ++generation;
+      try {
+        projectPath();
+        attachObserver(view);
+        resolved?.(); resolved = undefined;
+        await scan();
+        const key = context.workspaceState.get<string>('selectedSession');
+        if (key && token === generation) await selectSession(key, token);
+      } catch (error) { resolved?.(); resolved = undefined; await reportError(error); }
+    }
+  }, { webviewOptions: { retainContextWhenHidden: true } }));
+  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    ++generation; ++scanGeneration;
+    stopObservation();
+    // VS Code normally reloads on first-folder changes. Do not keep the old
+    // source alive if a workspace changes without a reload.
+    if (observer) void Promise.resolve(observer.webview.postMessage({ type: 'workspaceChanged' })).catch(() => undefined);
+  }));
+  context.subscriptions.push({ dispose() { disposed = true; ++generation; ++scanGeneration; stopObservation(); for (const view of evidence) view.panel.dispose(); } });
+
+  // Test access calls the same production functions; no fixture Agent surface is part of the product.
+  return { openObserver, scan, selectSession, refresh, openDetail, keepEvidence,
+    get session() { return session; }, get candidates() { return [...candidates]; },
+    get observer() { return observer; }, get preview() { return preview; },
+    get evidence() { return [...evidence]; } };
+}

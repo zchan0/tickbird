@@ -1,0 +1,98 @@
+{
+  "name": "agent-sidecar",
+  "displayName": "Agent Sidecar (Development)",
+  "description": "Read-only, project-scoped process evidence beside Codex and Claude Code.",
+  "publisher": "agent-sidecar-local",
+  "version": "0.0.1",
+  "private": true,
+  "engines": {
+    "vscode": "^1.96.0",
+    "node": ">=22"
+  },
+  "main": "./dist/packages/vscode/src/extension.js",
+  "activationEvents": [
+    "onView:agentSidecar.observer"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": false
+  },
+  "categories": [
+    "Other"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentSidecar.open",
+        "title": "Open Process Observer",
+        "category": "Agent Sidecar"
+      },
+      {
+        "command": "agentSidecar.chooseSession",
+        "title": "Choose Project Session",
+        "category": "Agent Sidecar"
+      },
+      {
+        "command": "agentSidecar.refresh",
+        "title": "Refresh Selected Session",
+        "category": "Agent Sidecar"
+      },
+      {
+        "command": "agentSidecar.keepEvidence",
+        "title": "Keep Evidence Preview",
+        "category": "Agent Sidecar"
+      },
+      {
+        "command": "agentSidecar.coverage",
+        "title": "Show Content Coverage Ledger",
+        "category": "Agent Sidecar"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentSidecar",
+          "title": "Agent Sidecar",
+          "icon": "resources/sidecar.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentSidecar": [
+        {
+          "type": "webview",
+          "id": "agentSidecar.observer",
+          "name": "过程"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "npm run build && node scripts/launch-development.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build:realtime": "tsc -p tsconfig.realtime.json",
+    "test:realtime": "npm run build:realtime && node --test .test-artifacts/realtime-build/tests/*.test.js",
+    "probe:realtime": "npm run build:realtime && node .test-artifacts/realtime-build/scripts/probe-realtime.js",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test:host": "npm run build && node scripts/test-host.mjs",
+    "audit:samples": "npm run build && node dist/scripts/audit-samples.js",
+    "verify:content": "npm run build && node dist/scripts/verify-real-content.js",
+    "verify:sessions": "npm run build && node dist/scripts/verify-session-granularity.js",
+    "test:coexistence": "npm run build && node scripts/test-coexistence.mjs"
+  },
+  "dependencies": {
+    "highlight.js": "11.11.1",
+    "markdown-it": "14.3.1",
+    "typescript": "5.9.3"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/markdown-it": "14.2.0",
+    "@types/node": "22.20.1",
+    "@types/vscode": "1.96.0",
+    "jsdom": "^26.1.0"
+  }
+}

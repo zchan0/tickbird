@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.vsix
+.DS_Store
+.test-artifacts/
+
+# Local only, never in history: design probes, Codex's prototype output, and
+# superseded plans and reviews (see archived/README.md).
+probes/
+.codex/
+archived/

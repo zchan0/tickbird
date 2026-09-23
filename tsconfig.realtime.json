@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": ".test-artifacts/realtime-build" },
+  "include": [
+    "packages/core/**/*.ts",
+    "scripts/probe-realtime.ts",
+    "tests/record-stream.test.ts",
+    "tests/live-session.test.ts",
+    "tests/sessions.test.ts",
+    "tests/session-picker.test.ts",
+    "tests/session-title.test.ts"
+  ]
+}
