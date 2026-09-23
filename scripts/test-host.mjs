@@ -35,23 +35,32 @@ await writeFile(join(claudeProject, 'fixture.jsonl'), jsonl([
   { type: 'assistant', uuid: 'cl-call', sessionId: 'cl-fixture', cwd: fixture, message: { id: 'cl-msg', role: 'assistant', content: [{ type: 'tool_use', id: 'cl-tool', name: 'Bash', input: { command: 'fixture only, never executed' } }] } },
   { type: 'user', uuid: 'cl-output', sessionId: 'cl-fixture', cwd: fixture, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'cl-tool', is_error: false, content: 'Fixture completed. One known result.' }] } }
 ]));
-const resultFile = join(runRoot, 'result.json');
 const code = process.env.SIDECAR_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
-const args = ['--new-window', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`, `--extensions-dir=${extensions}`,
-  `--extensionDevelopmentPath=${root}`, `--extensionTestsPath=${join(root, 'dist/tests/host/run.js')}`, fixture];
-const child = spawn(code, args, { stdio: 'inherit', env: { ...process.env, SIDECAR_TEST_RESULT: resultFile,
-  SIDECAR_TEST_CODEX_ROOT: codex, SIDECAR_TEST_CLAUDE_ROOT: claude } });
-console.log(JSON.stringify({ runRoot, resultFile, launcherPid: child.pid }));
-const exitCode = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });
-let result;
-const deadline = Date.now() + 60000;
-while (!result && exitCode === 0 && Date.now() < deadline) {
-  try { result = JSON.parse(await readFile(resultFile, 'utf8')); }
-  catch { await new Promise(resolve => setTimeout(resolve, 200)); }
+// Each run opens its own window: the project fixture, then a window with no folder.
+async function launch(name, tests, folder) {
+  const resultFile = join(runRoot, `result-${name}.json`);
+  const args = ['--new-window', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`, `--extensions-dir=${extensions}`,
+    `--extensionDevelopmentPath=${root}`, `--extensionTestsPath=${join(root, tests)}`, ...(folder ? [folder] : [])];
+  const child = spawn(code, args, { stdio: 'inherit', env: { ...process.env, SIDECAR_TEST_RESULT: resultFile,
+    SIDECAR_TEST_CODEX_ROOT: codex, SIDECAR_TEST_CLAUDE_ROOT: claude } });
+  console.log(JSON.stringify({ run: name, runRoot, resultFile, launcherPid: child.pid }));
+  const exitCode = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });
+  let result;
+  const deadline = Date.now() + 60000;
+  while (!result && exitCode === 0 && Date.now() < deadline) {
+    try { result = JSON.parse(await readFile(resultFile, 'utf8')); }
+    catch { await new Promise(resolve => setTimeout(resolve, 200)); }
+  }
+  if (!result) console.error(`No authoritative host result for ${name}. Retained run directory: ${runRoot}`);
+  return result;
 }
-if (result) {
+const project = await launch('project', 'dist/tests/host/run.js', fixture);
+const empty = project?.passed ? await launch('empty-window', 'dist/tests/host/empty.js') : undefined;
+if (project) {
   await mkdir(join(root, '.test-artifacts'), { recursive: true });
-  await writeFile(join(root, '.test-artifacts', 'host-latest.json'), JSON.stringify({ ...result, runRoot }, null, 2) + '\n');
-  console.log(JSON.stringify({ passed: result.passed, checks: result.checks, artifact: '.test-artifacts/host-latest.json' }, null, 2));
-} else console.error('No authoritative host result. Retained run directory: ' + runRoot);
-process.exitCode = result?.passed ? 0 : 1;
+  await writeFile(join(root, '.test-artifacts', 'host-latest.json'), JSON.stringify({ ...project, emptyWindow: empty, runRoot }, null, 2) + '\n');
+  console.log(JSON.stringify({ passed: project.passed && Boolean(empty?.passed),
+    checks: [...project.checks, ...(empty?.checks ?? [])].map(check => ({ name: check.name, passed: check.passed })),
+    artifact: '.test-artifacts/host-latest.json' }, null, 2));
+}
+process.exitCode = project?.passed && empty?.passed ? 0 : 1;

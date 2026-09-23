@@ -241,8 +241,9 @@ test('only evidence with readable incremental content becomes a detail button', 
     item({ id: 'missing', kind: 'question', availability: 'unavailable', detail: undefined }),
     item({ id: 'empty', kind: 'question', detail: { title: '空记录', blocks: [] } }),
   ]) });
-  assert.match(html, /data-inline-id="available"/);
-  assert.match(html, /data-inline-id="partial"/);
+  // A question to the user is a call row: readable evidence opens in the editor.
+  assert.match(html, /class="crow node-button" data-item-id="available" data-tool="Ask"/);
+  assert.match(html, /data-item-id="partial"/);
   for (const id of ['display', 'missing', 'empty']) assert.ok(!html.includes(`data-item-id="${id}"`));
   assert.match(renderInlineEvidence({ item: item({ availability: 'partial' }) }), /部分内容/);
   assert.match(html, /未取得可读的记录内容/);
@@ -457,13 +458,11 @@ test('the lens is clamped to the webview and dismissal cannot move reading or se
   }
 });
 
-test('subagent and tool disclosures use distinct icons plus text and inline chevrons', () => {
+test('a subagent reads as an Agent call row in its place, named in text and opening its record in the editor', () => {
   const html = renderSidecar({ projectName: 'project', nonce, session: session([item({ kind: 'subagent', title: '子 Agent 返回' })]) });
-  assert.match(html, /class="record-disclosure/);
-  assert.match(html, /class="action-symbol"/);
-  assert.match(html, /class="disclosure-arrow"/);
-  assert.match(html, /子 Agent 返回/);
-  assert.doesNotMatch(html, /data-item-id=/);
+  assert.match(html, /<button type="button" class="crow node-button" data-item-id="tool-1" data-tool="Agent"/);
+  assert.match(html, /<span class="ctool">Agent<\/span>/);
+  assert.doesNotMatch(html, /class="record-disclosure/);
 });
 
 test('unavailable nonclickable action and subagent rows keep reasons accessible without redundant badges or empty details', () => {
@@ -831,7 +830,7 @@ test('failed, running, partial, unreadable, unsupported and missing-result metad
   const html = renderSidecar({ projectName: 'project', nonce, session: session(records) });
   assert.doesNotMatch(html, /<details class="action-fold"/);
   for (const state of ['failed', '进行中', '待支持：新结构']) assert.ok(html.includes(state));
-  assert.ok(html.includes('data-inline-id="question"'));
+  assert.ok(html.includes('data-item-id="question"'));
   assert.ok(html.includes('unclassified.ts'));
   const evidence = resolveOutlineEvidence(session(records), projectedRows(session(records)).find(row => row.items.some(item => item.id === 'partial'))!.id)!;
   assert.match(renderInlineEvidence(evidence), /部分可读/);
@@ -1638,11 +1637,11 @@ test('pasted content is set apart without its transport tags, in the request and
   assert.ok(question.indexOf('看下这些点') < question.indexOf('class="pasted"') && question.indexOf('class="pasted"') < question.indexOf('给修复方案'));
 });
 
-test('images attached to a request are labelled as pasted images', () => {
+test('a request with images always offers 展开全文, which opens it with its images', () => {
   const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]).toString('base64');
   const html = renderSidecar({ projectName: 'project', nonce, session: session([
     item({ id: 'q', kind: 'request', title: '用户请求', summary: '看图', detail: { title: '用户请求', blocks: [{ kind: 'image', label: '记录中的图像', mime: 'image/png', data: png }] } })]) });
-  assert.match(html, /class="question-more" data-item-id="q" data-open-text data-extras="附图 1 张" aria-pressed="false">附图 1 张 →<\/button>/);
+  assert.match(html, /class="question-more" data-item-id="q" data-open-text data-always aria-pressed="false">展开全文<\/button>/, 'One label; images open with the full request');
   assert.ok(!html.includes('<figure'), 'Images open at full size in the detail page, not shrunk in the card');
 });
 
@@ -1678,24 +1677,25 @@ test('a read of one file opens as that file: its recorded lines, numbered where 
   assert.ok(!detail({ ...read('failed', { command: 'cat missing.ts' }, 'No such file'), status: 'failed' }).includes('class="code-surface'));
 });
 
-test('a turn that is over folds each chapter\'s calls into one line by tool; a running turn and short chapters stay open', () => {
+test('a turn that is over folds its whole process into the line the agent prints; the request, files and answer stay; a running turn stays open', () => {
   const said = (id: string, turnId: string) => item({ id, turnId, kind: 'message', title: '过程说明', summary: id, availability: 'none', detail: undefined });
   const bash = (id: string, turnId: string) => item({ id, turnId, title: 'Bash', detail: { title: 'Bash', blocks: [{ kind: 'json', label: '当时调用参数', text: JSON.stringify({ command: `npm run ${id}` }) }] } });
   const html = renderSidecar({ projectName: 'project', nonce, session: session([
-    said('long', 't1'), bash('a', 't1'), bash('b', 't1'), readInput('r1', { turnId: 't1' }),
-    said('short', 't1'), bash('c', 't1'), readInput('r2', { turnId: 't1' }),
-    said('newest', 't2'), bash('d', 't2'), bash('e', 't2'), readInput('r3', { turnId: 't2' })]) });
-  const panel = (key: string) => html.slice(html.indexOf(`data-turn-panel="turn:${key}"`)).split(/<section class="turn-panel|<\/main>/)[0];
-  const folds = [...panel('t1').matchAll(/<details class="cfold" data-fold="([^"]+)"><summary>([\s\S]*?)<\/summary>/g)];
-  assert.equal(folds.length, 1, 'Only the chapter with more than two calls folds');
-  assert.equal(folds[0][1], 'chapter:long');
-  assert.equal(folds[0][2].replace(/<[^>]+>/g, ''), 'Bash ×2 · Read›');
-  assert.ok(!/<details class="cfold"[^>]*\bopen\b/.test(panel('t1')), 'Folded by default');
-  assert.ok(panel('t2').includes('class="cfold"'), 'A turn that is over folds, newest or not');
+    item({ id: 'q', turnId: 't1', kind: 'request', title: '用户请求', summary: '改一下', availability: 'none', detail: undefined, timestamp: '2026-09-23T06:00:00.000Z' }),
+    said('long', 't1'), bash('a', 't1'), readInput('r1', { turnId: 't1' }), said('short', 't1'), bash('c', 't1'),
+    item({ id: 'done', turnId: 't1', kind: 'answer', title: '历史回答', summary: '改好了。', availability: 'none', detail: undefined, timestamp: '2026-09-23T06:03:12.000Z' })]) });
+  const panel = html.slice(html.indexOf('data-turn-panel="turn:t1"')).split(/<section class="turn-panel|<\/main>/)[0];
+  const fold = /<details class="cprocess" data-fold="process:turn:t1"><summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/.exec(panel)!;
+  assert.ok(fold, 'One fold for the whole process');
+  assert.match(fold[1].replace(/<[^>]+>/g, ''), /^(Baked|Brewed|Churned|Cogitated|Cooked|Crunched|Sautéed|Worked) for 3m 12s · 3 calls›$/);
+  assert.equal((fold[2].match(/class="csay"/g) ?? []).length, 2, 'The agent\'s words are inside');
+  assert.ok(panel.indexOf('class="turn-question"') < panel.indexOf('cprocess') && panel.indexOf('</details>') < panel.indexOf('final-answer'), 'Request above, answer below and outside');
+  assert.ok(!panel.includes('class="cfold"'), 'No per-chapter folds any more');
+  const codex = renderSidecar({ projectName: 'project', nonce, session: { ...session([said('x', 't1'), bash('y', 't1')]) } });
+  assert.match(codex, /<span class="cdone">Process<\/span>/, 'Without a duration it is just the process');
   const at = '2026-09-23T06:24:07.000Z';
   const running = renderSidecar({ projectName: 'project', nonce, session: session([said('newest', 't2'), ...['d', 'e', 'f'].map(id => ({ ...bash(id, 't2'), timestamp: at }))]) });
-  assert.ok(!running.slice(running.indexOf('data-turn-panel="turn:t2"')).split('</main>')[0].includes('class="cfold"'), 'A running turn keeps its calls open');
-  assert.equal(actionHtmlRows(html).length, 8, 'Folded rows are still there to open');
+  assert.ok(!running.slice(running.indexOf('data-turn-panel="turn:t2"')).split('</main>')[0].includes('class="cprocess"'), 'A running turn stays open');
 });
 
 test('the loading word is the agent\'s own: one of Claude Code\'s verbs per turn, Working for Codex', async () => {
@@ -1706,3 +1706,21 @@ test('the loading word is the agent\'s own: one of Claude Code\'s verbs per turn
   assert.equal(statusVerb('claude', 'turn:a'), verb, 'Stable for a turn');
   assert.ok(new Set(['turn:a', 'turn:b', 'turn:c', 'turn:d', 'turn:e'].map(key => statusVerb('claude', key))).size > 1, 'Varies across turns');
 });
+
+test('a question to the user sits in its place among the calls and shows what was chosen', () => {
+  const ask = item({ id: 'ask', kind: 'question', title: 'AskUserQuestion', detail: { title: 'AskUserQuestion', blocks: [
+    { kind: 'json', label: '当时调用参数', text: JSON.stringify({ questions: [{ question: '仓库设为？', header: '可见性', options: [{ label: '私有 (Recommended)' }, { label: '公开' }] }] }) },
+    { kind: 'json', label: '问题及记录的回答', text: JSON.stringify({ questions: [], answers: { '仓库设为？': '私有 (Recommended)' } }) }] } });
+  const bash = (id: string) => item({ id, title: 'Bash', detail: { title: 'Bash', blocks: [{ kind: 'json', label: '当时调用参数', text: JSON.stringify({ command: `echo ${id}`, description: `Step ${id}` }) }] } });
+  const html = renderSidecar({ projectName: 'project', nonce, session: session([bash('before'), ask, bash('after')]) });
+  const rows = actionHtmlRows(html);
+  assert.deepEqual(rows.map(row => /data-tool="([^"]+)"/.exec(row)![1]), ['Bash', 'Ask', 'Bash'], 'In source order, not after the calls around it');
+  assert.match(rows[1], /仓库设为？<span class="cchoices"><b class="cchoice">✓ 私有 \(Recommended\)<\/b><\/span>/, 'Only what was chosen');
+  assert.ok(!rows[1].includes('公开'), 'An option not chosen is not shown as if it were an answer');
+});
+
+test('an image placeholder in a request stays as the text the user sent', () => {
+  const html = renderSidecar({ projectName: 'project', nonce, session: session([item({ id: 'q', kind: 'request', title: '用户请求', summary: '这里没对齐 [Image #10] 看一下', availability: 'none', detail: undefined })]) });
+  assert.match(html.slice(html.indexOf('class="turn-question"')), /<p>这里没对齐 \[Image #10\] 看一下<\/p>/);
+});
+

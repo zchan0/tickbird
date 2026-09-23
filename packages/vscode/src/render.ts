@@ -191,6 +191,8 @@ const styles = `
   .empty p { color: var(--muted); font-size: 11px; }
   .empty { padding: 18px 9px; }
   .empty h2 { margin-bottom: 8px; }
+  .gap-action { margin-top: 6px; padding: 4px 12px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font: inherit; font-size: 12px; }
+  .gap-action:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
   .notice { border-left: 2px solid var(--warning); padding: 9px 11px; background: var(--vscode-textBlockQuote-background, transparent); color: var(--warning); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .session-warning { margin: 8px 0; }
   .detail { max-width: 960px; margin: 0 auto; padding-bottom: 24px; }
@@ -352,6 +354,8 @@ const styles = `
   .narrative-attachments { margin-top: 10px; font-size: 11px; color: var(--muted); }
   .narrative-attachments > summary { cursor: pointer; }
   .final-answer { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
+  /* Right under a folded process line, the answer follows closely. */
+  .cprocess + .cstream .final-answer { margin-top: 6px; padding-top: 12px; }
   .answer-label { margin-bottom: 10px; color: var(--muted); font-size: 11px; }
   .action-sections, .action-list { margin: 10px 0 18px; }
   .action-sections > li::after, .action-list > li::after { display: none; }
@@ -412,7 +416,7 @@ const script = `(() => {
   let focusId = typeof saved.focusId === 'string' ? saved.focusId : '';
   let focusTurnId = typeof saved.focusTurnId === 'string' ? saved.focusTurnId : '';
   let focusGroupId = typeof saved.focusGroupId === 'string' ? saved.focusGroupId : '';
-  const actions = ['chooseSession', 'refresh', 'coverage', 'keep'];
+  const actions = ['chooseSession', 'refresh', 'coverage', 'keep', 'openFolder'];
   let focusAction = typeof saved.focusAction === 'string' && actions.includes(saved.focusAction) ? saved.focusAction : '';
   const nodes = () => [...document.querySelectorAll('button[data-item-id]')];
   const panels = () => [...document.querySelectorAll('[data-turn-panel]')];
@@ -829,13 +833,16 @@ function renderAttachments(item: TimelineItem): string {
   return extras.length ? `<details class="narrative-attachments" data-action-group="attachments:${escapeHtml(item.id)}"><summary>${label} ${disclosureArrow()}</summary>${extras.map(block => renderBlock(block, item)).join('')}</details>` : '';
 }
 
-/** A long request and its pasted images read in the editor area, at full size; the card keeps six lines. */
+/**
+ * The card keeps six lines; 展开全文 reads the whole request in the editor area,
+ * where pasted images keep their size. A request with images or attached
+ * records always offers it, even when its words fit.
+ */
 function renderRequest(item: TimelineItem): string {
-  const extras = item.detail?.blocks.filter(block => !(block.kind === 'text' && publicBodyLabels.has(block.label))) ?? [];
-  const attached = !extras.length ? '' : extras.every(block => block.kind === 'image') ? `附图 ${extras.length} 张` : '附带记录';
+  const extras = item.detail?.blocks.some(block => !(block.kind === 'text' && publicBodyLabels.has(block.label)));
   const more = canOpen(item)
-    ? `<button type="button" class="question-more" data-item-id="${escapeHtml(item.id)}" data-open-text data-extras="${escapeHtml(attached)}" aria-pressed="false"${attached ? '' : ' hidden'}>${attached ? attached + ' →' : '查看全文 →'}</button>`
-    : '<button type="button" class="question-more" data-toggle-text aria-expanded="false" hidden>展开全文 ⌄</button>';
+    ? `<button type="button" class="question-more" data-item-id="${escapeHtml(item.id)}" data-open-text${extras ? ' data-always' : ''} aria-pressed="false"${extras ? '' : ' hidden'}>展开全文</button>`
+    : '<button type="button" class="question-more" data-toggle-text aria-expanded="false" hidden>展开全文</button>';
   return `<section class="turn-question" data-text-id="${escapeHtml(item.id)}" aria-label="用户问题"><div class="question-text">${renderUserText(publicBody(item))}</div><div class="question-foot">${more}</div></section>`;
 }
 
@@ -911,6 +918,21 @@ export function renderSidecar({ projectName, session, nonce, streamId = '', loca
     <header class="toolbar"><h1 class="session-title" title="${escapeHtml(p.identity)}">${escapeHtml(p.name)}</h1><span class="observation-status" title="按会话记录推断：最新一轮未结束且仍有新记录时显示运行中" ${streamId ? '' : 'hidden'}></span><div class="controls">${streamId ? '<button type="button" class="follow-button" data-follow-toggle aria-pressed="true">跟随 ↓</button>' : ''}${toolbarIcon('chooseSession', '切换会话', 'M3 4.5h10m-3-3 3 3-3 3M13 11.5H3m3-3-3 3 3 3')}${toolbarIcon('refresh', '刷新', 'M12.5 5A5 5 0 1 0 13 9M12.5 1.5V5H9')}${toolbarIcon('coverage', '覆盖记录', 'M3 2.5h10v11H3zM5.5 5.5h5M5.5 8h5M5.5 10.5h3')}</div></header>
     <div class="observation-problem" hidden></div><div class="reading-layout"><nav class="turn-map" aria-label="回合目录（从新到旧）">${p.map}</nav><nav id="turn-lens" class="turn-lens" aria-label="对应回合的问题预览" hidden>${p.lens}</nav><section class="timeline" tabindex="0" aria-label="完整会话过程（从新到旧）"><div data-live-warnings>${p.warnings}</div><div data-live-empty>${p.empty}</div>${p.turns.map(turn => turn.html).join('')}</section></div></main>`;
   return documentHtml('Agent Sidecar', body, nonce, p.sessionKey, locale);
+}
+
+/** Workspaces the Sidecar cannot map to one local project directory. */
+export type WorkspaceGap = 'untrusted' | 'empty' | 'multi' | 'remote';
+export const workspaceGaps: Readonly<Record<WorkspaceGap, { title: string; body: string; openFolder?: boolean }>> = {
+  empty: { title: '打开一个项目文件夹', body: 'Sidecar 按项目目录查找 Claude Code 和 Codex 的会话记录；当前窗口还没有打开文件夹。', openFolder: true },
+  multi: { title: '暂不支持多文件夹工作区', body: 'Sidecar 按单个项目目录匹配会话。请在单独的窗口里打开要观察的项目文件夹。' },
+  remote: { title: '暂不支持远程工作区', body: 'Sidecar 目前只读取本机的会话记录，远程工作区的记录在远程机器上。' },
+  untrusted: { title: '需要先信任此工作区', body: '信任后 Sidecar 才读取这个项目的本地会话记录。' },
+};
+
+export function renderWorkspaceGap(gap: WorkspaceGap, nonce: string, locale?: string): string {
+  const copy = workspaceGaps[gap];
+  const body = `<main class="workspace-gap" data-workspace-gap="${gap}"><div class="empty"><h2>${escapeHtml(copy.title)}</h2><p>${escapeHtml(copy.body)}</p>${copy.openFolder ? '<button type="button" class="gap-action" data-action="openFolder">打开文件夹…</button>' : ''}</div></main>`;
+  return documentHtml('Agent Sidecar', body, nonce, '', locale);
 }
 
 function displayValue(value: unknown): string {

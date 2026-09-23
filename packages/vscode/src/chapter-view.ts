@@ -3,7 +3,7 @@ import type { TurnGroup } from '../../core/src/timeline';
 import { chapterTurn, type ChapterRow, type ChangedFile, type RowOutcome } from '../../core/src/chapters';
 import { presentEvidence } from '../../core/src/presentation';
 import { renderMarkdown } from './markdown';
-import { statusVerb } from './verbs';
+import { doneVerb, statusVerb } from './verbs';
 import type { Provider } from '../../core/src/model';
 
 /**
@@ -32,6 +32,9 @@ const MACHINE = new Set(['Read', 'Write', 'Edit', 'Skill', 'Instructions', 'Memo
 const clock = (iso?: string) => iso ? new Date(iso).toTimeString().slice(0, 5) : '';
 const duration = (ms?: number) => ms === undefined || ms < 1000 ? '' : ms < 60000 ? Math.round(ms / 1000) + 's'
   : ms < 3600000 ? Math.round(ms / 60000) + 'm' : (ms / 3600000).toFixed(1) + 'h';
+/** The agents' own long format: 12s, 1m 33s, 1h 2m 5s. */
+const elapsed = (ms: number) => { const s = Math.round(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return h ? `${h}h ${m}m ${s % 60}s` : m ? `${m}m ${s % 60}s` : `${s}s`; };
 
 /** In the harness's own terms, as the call rows' machine voice: an exit code, a refusal, a stop. */
 function outcomeWord(outcome: RowOutcome): string {
@@ -55,8 +58,13 @@ function rowHtml(row: ChapterRow, lead: boolean, render: ChapterRenderers, key: 
   const label = row.output ? `返回内容 · ${output.split(/\r?\n/).length} 行` : row.label || '无记录参数';
   const voice = row.output || MACHINE.has(row.tool) ? 'machine' : 'prose';
   const tool = row.output ? 'OUT' : row.tool;
+  // A question shows what was chosen under it; waiting in a live turn says so.
+  const answer = !row.choices ? '' : row.choices.map(choice => `<span class="cchoices">${row.choices!.length > 1 && choice.header ? `<i class="cq">${escapeHtml(choice.header)}</i>` : ''}`
+    + (choice.chosen.length ? choice.chosen.map(value => `<b class="cchoice">✓ ${escapeHtml(value)}</b>`).join('')
+      : live && row.pending ? '<i class="cq">等待你的选择</i>' : '')
+    + '</span>').join('');
   const copy = `<span class="ctool"${lead && tool.length > 7 ? ` title="${escapeHtml(tool)}"` : ''}>${lead ? escapeHtml(tool) : ''}</span>`
-    + `<span class="clabel ${voice}">${word ? `<b class="cbad">${word}</b> · ` : ''}${escapeHtml(label)}`
+    + `<span class="clabel ${voice}${answer ? ' asked' : ''}">${word ? `<b class="cbad">${word}</b> · ` : ''}${escapeHtml(label)}${answer}`
     + `${row.count > 1 ? `<i class="crep"> · ${row.count} 次</i>` : ''}`
     + `${row.outcome?.kind === 'empty' ? '<i class="cnone">no match</i>' : ''}`
     + `${note}</span>`;
@@ -88,13 +96,6 @@ function filesHtml(files: ChangedFile[], turnKey: string): string {
     + '</section>';
 }
 
-/** What a folded chapter did, by tool, in the order first used: `Bash ×5 · Read ×3`. */
-function toolCounts(rows: ChapterRow[]): string {
-  const counts = new Map<string, number>();
-  for (const row of rows) if (!row.output) counts.set(row.tool, (counts.get(row.tool) ?? 0) + row.count);
-  return [...counts].map(([tool, count]) => `<span class="cfold-item"><b class="cfold-tool">${escapeHtml(tool)}</b>${count > 1 ? ` ×${count}` : ''}</span>`).join('<span class="cfold-sep"> · </span>');
-}
-
 /** Tool-name column width, as a class: the webview CSP forbids style="" attributes. */
 function toolWidth(rows: ChapterRow[]): string {
   // Capped: one long name (ToolSearch) must not widen every row of the turn.
@@ -109,7 +110,7 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, la
   const label = group.turnId ? `第 ${group.ordinal} 轮` : '未归属回合的记录';
   const chapters = turn.segments.filter(segment => segment.kind === 'chapter');
   const rows = chapters.flatMap(segment => segment.kind === 'chapter' ? segment.chapter.rows : []);
-  const stream = turn.segments.map(segment => {
+  const segmentHtml = (segment: typeof turn.segments[number]) => {
     if (segment.kind === 'answer') return `<li class="cseg" data-observation-key="${escapeHtml(segment.item.id)}">${render.answer(segment.item)}</li>`;
     if (segment.kind === 'interjection') return `<li class="cseg interjection" data-observation-key="${escapeHtml(segment.item.id)}"><div class="kicker">你的消息</div>${render.request(segment.item)}</li>`;
     const { chapter } = segment;
@@ -117,13 +118,17 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, la
     const say = chapter.headings.map(heading => `<div class="csay" data-observation-key="say:${escapeHtml(heading.id)}" data-text-id="${escapeHtml(heading.id)}" data-status="${escapeHtml(heading.status)}">`
       + `${heading.status === 'failed' ? '<span class="availability">失败</span>' : ''}${renderMarkdown(render.publicBody(heading))}${render.attachments(heading)}</div>`).join('');
     return `<li class="chapter${chapter.headings.length ? '' : ' silent'}" data-observation-key="${escapeHtml(chapter.key)}">${say}`
-      + (!chapter.rows.length ? '' : live || chapter.rows.length <= 2 ? `<ol class="crows">${rowsHtml(chapter.rows, render, chapter.key, live)}</ol>`
-        // Once a turn is over it keeps the agent's words and folds its calls into one line.
-        : `<details class="cfold" data-fold="${escapeHtml(chapter.key)}"><summary>${toolCounts(chapter.rows)}<span class="cfold-arrow" aria-hidden="true">›</span></summary>`
-          + `<ol class="crows">${rowsHtml(chapter.rows, render, chapter.key, live)}</ol></details>`)
+      + (chapter.rows.length ? `<ol class="crows">${rowsHtml(chapter.rows, render, chapter.key, live)}</ol>` : '')
       + (chapter.records.length ? `<ol class="nodes">${chapter.records.map(render.record).join('')}</ol>` : '')
       + '</li>';
-  }).join('');
+  };
+  // Once a turn is over its whole process folds into the line the agents print
+  // ("Crunched for 3m 12s"); the request, the files and the final answer stay.
+  const closing = turn.segments.length - [...turn.segments].reverse().findIndex(segment => segment.kind !== 'answer');
+  const process = live ? turn.segments : turn.segments.slice(0, closing > turn.segments.length ? 0 : closing);
+  const answers = live ? [] : turn.segments.slice(process.length);
+  const calls = rows.filter(row => !row.output).reduce((sum, row) => sum + row.count, 0);
+  const stream = process.map(segmentHtml).join('');
   // One status line while the turn runs, as the agents show it. The clock counts
   // from the start of the turn, the same point Claude Code and Codex time from.
   const verb = statusVerb(provider, group.key);
@@ -133,7 +138,12 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, la
     + `<header class="turn-heading"><span class="tclock">${clock(turn.start)}</span><span class="tlabel">${label}</span>${turn.aborted ? '<span class="tstop">中断</span>' : live ? '<span class="tstop tidle">已停止</span>' : ''}<span class="tdur">${duration(turn.durationMs)}</span></header>`
     + (turn.request ? render.request(turn.request) : '')
     + filesHtml(turn.files, group.key)
-    + `<ol class="cstream${chapters.length > 1 ? ' tracked' : ''}${tail ? ' live' : ''}">${stream}${tail}</ol>`
+    + (live || !process.length ? `<ol class="cstream${chapters.length > 1 ? ' tracked' : ''}${tail ? ' live' : ''}">${stream}${tail}</ol>`
+      : `<details class="cprocess" data-fold="process:${escapeHtml(group.key)}"><summary>`
+        + `<span class="cdone">${turn.durationMs ? `${doneVerb(provider, group.key)} for ${elapsed(turn.durationMs)}` : 'Process'}</span>`
+        + `${calls ? `<span class="ccount-calls"> · ${calls} ${calls === 1 ? 'call' : 'calls'}</span>` : ''}<span class="cfold-arrow" aria-hidden="true">›</span></summary>`
+        + `<ol class="cstream${chapters.length > 1 ? ' tracked' : ''}">${stream}</ol></details>`)
+    + (answers.length ? `<ol class="cstream">${answers.map(segmentHtml).join('')}</ol>` : '')
     + (turn.segments.length || tail ? '' : '<p class="empty">暂未取得本轮过程。</p>')
     + `<div class="turn-content-end" aria-hidden="true"></div></section>`;
 }
@@ -161,22 +171,28 @@ export const chapterStyles = `
   .csay { line-height: 1.7; overflow-wrap: anywhere; }
   .csay .markdown > :first-child { margin-top: 0; }
   .crows { list-style: none; margin: 6px 0 0; padding: 0; }
-  .cfold { margin: 6px 0 0; }
-  .cfold > summary { display: flex; align-items: baseline; width: fit-content; max-width: 100%; padding: 1px 0; list-style: none; cursor: pointer; font: 10.5px/1.8 var(--mono); color: var(--ink-3); }
-  .cfold > summary::-webkit-details-marker { display: none; }
-  .cfold > summary:hover { color: var(--vscode-foreground); }
-  .cfold-item { white-space: pre; }
-  .cfold-tool { font-weight: 600; }
-  .cfold-sep { white-space: pre; }
-  .cfold-arrow { display: inline-block; margin-left: 7px; transition: transform .12s; }
-  .cfold[open] > summary .cfold-arrow { transform: rotate(90deg); }
-  .cfold > .crows { margin-top: 2px; }
+  /* A finished turn's process, folded into one line; open, it is the full process. */
+  .cprocess { margin: 0 0 4px; }
+  .cprocess > summary { display: flex; align-items: baseline; width: fit-content; max-width: 100%; padding: 2px 0; list-style: none; cursor: pointer; font-size: 12px; color: var(--ink-3); }
+  .cprocess > summary::-webkit-details-marker { display: none; }
+  .cprocess > summary:hover { color: var(--vscode-foreground); }
+  .cprocess > summary::before { content: "✻"; margin-right: 7px; color: var(--ink-4); }
+  .ccount-calls { white-space: pre; color: var(--ink-4); }
+  .cfold-arrow { display: inline-block; margin-left: 8px; transition: transform .12s; }
+  .cprocess[open] > summary .cfold-arrow { transform: rotate(90deg); }
+  .cprocess > .cstream { margin-top: 10px; }
   .crow { display: grid; grid-template-columns: var(--tw) minmax(0, 1fr) 14px; align-items: baseline; gap: 8px; width: 100%; padding: 1px 4px; margin: 0 -4px; border: 0; border-radius: 4px; background: transparent; text-align: left; }
   .ctool { font: 600 10px/1.8 var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* Two lines at most: a raw command without a description can be a paragraph. */
   .clabel { min-width: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .clabel.machine { font: 11px/1.7 var(--mono); }
   .cbad { font-weight: 500; color: var(--vscode-errorForeground); }
+  /* A question: its words, then its options on one wrapping line, the chosen ones marked. */
+  .clabel.asked { display: block; -webkit-line-clamp: unset; }
+  .cchoices { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 12px; margin-top: 2px; font-size: 12px; }
+  .cchoices:empty { display: none; }
+  .cchoice { font-weight: 500; color: var(--vscode-foreground); }
+  .cchoices .cq { font-style: normal; font-size: 11px; color: var(--ink-4); }
   .crow[data-status="empty"] .clabel { color: var(--ink-3); }
   .crep, .cnone { font-style: normal; color: var(--ink-4); }
   .cnone { margin-left: 6px; font: 10px/1 var(--mono); }

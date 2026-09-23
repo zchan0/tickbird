@@ -27,7 +27,16 @@ const CLAUDE_VERBS = [
   'Wrangling', 'Zesting', 'Zigzagging',
 ];
 
+/** What Claude Code prints when a turn is done ("✻ Crunched for 1m 5s"); Codex prints "Worked for". */
+const CLAUDE_DONE = ['Baked', 'Brewed', 'Churned', 'Cogitated', 'Cooked', 'Crunched', 'Sautéed', 'Worked'];
+
+const pick = <T>(list: T[], key: string): T => list[[...key].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7) % list.length];
+
+export function doneVerb(provider: Provider | undefined, key: string): string {
+  return provider === 'codex' ? 'Worked' : pick(CLAUDE_DONE, key);
+}
+
 export function statusVerb(provider: Provider | undefined, key: string): string {
   if (provider === 'codex') return 'Working';
-  return CLAUDE_VERBS[[...key].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7) % CLAUDE_VERBS.length] + '…';
+  return pick(CLAUDE_VERBS, key) + '…';
 }

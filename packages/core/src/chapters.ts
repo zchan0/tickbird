@@ -2,7 +2,7 @@ import type { TimelineItem } from './model';
 import type { TurnGroup } from './timeline';
 import { actionRowSections, outlineTurn, hasReadableEvidence, type ActionRow, type OutlineNode } from './outline';
 import { actionPresentation } from './actions';
-import { fileEvidenceId, recordedFiles, shortFileLabels, type PatchFile } from './presentation';
+import { describeDisplayAction, fileEvidenceId, recordedFiles, shortFileLabels, type PatchFile } from './presentation';
 import { commandOutcome, exitReason, type OutcomeKind } from './outcome';
 
 /**
@@ -29,7 +29,10 @@ export interface ChapterRow {
   command?: string;
   /** A quiet word after the label, for a row whose state is not a failure. */
   note?: string;
+  /** A question to the user: its options, and what was chosen as the source recorded it. */
+  choices?: QuestionChoice[];
 }
+export interface QuestionChoice { header?: string; question: string; options: string[]; chosen: string[] }
 /** Words said back to back, with no call between them, head one chapter together. */
 export interface Chapter { key: string; headings: TimelineItem[]; rows: ChapterRow[]; records: TimelineItem[] }
 export type TurnSegment =
@@ -127,6 +130,42 @@ function changedFiles(nodes: OutlineNode[]): ChangedFile[] {
 
 const pendingReview = (item: TimelineItem) => item.kind === 'notice' && item.title.startsWith('待核对');
 
+const parsed = (text?: string): Record<string, unknown> => { try { const value = JSON.parse(text ?? ''); return value && typeof value === 'object' ? value : {}; } catch { return {}; } };
+
+/** Each question's options, and the ones chosen, from the call's own input and the recorded answers. */
+function questionChoices(item: TimelineItem): QuestionChoice[] | undefined {
+  const block = (label: string) => item.detail?.blocks.find(candidate => candidate.label === label)?.text;
+  const input = parsed(block('当时调用参数')), recorded = parsed(block('问题及记录的回答'));
+  const questions = (Array.isArray(input.questions) ? input.questions : Array.isArray(recorded.questions) ? recorded.questions : []) as Array<Record<string, unknown>>;
+  const answers = (recorded.answers && typeof recorded.answers === 'object' ? recorded.answers : {}) as Record<string, unknown>;
+  const choices = questions.map(question => {
+    const text = typeof question.question === 'string' ? question.question : '';
+    const options = (Array.isArray(question.options) ? question.options : []).map(option => typeof option === 'string' ? option : String((option as { label?: unknown })?.label ?? '')).filter(Boolean);
+    const answer = answers[text];
+    const said = Array.isArray(answer) ? answer.map(String) : typeof answer === 'string' && answer ? [answer] : [];
+    // A multi-select answer is one string; a typed answer is not one of the options.
+    const chosen = said.flatMap(value => options.includes(value) ? [value] : question.multiSelect ? value.split(/,\s*/) : [value]).filter(Boolean);
+    return { ...(typeof question.header === 'string' && question.header ? { header: question.header } : {}), question: text, options, chosen };
+  }).filter(choice => choice.question || choice.options.length);
+  return choices.length ? choices : undefined;
+}
+
+/**
+ * A question to the user or a subagent is a call the agent made, recorded as
+ * its own kind. It reads as a row in its place, not after the calls around it.
+ */
+function callRecordRow(item: TimelineItem): ChapterRow {
+  const description = describeDisplayAction(item), entry = description.entries[0];
+  const tool = entry?.toolName || (item.kind === 'question' ? 'Ask' : 'Agent');
+  const label = (entry?.label || description.label || item.title).replace(/\s+/g, ' ').trim();
+  const outcome = rowOutcome({ id: item.id, description: entry ?? { label, key: item.id, count: 1 }, items: [item], count: 1 });
+  const choices = item.kind === 'question' ? questionChoices(item) : undefined;
+  const answered = Boolean(choices?.some(choice => choice.chosen.length));
+  return { id: item.id, tool, label, count: 1, items: [item], output: false, openable: hasReadableEvidence(item),
+    running: item.status === 'running', pending: !answered && item.result === 'not-observed' && !['failed', 'completed'].includes(item.status),
+    ...(outcome ? { outcome } : {}), ...(choices ? { choices } : {}) };
+}
+
 /** A background task reporting back reads as the call it finished. */
 function notificationRow(item: TimelineItem): ChapterRow {
   const outcome: RowOutcome | undefined = item.interrupted ? { kind: 'interrupted' } : item.status === 'failed'
@@ -171,6 +210,7 @@ export function chapterTurn(group: TurnGroup): ChapterTurn {
     // material: it stays in the turn, folded, not between the agent's steps.
     if (node.kind === 'record' && pendingReview(node.item)) { background.push(node.item); continue; }
     if (node.kind === 'record' && node.item.noticeType === 'task-notification') { (chapter ?? open()).rows.push(notificationRow(node.item)); continue; }
+    if (node.kind === 'record' && (node.item.kind === 'question' || node.item.kind === 'subagent')) { (chapter ?? open()).rows.push(callRecordRow(node.item)); continue; }
     const target = chapter ?? open();
     if (node.kind === 'actions') target.rows.push(...chapterRows(node));
     else target.records.push(node.item);

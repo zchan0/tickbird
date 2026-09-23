@@ -14,14 +14,12 @@ export const inlineClient = `
       const open = block.querySelector('[data-open-text]');
       if (open && content) {
         // Full text opens in the editor area, where pasted images keep their size.
-        const clamped = content.scrollHeight > content.clientHeight + 2, extras = open.dataset.extras || '';
-        open.hidden = !clamped && !extras;
-        open.textContent = (clamped ? '查看全文' + (extras ? ' · ' + extras : '') : extras) + ' →';
+        open.hidden = content.scrollHeight <= content.clientHeight + 2 && !open.hasAttribute('data-always');
       }
       if (!button || !content) return;
       button.hidden = !expanded && content.scrollHeight <= content.clientHeight + 2;
       button.setAttribute('aria-expanded', String(expanded));
-      button.textContent = expanded ? '收起全文 ⌃' : '展开全文 ⌄';
+      button.textContent = expanded ? '收起全文' : '展开全文';
     });
   };
   const loadOpenInline = () => {

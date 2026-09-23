@@ -62,6 +62,8 @@ function harness(initialOrientation = 0) {
   const documents = new Map<string, { text: string }>();
   let provider: { provideTextDocumentContent(uri: { toString(): string }): string; onDidChange: FixtureEmitter<unknown>['event'] };
   const warnings: string[] = [];
+  const executed: string[] = [];
+  let discoveries = 0;
   const metadataEntry = (candidate: SessionCandidate, ready = false): SessionPickerEntry => ({
     key: `${candidate.provider}:${candidate.id}`, title: ready ? `会话标题 ${candidate.id}` : `${candidate.provider} · ${candidate.id}`,
     shortId: candidate.id.slice(0, 8),
@@ -200,6 +202,7 @@ function harness(initialOrientation = 0) {
     commands: {
       registerCommand: (name: string, callback: () => Promise<void>) => { commands.set(name, callback); return { dispose() {} }; },
       executeCommand: async (name: string, value?: Layout) => {
+        executed.push(name);
         if (name === 'agentSidecar.observer.focus') {
           if (!sidebar || sidebar.disposed) { sidebar = createSidebarView(); void viewProvider!.resolveWebviewView(sidebar); }
           return undefined;
@@ -250,7 +253,7 @@ function harness(initialOrientation = 0) {
       lives.push(live); return live;
     } };
     if (request === '../../core/src/sessions') return {
-      discoverSessions: () => sources.discover(), loadSession: (candidate: SessionCandidate) => sources.load(candidate),
+      discoverSessions: () => { ++discoveries; return sources.discover(); }, loadSession: (candidate: SessionCandidate) => sources.load(candidate),
       sessionKey: (candidate: SessionCandidate) => `${candidate.provider}:${candidate.id}`,
     };
     if (request === '../../core/src/session-picker') return { createSessionPickerMetadata: () => metadata };
@@ -260,7 +263,9 @@ function harness(initialOrientation = 0) {
   try { api = require(entry).activate(context); }
   finally { loader._load = original; delete require.cache[entry]; }
   return { api, sources, state, documents, warnings, layoutWrites, metadata, metadataEntry, pickers, lives,
-    changeWorkspace() { vscode.workspace.workspaceFolders = []; workspaceChange.fire(); },
+    changeWorkspace(folders: Array<{ uri: { scheme: string; fsPath: string } }> = []) { vscode.workspace.workspaceFolders = folders; workspaceChange.fire(); },
+    setFolders(folders: Array<{ uri: { scheme: string; fsPath: string } }>) { vscode.workspace.workspaceFolders = folders; },
+    executed, get discoveries() { return discoveries; },
     get groupCount() { return layout.groups.length; }, get layoutReads() { return layoutReads; },
     get activeColumn() { return activeColumn; }, get revealCalls() { return revealCalls; }, get focusCommands() { return focusCommands; },
     focusColumn: (column: number) => { activeColumn = column; },
@@ -310,9 +315,65 @@ test('selection, disposal and workspace changes cancel live delivery without aut
     const observer = host.api.observer as unknown as { webview: { messages: unknown[] } }, count = observer.webview.messages.length;
     old.emit(); await new Promise(resolve => setImmediate(resolve)); assert.equal(observer.webview.messages.length, count);
     host.changeWorkspace(); assert.equal(host.lives[1].closed, true);
+    const messages = observer.webview.messages.length;
     host.lives[1].emit(); await new Promise(resolve => setImmediate(resolve));
-    assert.equal((observer.webview.messages.at(-1) as any).type, 'workspaceChanged');
+    assert.equal(observer.webview.messages.length, messages, 'A closed source posts nothing');
+    // The window lost its only folder: the view explains that instead of keeping a stopped session.
+    assert.match((observer as any).webview.html, /data-workspace-gap="empty"/);
     assert.equal(host.api.session?.id, 'b');
+    assert.deepEqual(host.warnings, []);
+  } finally { host.dispose(); }
+});
+
+test('a folder switched without a reload stops the old source and asks for a new selection', async () => {
+  const host = harness();
+  try {
+    await host.ready();
+    const observer = host.api.observer as unknown as { webview: { messages: unknown[]; htmlWrites: number } }, writes = observer.webview.htmlWrites;
+    host.changeWorkspace([{ uri: { scheme: 'file', fsPath: '/other' } }]);
+    assert.equal(host.lives[0].closed, true);
+    assert.equal((observer.webview.messages.at(-1) as any).type, 'workspaceChanged');
+    assert.equal(observer.webview.htmlWrites, writes);
+  } finally { host.dispose(); }
+});
+
+const local = (path: string) => ({ uri: { scheme: 'file', fsPath: path } });
+for (const [gap, folders, text] of [
+  ['empty', [], '打开一个项目文件夹'],
+  ['multi', [local('/fixture'), local('/other')], '暂不支持多文件夹工作区'],
+  ['remote', [{ uri: { scheme: 'vscode-remote', fsPath: '/fixture' } }], '暂不支持远程工作区'],
+] as const) test(`a ${gap} workspace shows its reason in the view without a warning or a session scan`, async () => {
+  const host = harness();
+  try {
+    host.setFolders([...folders]);
+    await host.api.openObserver();
+    const html = host.sidebar.webview.html as string;
+    assert.match(html, new RegExp(`data-workspace-gap="${gap}"`));
+    assert.ok(html.includes(text));
+    assert.equal(html.includes('data-action="openFolder"'), gap === 'empty');
+    // Palette commands land on the same explanation rather than a warning.
+    await host.command('agentSidecar.chooseSession');
+    await host.command('agentSidecar.refresh');
+    assert.equal(host.pickers.length, 0);
+    assert.equal(host.discoveries, 0);
+    assert.deepEqual(host.warnings, []);
+    if (gap === 'empty') {
+      host.receive({ type: 'openFolder' }); await new Promise(resolve => setImmediate(resolve));
+      assert.ok(host.executed.includes('vscode.openFolder'));
+    }
+  } finally { host.dispose(); }
+});
+
+test('leaving a multi-folder workspace for one local folder renders a fresh chooser', async () => {
+  const host = harness();
+  try {
+    host.setFolders([local('/fixture'), local('/other')]);
+    await host.api.openObserver();
+    host.changeWorkspace([local('/fixture')]);
+    const html = host.sidebar.webview.html as string;
+    assert.ok(!html.includes('data-workspace-gap'));
+    assert.ok(html.includes('选择要观察的会话'));
+    assert.deepEqual(host.warnings, []);
   } finally { host.dispose(); }
 });
 

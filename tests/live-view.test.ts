@@ -199,11 +199,15 @@ test('reader scrolling pauses follow across updates and refresh; explicit return
 test('a burst is revealed one part at a time: the words, a beat, then each call; a later update does not cut it short', async t => {
   const f = await fixture(t), { document } = f;
   const now = new Date().toISOString();
+  // The turn is running first; then a burst lands in it.
+  f.data.items.find(item => item.id === 'current')!.timestamp = now; f.update();
   f.data.items.push(narrative('said-1', 't2', '先看解析器。'), narrative('said-2', 't2', '然后改视图。'), input('read-c'), input('read-d'));
-  f.data.items.filter(item => item.turnId === 't2' || item.id.startsWith('read-')).slice(-5).forEach(item => { item.turnId = 't2'; item.timestamp = now; });
+  f.data.items.slice(-4).forEach(item => { item.turnId = 't2'; item.timestamp = now; });
   f.update();
   const panel = document.querySelector('[data-turn-panel="turn:t2"]')!;
-  const arrived = [...panel.querySelectorAll<HTMLElement>('.arrived:not(.live-tail)')];
+  const arrived = ['say:said-1', 'say:said-2'].map(key => panel.querySelector<HTMLElement>(`[data-observation-key="${key}"]`)!)
+    .concat([...panel.querySelectorAll<HTMLElement>('.crow-item')].slice(-2));
+  assert.ok(arrived.every(node => node.classList.contains('arrived')));
   assert.deepEqual(arrived.map(node => node.matches('.csay') ? 'say' : 'row'), ['say', 'say', 'row', 'row'], 'The container does not fade as one block');
   const delays = arrived.map(node => parseInt(node.style.animationDelay, 10));
   assert.ok(delays.every((delay, index) => index === 0 || delay > delays[index - 1]), 'One after another');

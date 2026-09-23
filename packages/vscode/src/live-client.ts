@@ -140,6 +140,8 @@ export const liveClient = `
         || !Array.isArray(message.turns) || !message.turns.every(turn => turn && typeof turn.key === 'string' && typeof turn.html === 'string')) return;
       const top = timeline.getBoundingClientRect().top;
       const visible = [...timeline.querySelectorAll('[data-observation-key], [data-turn-panel]')].filter(node => {
+        // Content inside a closed fold has no place on screen to hold.
+        if (node.closest('details:not([open])')) return false;
         const rect = node.getBoundingClientRect(); return rect.height > 0 && rect.bottom > top;
       });
       // Prefer the innermost block crossing the viewport, then the first below.
