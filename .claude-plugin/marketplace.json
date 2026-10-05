@@ -1,12 +1,16 @@
 {
   "name": "agent-sidecar-local",
-  "owner": { "name": "zchan0" },
-  "metadata": { "description": "Agent Sidecar integration, installed from this checkout by npm run install:vscode." },
+  "owner": {
+    "name": "zchan0"
+  },
+  "metadata": {
+    "description": "Agent Sidecar 的接入，由本仓库的 npm run install:vscode 安装。"
+  },
   "plugins": [
     {
       "name": "agent-sidecar",
       "source": "./integration",
-      "description": "Writes what each session is doing to a local file that Agent Sidecar reads. Shows nothing and changes nothing in the agent."
+      "description": "Agent Sidecar 的接入：把每个会话在做什么（属于哪个窗口、是否在等你批准、屏幕上正在显示的文字）写到本机文件，供 Agent Sidecar 的 VS Code 版和终端版读取。本身不显示界面，不改变 Agent 的行为。"
     }
   ]
 }

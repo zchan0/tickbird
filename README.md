@@ -32,7 +32,9 @@ npm run install:vscode
 2. 把本仓库登记为 Claude Code 的本地插件市场（`.claude-plugin/marketplace.json`），装上接入 `agent-sidecar@agent-sidecar-local`。新开的会话生效，`/plugin` 里可以停用。
 3. 把本仓库登记为 Codex 的本地插件市场（`.agents/plugins/marketplace.json`），装上同一个接入。**还要在 Codex CLI 里执行一次 `/hooks`，按 `t` 信任它的 hook**，否则 Codex 会静默跳过。
 
-`npm run package:vscode` 只打包，不安装。改了 `integration/` 后，要把两份插件清单的版本号加一再安装，见 [integration/README.md](./integration/README.md)。
+装进 Claude Code 和 Codex 的不是终端版，而是接入：一组只写会话状态的 hook，VS Code 版靠它自动跟随会话、显示「等你批准」。以后的终端版也用同一个接入，不会再装第二个。
+
+`npm run package:vscode` 只打包，不安装。产品和接入用同一个版本号，用 `npm run set-version -- x.y.z` 修改；改了 `integration/` 后必须升版本再安装，见 [integration/README.md](./integration/README.md)。
 
 ## 使用
 

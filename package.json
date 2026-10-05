@@ -3,7 +3,7 @@
   "displayName": "Agent Sidecar (Development)",
   "description": "Read-only, project-scoped process evidence beside Codex and Claude Code.",
   "publisher": "agent-sidecar-local",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "private": true,
   "engines": {
     "vscode": "^1.96.0",
@@ -74,6 +74,7 @@
     "dev": "npm run build && node scripts/launch-development.mjs",
     "package:vscode": "node scripts/install-vscode.mjs --package-only",
     "install:vscode": "node scripts/install-vscode.mjs",
+    "set-version": "node scripts/set-version.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "build:realtime": "tsc -p tsconfig.realtime.json",
     "test:realtime": "npm run build:realtime && node --test .test-artifacts/realtime-build/tests/*.test.js",

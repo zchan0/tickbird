@@ -8,7 +8,9 @@
 
 ## 版本
 
-两份清单（`.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`）的 `version` 必须一起改。Claude Code 和 Codex 都按版本号缓存已装的插件：改了 `integration/` 里任何文件，都要把版本号加一，再运行 `npm run install:vscode`，否则已装的插件不会更新。Codex 的 hook 定义一改，还要在 `/hooks` 里重新信任。
+接入和产品用同一个版本号：`package.json` 和两份插件清单（`.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`）必须一致，测试会检查。改版本只用 `npm run set-version -- x.y.z`，不要手改某一个文件。
+
+Claude Code 和 Codex 都按版本号缓存已装的插件：改了 `integration/` 里任何文件，都要升一次版本，再运行 `npm run install:vscode`，否则已装的插件不会更新。Codex 的 hook 定义（命令那一行）一改，还要在 `/hooks` 里重新信任；只改脚本内容不需要。
 
 ## 本地试用
 
