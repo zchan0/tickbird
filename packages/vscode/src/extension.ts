@@ -2,12 +2,16 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import { basename } from 'node:path';
 import { realpath } from 'node:fs/promises';
+import { existsSync, watch, type FSWatcher } from 'node:fs';
 import { discoverSessions, sessionKey, type DiscoveryOptions } from '../../core/src/sessions';
 import { openLiveSession, type LiveSession } from '../../core/src/live-session';
 import { LiveView } from './live-view';
 import type { SessionCandidate, SessionData, TimelineItem, Provider } from '../../core/src/model';
 import { renderDetail, renderSidecar, renderInlineEvidence, inlineRevision, renderWorkspaceGap, workspaceGaps, type WorkspaceGap } from './render';
-import { hasReadableEvidence, outlineCoverage, resolveOutlineEvidence } from '../../core/src/outline';
+import { hasReadableEvidence, outlineCoverage, resolveOutlineEvidence, visibleTurnGroups } from '../../core/src/outline';
+import { awaitingApproval, currentSession, pendingDraft, readSessionStates, sessionStateDirectory, type SessionState, type SessionStateCache } from '../../core/src/session-state';
+import { publicBody } from '../../core/src/turn-view';
+import type { LiveExtras } from './chapter-view';
 import { createSessionPickerMetadata, type SessionPickerEntry } from '../../core/src/session-picker';
 
 interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean }
@@ -25,6 +29,17 @@ export function activate(context: vscode.ExtensionContext) {
   let preview: EvidenceView | undefined;
   const evidence = new Set<EvidenceView>();
   let generation = 0;
+  // What the integration hooks say about live sessions; see SESSION_STATE.md.
+  const stateDirectory = sessionStateDirectory();
+  const stateCache: SessionStateCache = new Map();
+  let states: SessionState[] = [];
+  /** Off once the reader chooses a session other than this window's current one. */
+  let follow = true;
+  let currentKey: string | undefined;
+  let following: Promise<void> | undefined;
+  let publishedExtras = '';
+  let postedPaused: boolean | undefined;
+  let hintShown = false;
   let scanGeneration = 0;
   let disposed = false;
   let resolved: (() => void) | undefined;
@@ -66,12 +81,47 @@ export function activate(context: vscode.ExtensionContext) {
     if (!observer) return;
     gapShown = workspaceGap();
     if (gapShown) observer.webview.html = renderWorkspaceGap(gapShown, nonce(), vscode.env?.language);
-    else observer.webview.html = renderSidecar({ projectName: basename(projectPath()), session, nonce: nonce(), streamId: liveView?.streamId, locale: vscode.env?.language }, liveView?.current);
+    else {
+      postedPaused = followPaused();
+      observer.webview.html = renderSidecar({ projectName: basename(projectPath()), session, nonce: nonce(), streamId: liveView?.streamId, locale: vscode.env?.language,
+        followPaused: postedPaused, integrationHint: hintShown }, liveView?.current);
+    }
+  }
+  /** Latest source time in the session, for "has the agent moved on since". */
+  function lastRecordAt(snapshot: SessionData): number | undefined {
+    let latest: number | undefined;
+    for (const item of snapshot.items) {
+      const at = item.timestamp ? Date.parse(item.timestamp) : NaN;
+      if (Number.isFinite(at) && (latest === undefined || at > latest)) latest = at;
+    }
+    return latest;
+  }
+  /** The approval the newest turn waits for and the text on screen, when the integration reports them. */
+  function liveExtras(snapshot: SessionData | undefined): LiveExtras {
+    const state = snapshot && states.find(item => item.provider === snapshot.provider && item.session === snapshot.id);
+    if (!snapshot || !state) return {};
+    const approval = awaitingApproval(state, lastRecordAt(snapshot)) ? state.approval : undefined;
+    // Turn grouping costs a pass over the session: only when there is a draft to check.
+    const latest = state.draft ? visibleTurnGroups(snapshot).at(-1) : undefined;
+    const draft = latest && pendingDraft(state, latest.items.filter(item => item.kind === 'message' || item.kind === 'answer').map(publicBody));
+    return { ...(approval ? { approval: { tool: approval.tool, summary: approval.summary } } : {}), ...(draft ? { draft } : {}) };
+  }
+  function followPaused(): boolean {
+    return !follow && Boolean(currentKey) && (!candidate || sessionKey(candidate) !== currentKey);
+  }
+  /** Tells the page only when the paused state changes; `force` after the page was rebuilt. */
+  function postFollowState(force = false) {
+    const paused = followPaused();
+    if (!observer || gapShown || disposed || (!force && paused === postedPaused)) return;
+    postedPaused = paused;
+    void Promise.resolve(observer.webview.postMessage({ type: 'follow', paused })).catch(() => undefined);
   }
   function publish(reset = false) {
     const source = live, view = liveView, panel = observer;
     if (!source || !view || !panel || disposed) return;
-    const message = view.update(source.session, source.health, reset);
+    const extras = liveExtras(source.session);
+    publishedExtras = JSON.stringify(extras);
+    const message = view.update(source.session, source.health, reset, extras);
     delivery = delivery.catch(() => undefined).then(async () => {
       if (!disposed && live === source && observer === panel) await panel.webview.postMessage(message);
     });
@@ -113,7 +163,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (disposed || token !== generation || !observer) { await opened.close(); return; }
     const previous = live;
     live = opened;
-    liveView = new LiveView(basename(projectPath()), opened.session, vscode.env?.language);
+    liveView = new LiveView(basename(projectPath()), opened.session, vscode.env?.language, liveExtras(opened.session));
     candidate = selected;
     session = opened.session;
     renderObserver();
@@ -202,7 +252,8 @@ export function activate(context: vscode.ExtensionContext) {
     void metadata.list(choices).then(merge).catch(() => undefined)
       .finally(() => { if (!closed && !disposed && token === generation) picker.busy = false; });
     const picked = await selected;
-    if (picked && !disposed && token === generation) await selectSession(picked, token);
+    // Choosing another session than this window's current one pauses following.
+    if (picked && !disposed && token === generation) { follow = !currentKey || picked === currentKey; await selectSession(picked, token); postFollowState(); }
   }
   async function refresh() {
     const token = ++generation;
@@ -231,6 +282,8 @@ export function activate(context: vscode.ExtensionContext) {
       else if (value.type === 'coverage') action = showCoverage();
       // Without a URI, the public command asks for the folder in a native dialog.
       else if (value.type === 'openFolder') action = Promise.resolve(vscode.commands.executeCommand('vscode.openFolder'));
+      else if (value.type === 'resumeFollow') { follow = true; action = followCurrent(); }
+      else if (value.type === 'dismissHint') action = dismissHint();
       else if (value.type === 'keep') { keepEvidence(); }
       else if (value.type === 'openDetail' && typeof value.itemId === 'string') action = openDetail(value.itemId);
       else if (value.type === 'loadInlineEvidence' && session && value.sessionId === sessionKey(session) && typeof value.itemId === 'string' && typeof value.requestId === 'string' && value.requestId.length < 40) {
@@ -351,8 +404,68 @@ export function activate(context: vscode.ExtensionContext) {
   }));
   context.subscriptions.push({ dispose() { disposed = true; ++generation; ++scanGeneration; stopObservation(); for (const view of evidence) view.panel.dispose(); } });
 
+  /** Shows this window's current session, unless the reader chose another one. */
+  function followCurrent(): Promise<void> {
+    if (following) return following;
+    following = (async () => {
+      const current = currentSession(states, process.pid);
+      currentKey = current ? `${current.provider}:${current.session}` : undefined;
+      if (follow && current && observer && !disposed && !workspaceGap() && (!candidate || sessionKey(candidate) !== currentKey)
+        // Only this project's sessions, and only once the agent has written a transcript.
+        && current.transcript && existsSync(current.transcript)) {
+        const project = await realpath(projectPath()).catch(() => undefined);
+        const cwd = await realpath(current.cwd).catch(() => current.cwd);
+        if (project && cwd === project && !disposed && follow) {
+          if (!candidates.some(item => sessionKey(item) === currentKey))
+            candidates = [...candidates, { id: current.session, provider: current.provider, file: current.transcript, projectPath: project, updatedAt: Date.now(), activity: 'unverified' }];
+          await selectSession(currentKey!);
+        }
+      }
+      postFollowState();
+    })().finally(() => { following = undefined; });
+    return following;
+  }
+  /** Suggests the integration while an active session has no state from it. */
+  function updateHint() {
+    const snapshot = session, recent = snapshot && lastRecordAt(snapshot);
+    const show = !context.globalState?.get<boolean>('integrationHintDismissed') && !gapShown && Boolean(snapshot)
+      && recent !== undefined && Date.now() - recent < 10 * 60 * 1000
+      && !states.some(state => state.provider === snapshot!.provider && state.session === snapshot!.id);
+    if (show === hintShown) return;
+    hintShown = show;
+    if (observer && !disposed) void Promise.resolve(observer.webview.postMessage({ type: 'integrationHint', show })).catch(() => undefined);
+  }
+  async function dismissHint() {
+    await context.globalState?.update('integrationHintDismissed', true);
+    updateHint();
+  }
+  async function refreshStates(): Promise<void> {
+    if (disposed) return;
+    states = await readSessionStates(stateDirectory, undefined, stateCache);
+    if (disposed) return;
+    await followCurrent();
+    // A new approval or a draft changes the view without a new transcript record.
+    if (live && liveView && JSON.stringify(liveExtras(live.session)) !== publishedExtras) publish();
+    updateHint();
+  }
+  let stateWatcher: FSWatcher | undefined;
+  let stateNudge: ReturnType<typeof setTimeout> | undefined;
+  const nudgeStates = () => { clearTimeout(stateNudge); stateNudge = setTimeout(() => void refreshStates().catch(() => undefined), 100); };
+  const watchStates = () => {
+    if (stateWatcher || disposed) return;
+    try {
+      stateWatcher = watch(stateDirectory, nudgeStates);
+      stateWatcher.on('error', () => { stateWatcher?.close(); stateWatcher = undefined; });
+    } catch { /* Not created yet: the poll retries. */ }
+  };
+  // The watcher is fast but not guaranteed; the poll also notices an agent that exits.
+  const statePoll = setInterval(() => { watchStates(); void refreshStates().catch(() => undefined); }, 1000);
+  watchStates();
+  context.subscriptions.push({ dispose() { clearInterval(statePoll); clearTimeout(stateNudge); stateWatcher?.close(); stateWatcher = undefined; } });
+
   // Test access calls the same production functions; no fixture Agent surface is part of the product.
-  return { openObserver, scan, selectSession, refresh, openDetail, keepEvidence,
+  return { openObserver, scan, selectSession, refresh, openDetail, keepEvidence, refreshStates,
+    get following() { return follow; }, get currentKey() { return currentKey; },
     get session() { return session; }, get candidates() { return [...candidates]; },
     get observer() { return observer; }, get preview() { return preview; },
     get evidence() { return [...evidence]; } };

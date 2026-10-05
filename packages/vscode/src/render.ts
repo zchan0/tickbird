@@ -1,4 +1,4 @@
-import { renderChapterTurn, chapterStyles } from './chapter-view';
+import { renderChapterTurn, chapterStyles, type LiveExtras } from './chapter-view';
 import type { EvidenceBlock, ItemKind, Provider, SessionData, TimelineItem } from '../../core/src/model';
 import type { TurnGroup } from '../../core/src/timeline';
 import { actionRowSections, outlineTurn, visibleTurnGroups, type OutlineNode, type OutlineEvidence } from '../../core/src/outline';
@@ -15,7 +15,15 @@ import { renderCode, renderFile } from './code';
 import { uiLabel } from './labels';
 import { publicBody, publicBodyLabels } from '../../core/src/turn-view';
 
-export interface SidecarRenderOptions { projectName: string; session?: SessionData; nonce: string; streamId?: string; locale?: string }
+export interface SidecarRenderOptions {
+  projectName: string; session?: SessionData; nonce: string; streamId?: string; locale?: string;
+  /** From the integration: what the newest turn is waiting for, and text on screen. */
+  live?: LiveExtras;
+  /** Auto-follow is paused while this window's current session is another one. */
+  followPaused?: boolean;
+  /** Suggest installing the integration. */
+  integrationHint?: boolean;
+}
 export interface SidecarProjection { sessionKey: string; name: string; identity: string; map: string; lens: string; warnings: string; empty: string; turns: Array<{ key: string; html: string }> }
 export type TurnRenderCache = Map<string, { digest: string; html: string }>;
 export interface DetailRenderOptions { item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean; nonce: string; locale?: string }
@@ -91,6 +99,10 @@ const styles = `
   .observation-status[data-state="running"] { color: var(--vscode-foreground); }
   .observation-status[data-state="running"]::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 1px; border-radius: 50%; background: var(--vscode-charts-green, var(--vscode-foreground)); }
   .observation-problem { flex: none; color: var(--warning); padding: 7px 12px; font-size: 11px; border-bottom: 1px solid var(--border); }
+  .integration-hint { flex: none; display: flex; gap: 8px; align-items: baseline; padding: 6px 12px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); }
+  .integration-hint > span { flex: 1; min-width: 0; }
+  .integration-hint > button { flex: none; border: 0; padding: 0; background: transparent; color: var(--vscode-textLink-foreground); font-size: 11px; }
+  .follow-session { color: var(--vscode-foreground); background: var(--vscode-list-hoverBackground); }
   .icon-button { display: grid; place-items: center; width: 24px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: transparent; }
   .icon-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
   .icon-button:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
@@ -417,7 +429,7 @@ const script = `(() => {
   let focusId = typeof saved.focusId === 'string' ? saved.focusId : '';
   let focusTurnId = typeof saved.focusTurnId === 'string' ? saved.focusTurnId : '';
   let focusGroupId = typeof saved.focusGroupId === 'string' ? saved.focusGroupId : '';
-  const actions = ['chooseSession', 'refresh', 'coverage', 'keep', 'openFolder'];
+  const actions = ['chooseSession', 'refresh', 'coverage', 'keep', 'openFolder', 'resumeFollow', 'dismissHint'];
   let focusAction = typeof saved.focusAction === 'string' && actions.includes(saved.focusAction) ? saved.focusAction : '';
   const nodes = () => [...document.querySelectorAll('button[data-item-id]')];
   const panels = () => [...document.querySelectorAll('[data-turn-panel]')];
@@ -605,6 +617,11 @@ const script = `(() => {
   }
   window.addEventListener('message', event => {
     const message = event.data;
+    // Window-level state from the host: shown whether or not a session is open.
+    if (message && typeof message === 'object' && !Array.isArray(message)) {
+      if (message.type === 'follow') { const button = document.querySelector('.follow-session'); if (button) button.hidden = !message.paused; return; }
+      if (message.type === 'integrationHint') { const hint = document.querySelector('.integration-hint'); if (hint) hint.hidden = !message.show; return; }
+    }
     if (!message || typeof message !== 'object' || Array.isArray(message) || Object.keys(message).length !== 1 || message.type !== 'kept') return;
     const button = document.querySelector('.detail button[data-action="keep"]');
     const status = document.querySelector('[data-keep-status]');
@@ -843,7 +860,7 @@ function renderRequest(item: TimelineItem): string {
   return `<section class="turn-question" data-text-id="${escapeHtml(item.id)}" aria-label="用户问题"><div class="question-text">${renderUserText(publicBody(item))}</div><div class="question-foot">${more}</div></section>`;
 }
 
-function renderTurn(group: TurnGroup, locale?: string, latest = false, provider?: Provider): string {
+function renderTurn(group: TurnGroup, locale?: string, latest = false, provider?: Provider, extras?: LiveExtras): string {
   const keyed = (html: string, id: string) => html.slice(0, html.indexOf('>')).includes('data-observation-key=') ? html
     : html.replace(/^<(li|section)/, `<$1 data-observation-key="${escapeHtml(id)}"`);
   return renderChapterTurn(group, {
@@ -853,7 +870,7 @@ function renderTurn(group: TurnGroup, locale?: string, latest = false, provider?
     answer: renderNarrative,
     attachments: renderAttachments,
     unavailable: unavailableReason,
-  }, latest, provider);
+  }, latest, provider, extras);
 }
 
 function toolbarIcon(action: string, label: string, path: string): string {
@@ -867,7 +884,7 @@ function requestFirstSentence(group: TurnGroup): string {
   return sentence || '未取得本轮问题';
 }
 
-export function projectSidecar({ projectName, session, locale }: Pick<SidecarRenderOptions, 'projectName' | 'session' | 'locale'>, cache?: TurnRenderCache): SidecarProjection {
+export function projectSidecar({ projectName, session, locale, live }: Pick<SidecarRenderOptions, 'projectName' | 'session' | 'locale' | 'live'>, cache?: TurnRenderCache): SidecarProjection {
   // Reverse only the turn groups; events inside each turn keep source order.
   const groups = session ? visibleTurnGroups(session).reverse() : [];
   const turns = groups.filter(group => group.turnId);
@@ -901,18 +918,20 @@ export function projectSidecar({ projectName, session, locale }: Pick<SidecarRen
       // Exact public model invalidation, including late output to an old turn.
       // Retain only a digest, not another copy of all evidence bodies.
       const latest = group === groups[0];
-      const digest = cache ? createHash('sha256').update(JSON.stringify([locale, latest, group])).digest('hex') : '';
+      const extras = latest ? live : undefined;
+      const digest = cache ? createHash('sha256').update(JSON.stringify([locale, latest, group, extras ?? null])).digest('hex') : '';
       const previous = cache?.get(group.key);
-      const html = previous?.digest === digest ? previous.html : renderTurn(group, locale, latest, session?.provider);
+      const html = previous?.digest === digest ? previous.html : renderTurn(group, locale, latest, session?.provider, extras);
       cache?.set(group.key, { digest, html });
       return { key: group.key, html };
     }) };
 }
 
-export function renderSidecar({ projectName, session, nonce, streamId = '', locale }: SidecarRenderOptions, projection?: SidecarProjection): string {
-  const p = projection ?? projectSidecar({ projectName, session, locale });
+export function renderSidecar({ projectName, session, nonce, streamId = '', locale, live, followPaused = false, integrationHint = false }: SidecarRenderOptions, projection?: SidecarProjection): string {
+  const p = projection ?? projectSidecar({ projectName, session, locale, live });
   const body = `<main class="sidecar" data-observation-stream="${escapeHtml(streamId)}" aria-label="Sidecar 过程观察">
-    <header class="toolbar"><h1 class="session-title" title="${escapeHtml(p.identity)}">${escapeHtml(p.name)}</h1><span class="observation-status" title="按会话记录推断：最新一轮未结束且仍有新记录时显示运行中" ${streamId ? '' : 'hidden'}></span><div class="controls">${streamId ? '<button type="button" class="follow-button" data-follow-toggle aria-pressed="true">跟随 ↓</button>' : ''}${toolbarIcon('chooseSession', '切换会话', 'M3 4.5h10m-3-3 3 3-3 3M13 11.5H3m3-3-3 3 3 3')}${toolbarIcon('refresh', '刷新', 'M12.5 5A5 5 0 1 0 13 9M12.5 1.5V5H9')}${toolbarIcon('coverage', '覆盖记录', 'M3 2.5h10v11H3zM5.5 5.5h5M5.5 8h5M5.5 10.5h3')}</div></header>
+    <header class="toolbar"><h1 class="session-title" title="${escapeHtml(p.identity)}">${escapeHtml(p.name)}</h1><span class="observation-status" title="按会话记录推断：最新一轮未结束且仍有新记录时显示运行中" ${streamId ? '' : 'hidden'}></span><div class="controls"><button type="button" class="follow-button follow-session" data-action="resumeFollow" title="自动跟随已暂停：你选了另一个会话。点击跟随这个窗口正在进行的会话"${followPaused ? '' : ' hidden'}>跟随当前会话</button>${streamId ? '<button type="button" class="follow-button" data-follow-toggle aria-pressed="true">跟随 ↓</button>' : ''}${toolbarIcon('chooseSession', '切换会话', 'M3 4.5h10m-3-3 3 3-3 3M13 11.5H3m3-3-3 3 3 3')}${toolbarIcon('refresh', '刷新', 'M12.5 5A5 5 0 1 0 13 9M12.5 1.5V5H9')}${toolbarIcon('coverage', '覆盖记录', 'M3 2.5h10v11H3zM5.5 5.5h5M5.5 8h5M5.5 10.5h3')}</div></header>
+    <div class="integration-hint"${integrationHint ? '' : ' hidden'}><span>装上 Agent Sidecar 接入后，可以自动跟随当前会话，并显示「等你批准」。</span><button type="button" data-action="dismissHint">不再提示</button></div>
     <div class="observation-problem" hidden></div><div class="reading-layout"><nav class="turn-map" aria-label="回合目录（从新到旧）">${p.map}</nav><nav id="turn-lens" class="turn-lens" aria-label="对应回合的问题预览" hidden>${p.lens}</nav><section class="timeline" tabindex="0" aria-label="完整会话过程（从新到旧）"><div data-live-warnings>${p.warnings}</div><div data-live-empty>${p.empty}</div>${p.turns.map(turn => turn.html).join('')}</section></div></main>`;
   return documentHtml('Agent Sidecar', body, nonce, p.sessionKey, locale);
 }

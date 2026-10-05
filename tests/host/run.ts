@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { groupSessionTurns } from '../../packages/core/src/timeline';
@@ -253,6 +253,38 @@ export async function run() {
         assert.equal(webview.html, originalHtml, 'The document was not regenerated');
         assert.equal(JSON.stringify(kept.item), keptSnapshot); assert.equal(kept.panel.webview.html, keptHtml);
         assert.deepEqual(snapshot().map(group => [group.column, group.active]), before);
+      } finally { webview.postMessage = originalPost; }
+    });
+    await check('the window follows the session the integration says is its current one, and shows what it waits for', async () => {
+      // A state file as the integration hook writes it, naming this extension host as the window.
+      const directory = join(process.env.XDG_STATE_HOME!, 'agent-sidecar', 'sessions');
+      assert.ok(directory.startsWith(process.env.XDG_STATE_HOME!) && process.env.XDG_STATE_HOME!.includes('sidecar-product-host-'), 'Only this run\'s state directory');
+      const claude = api.candidates.find((candidate: any) => candidate.provider === 'claude');
+      await api.selectSession('codex:cx-fixture');
+      assert.equal(api.session.id, 'cx-fixture');
+      const webview = api.observer.webview as vscode.Webview, originalPost = webview.postMessage.bind(webview);
+      const deliveries: any[] = [];
+      webview.postMessage = message => { deliveries.push(message); return originalPost(message); };
+      try {
+        mkdirSync(directory, { recursive: true });
+        const file = join(directory, 'claude-cl-fixture.jsonl');
+        const line = (record: object) => appendFile(file, JSON.stringify({ v: 1, t: Date.now(), ...record }) + '\n');
+        await line({ e: 'start', provider: 'claude', session: 'cl-fixture', transcript: claude.file, cwd: vscode.workspace.workspaceFolders![0].uri.fsPath,
+          agentPid: process.pid, hostPid: process.pid, source: 'startup' });
+        await line({ e: 'prompt' });
+        const until = async (done: () => boolean, what: string) => {
+          const deadline = Date.now() + 8000;
+          while (!done() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+          assert.ok(done(), what);
+        };
+        await until(() => api.session?.id === 'cl-fixture', 'Followed the window\'s current session');
+        await line({ e: 'approval', tool: 'Write', summary: '/fixture/numbers.txt' });
+        await until(() => deliveries.some(message => message.type === 'observation' && message.turns.some((turn: any) => turn.html.includes('等你批准') && turn.html.includes('Write numbers.txt'))),
+          'The approval reached the newest turn');
+        await line({ e: 'stop' });
+        await until(() => deliveries.filter(message => message.type === 'observation').at(-1)?.turns.every((turn: any) => !turn.html.includes('等你批准')), 'The answered approval is gone');
+        result.followDelivery = { observations: deliveries.filter(message => message.type === 'observation').length };
+        await line({ e: 'end', reason: 'other' });
       } finally { webview.postMessage = originalPost; }
     });
     result.passed = true;

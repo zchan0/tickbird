@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Provider } from './model';
@@ -108,13 +108,52 @@ export function awaitingApproval(state: SessionState | undefined, transcriptLast
   return transcriptLastAt === undefined || transcriptLastAt <= state.approval.at;
 }
 
+const squash = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+/**
+ * The text still worth showing early: none once the session is idle, and none
+ * once the transcript holds the same words. Display ids do not match
+ * transcript ids, so the words decide.
+ */
+export function pendingDraft(state: SessionState | undefined, transcriptTexts: string[]): string | undefined {
+  const draft = state?.draft?.text;
+  if (!draft || state.phase === 'idle' || state.phase === 'ended') return undefined;
+  const head = squash(draft).slice(0, 40);
+  if (!head) return undefined;
+  return transcriptTexts.some(text => squash(text).startsWith(head)) ? undefined : draft;
+}
+
 const FILE = /^(claude|codex)-[A-Za-z0-9-]{1,80}\.jsonl$/;
 
-/** Every session the integration has recorded, read from disk once. */
-export async function readSessionStates(directory = sessionStateDirectory(), isAlive: (pid: number) => boolean = alive): Promise<SessionState[]> {
-  const names = await readdir(directory).catch(() => [] as string[]);
-  const states = await Promise.all(names.filter(name => FILE.test(name)).map(name =>
-    readFile(join(directory, name), 'utf8').then(text => foldSessionState(text, isAlive), () => undefined)));
+/** Folded files keyed by name, reused while the file's size and time stay the same. */
+export type SessionStateCache = Map<string, { mtimeMs: number; size: number; state?: SessionState }>;
+
+/**
+ * Every session the integration has recorded. With a cache, an unchanged file
+ * is not read again; whether its agent is still alive is checked every time.
+ */
+export async function readSessionStates(directory = sessionStateDirectory(), isAlive: (pid: number) => boolean = alive, cache?: SessionStateCache): Promise<SessionState[]> {
+  const names = (await readdir(directory).catch(() => [] as string[])).filter(name => FILE.test(name));
+  if (cache) for (const name of cache.keys()) if (!names.includes(name)) cache.delete(name);
+  const states = await Promise.all(names.map(async name => {
+    const file = join(directory, name);
+    try {
+      const info = await stat(file);
+      let cached = cache?.get(name);
+      if (!cached || cached.mtimeMs !== info.mtimeMs || cached.size !== info.size) {
+        cached = { mtimeMs: info.mtimeMs, size: info.size, state: foldSessionState(await readFile(file, 'utf8'), () => true) };
+        cache?.set(name, cached);
+      }
+      const folded = cached.state;
+      if (!folded) return undefined;
+      // Copies: a cached fold is never changed in place.
+      const state: SessionState = { ...folded };
+      if (state.phase !== 'ended' && state.agentPid && !isAlive(state.agentPid)) {
+        state.phase = 'ended'; delete state.approval; delete state.draft;
+      }
+      return state;
+    } catch { return undefined; }
+  }));
   return states.filter((state): state is SessionState => Boolean(state));
 }
 

@@ -77,8 +77,18 @@ function filesHtml(files: ChangedFile[], turnKey: string): string {
     + '</section>';
 }
 
+/**
+ * What the integration hooks add to the newest turn: the approval the agent is
+ * waiting for, and text already on screen but not yet in the transcript.
+ */
+export interface LiveExtras { approval?: { tool: string; summary: string }; draft?: string }
+
+/** A path names its file; anything else is kept, shortened by the row's own ellipsis. */
+const waitingFor = ({ tool, summary }: { tool: string; summary: string }): string =>
+  [tool, /^\/.+\/[^/]+$/.test(summary) ? summary.split('/').at(-1) : summary].filter(Boolean).join(' ');
+
 /** `latest` marks the newest turn: only it can still be running. */
-export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, latest = false, provider?: Provider): string {
+export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, latest = false, provider?: Provider, extras: LiveExtras = {}): string {
   const view = turnView(group, latest, provider);
   const { turn, live, label } = view;
   const segmentHtml = (segment: typeof turn.segments[number]) => {
@@ -93,22 +103,32 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, la
       + (chapter.records.length ? `<ol class="nodes">${chapter.records.map(render.record).join('')}</ol>` : '')
       + '</li>';
   };
+  // Waiting for the reader keeps the turn open, whatever its record clock says.
+  const waiting = latest && !turn.ended && extras.approval;
+  const open = live || Boolean(waiting);
   // Once a turn is over its whole process folds into the line the agents print
   // ("Crunched for 3m 12s"); the request, the files and the final answer stay.
-  const process = live ? turn.segments : view.process;
-  const answers = live ? [] : view.answers;
+  const process = open ? turn.segments : view.process;
+  const answers = open ? [] : view.answers;
   const { calls } = view;
   const stream = process.map(segmentHtml).join('');
   // One status line while the turn runs, as the agents show it. The clock counts
   // from the start of the turn, the same point Claude Code and Codex time from.
   const { verb } = view;
-  const tail = live
+  // Waiting for the reader replaces the status word: the agent is not working.
+  const tail = waiting
+    ? `<li class="cseg live-tail awaiting" data-observation-key="live-tail:${escapeHtml(group.key)}"><div class="ctail"><span class="cwait">等你批准</span>`
+      + `${waitingFor(waiting) ? ` · <span class="cwait-what">${escapeHtml(waitingFor(waiting))}</span>` : ''}</div></li>`
+    : live
     ? `<li class="cseg live-tail" data-observation-key="live-tail:${escapeHtml(group.key)}"><div class="ctail"><span class="shimmer" data-live-verb="${verb}">${verb}</span><span data-since="${escapeHtml(turn.start ?? turn.lastAt)}"></span></div></li>` : '';
+  // On screen in the agent, not yet in the transcript: shown faint until the record arrives.
+  const draft = live && extras.draft
+    ? `<li class="cseg cdraft-item" data-observation-key="draft:${escapeHtml(group.key)}"><div class="cdraft" title="Agent 正在显示，还没写入会话记录">${renderMarkdown(extras.draft)}</div></li>` : '';
   return `<section class="turn-panel chapter-turn tw-${view.toolWidth}" data-turn-panel="${escapeHtml(group.key)}"${live ? ` data-last-at="${escapeHtml(turn.lastAt)}"` : ''} aria-label="${label}">`
     + `<header class="turn-heading"><span class="tclock">${clock(turn.start)}</span><span class="tlabel">${label}</span>${turn.aborted ? '<span class="tstop">中断</span>' : live ? '<span class="tstop tidle">已停止</span>' : ''}<span class="tdur">${duration(turn.durationMs)}</span></header>`
     + (turn.request ? render.request(turn.request) : '')
     + filesHtml(turn.files, group.key)
-    + (live || !process.length ? `<ol class="cstream${view.chapters > 1 ? ' tracked' : ''}${tail ? ' live' : ''}">${stream}${tail}</ol>`
+    + (open || !process.length ? `<ol class="cstream${view.chapters > 1 ? ' tracked' : ''}${tail ? ' live' : ''}">${stream}${draft}${tail}</ol>`
       : `<details class="cprocess" data-fold="process:${escapeHtml(group.key)}"><summary>`
         + `<span class="cdone">${view.done}</span>`
         + `${calls ? `<span class="ccount-calls"> · ${calls} ${calls === 1 ? 'call' : 'calls'}</span>` : ''}<span class="cfold-arrow" aria-hidden="true">›</span></summary>`
@@ -187,6 +207,15 @@ export const chapterStyles = `
   .turn-panel[data-stale] .cstream > .live-tail::before { animation: none; background: var(--ink-4); }
   /* Hidden until the client sees the source is still being written: a day-old open turn is not running. */
   .turn-panel:not([data-fresh]) .live-tail { display: none; }
+  /* Waiting for the reader shows whatever the record clock says. */
+  .chapter-turn .cstream > .live-tail.awaiting { display: block; }
+  .chapter-turn .cstream.live > .live-tail.awaiting::before { background: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); animation: none; }
+  .cwait { font-weight: 600; color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); }
+  .cwait-what { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+  .cdraft { color: var(--ink-4); font-size: 12.5px; line-height: 1.55; }
+  /* Aligned with the chapters' text, without a rail dot of its own: it is not a step yet. */
+  :is(.cstream.tracked, [data-fresh] .cstream.live) > .cdraft-item { padding-left: 14px; }
+  .cdraft > :first-child { margin-top: 0; } .cdraft > :last-child { margin-bottom: 0; }
   /* The agent says it went idle without writing a stop: an interrupt before any output. */
   .tidle { display: none; }
   .turn-panel[data-idle] .tidle { display: inline; }

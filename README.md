@@ -41,6 +41,11 @@ npm run dev
    - 是否在运行：Claude Code 以它自己维护的 `~/.claude/sessions/<pid>.json`（busy / idle）为准，中断会立刻停下；Codex 以会话里的回合结束 / 中断事件为准。两者都取不到时，按记录是否仍在写入判断：10 分钟无新记录显示「无新记录」，6 小时以上不再显示运行状态。
    - 跟随：默认跟随最新一轮的末尾。向上滚动、点开记录会暂停；滚回末尾或点「回到最新」恢复；新一轮开始时自动恢复。正在跟随时，一轮结束会把最终回答滑到顶部。
    - 新内容逐项出现：先出 Agent 的话，再逐行出调用。
+   - **装了接入时**（见 `integration/`，安装流程待做）：
+     - 自动跟随本窗口最近活跃的会话（Claude Code、Codex 面板都算），不用手选；两个窗口开同一个项目也互不干扰。手动选了别的会话就暂停，工具栏「跟随当前会话」恢复。
+     - Agent 停下等你批准时，最新一轮末尾显示「等你批准 · 工具 文件」。
+     - Claude Code 的长回答在写进会话记录之前，就以淡色先显示出来。
+     - 没装接入时，正在进行的会话上方会提示一次，可以选「不再提示」。
    - 延迟：Claude Code 会把调用前的思考和正文攒着，等调用参数生成完才一起写入，所以这部分可能比它自己的界面晚几秒到十几秒；Sidecar 自身每次更新只要几十毫秒。
 6. 「覆盖记录」列出每条来源记录的去向：显示、合并、排除或待支持。
 
@@ -75,6 +80,7 @@ npm run test:coexistence
 ## 代码
 
 - `packages/core/src/`：数据模型、Claude / Codex 解析器（`claude.ts`、`codex.ts`）、章节模型（`chapters.ts`）、增量读取与实时会话（`record-stream.ts`、`live-session.ts`）、Agent 运行状态（`agent-status.ts`）、调用归纳与证据呈现（`actions.ts`、`tool-view.ts`、`presentation.ts`）。
+- `packages/core/src/session-state.ts`、`integration/`：接入 hook 写下的会话状态及其读取，格式见 [SESSION_STATE.md](./SESSION_STATE.md)。
 - `packages/vscode/src/`：扩展宿主（`extension.ts`）、渲染（`render.ts`、`chapter-view.ts`、`markdown.ts`、`code.ts`）、页面脚本（`live-client.ts`、`follow-client.ts`、`inline-client.ts`）。
 - `tests/`、`scripts/`：可重跑的测试、宿主验证与真实样本核对。
 

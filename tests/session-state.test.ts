@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { awaitingApproval, currentSession, foldSessionState, readSessionStates, sessionStateDirectory } from '../packages/core/src/session-state';
+import { awaitingApproval, currentSession, foldSessionState, pendingDraft, readSessionStates, sessionStateDirectory, type SessionStateCache } from '../packages/core/src/session-state';
 
 const live = () => true;
 const lines = (...records: object[]) => records.map(record => JSON.stringify({ v: 1, ...record })).join('\n') + '\n';
@@ -151,4 +151,26 @@ test('a new session prunes week-old files of dead agents and keeps live ones', (
   utimesSync(join(directory, 'claude-alive.jsonl'), old, old);
   run('claude', { hook_event_name: 'SessionStart', session_id: 'second' }, { XDG_STATE_HOME: home });
   assert.deepEqual(readdirSync(directory).sort(), ['claude-alive.jsonl', 'claude-first.jsonl', 'claude-recent.jsonl', 'claude-second.jsonl']);
+});
+
+test('a draft shows until the transcript holds the same words, and never once idle', () => {
+  const state = foldSessionState(lines(start(1), { t: 2, e: 'prompt' }, { t: 3, e: 'display', message: 'm1', index: 0, final: false, text: '1. **同时处理多个任务**：你可以一边' }), live)!;
+  assert.equal(pendingDraft(state, []), '1. **同时处理多个任务**：你可以一边');
+  assert.equal(pendingDraft(state, ['先看一下。']), '1. **同时处理多个任务**：你可以一边');
+  assert.equal(pendingDraft(state, ['1. **同时处理多个任务**：你可以一边编辑代码，一边看测试输出。\n2. …']), undefined);
+  assert.equal(pendingDraft({ ...state, phase: 'idle' }, []), undefined);
+  assert.equal(pendingDraft(undefined, []), undefined);
+});
+
+test('a cached read skips unchanged files but still notices a dead agent', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'sidecar-state-'));
+  writeFileSync(join(directory, 'claude-a.jsonl'), lines(start(1, { session: 'a', agentPid: 4242 }), { t: 2, e: 'prompt' }));
+  const cache: SessionStateCache = new Map();
+  let alive = true;
+  assert.equal((await readSessionStates(directory, () => alive, cache))[0].phase, 'working');
+  const cached = cache.get('claude-a.jsonl')!;
+  alive = false;
+  assert.equal((await readSessionStates(directory, () => alive, cache))[0].phase, 'ended');
+  assert.equal(cache.get('claude-a.jsonl'), cached, 'The unchanged file was not folded again');
+  assert.equal(cached.state!.phase, 'working', 'The cached fold was not changed in place');
 });

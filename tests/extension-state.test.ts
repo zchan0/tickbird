@@ -6,6 +6,11 @@ import type { SessionPickerEntry, SessionPickerMetadata } from '../packages/core
 import type { LiveUpdate, ObservationHealth } from '../packages/core/src/live-session';
 import { actionRows, actionRowSections, outlineTurn } from '../packages/core/src/outline';
 import { groupSessionTurns } from '../packages/core/src/timeline';
+import * as sessionStateModule from '../packages/core/src/session-state';
+import type { SessionState } from '../packages/core/src/session-state';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // This is an in-memory async/control-flow fixture, not a real VS Code host test.
 function deferred<T>() {
@@ -234,8 +239,12 @@ function harness(initialOrientation = 0) {
       },
     },
   };
+  const globals = new Map<string, unknown>();
+  // What the integration hooks would have written; tests set it directly.
+  const sessionStates: { list: SessionState[] } = { list: [] };
   const context = { extensionMode: 3, subscriptions: [] as Array<{ dispose(): unknown }>,
-    workspaceState: { get: (key: string) => state.get(key), update: async (key: string, value: unknown) => { state.set(key, value); } } };
+    workspaceState: { get: (key: string) => state.get(key), update: async (key: string, value: unknown) => { state.set(key, value); } },
+    globalState: { get: (key: string) => globals.get(key), update: async (key: string, value: unknown) => { globals.set(key, value); } } };
   const loader = Module as unknown as { _load(request: string, ...args: unknown[]): unknown };
   const original = loader._load;
   const entry = require.resolve('../packages/vscode/src/extension');
@@ -257,12 +266,14 @@ function harness(initialOrientation = 0) {
       sessionKey: (candidate: SessionCandidate) => `${candidate.provider}:${candidate.id}`,
     };
     if (request === '../../core/src/session-picker') return { createSessionPickerMetadata: () => metadata };
+    if (request === '../../core/src/session-state') return { ...sessionStateModule,
+      sessionStateDirectory: () => join(tmpdir(), 'sidecar-no-state-dir'), readSessionStates: async () => sessionStates.list.map(item => ({ ...item })) };
     return original.call(this, request, ...args);
   };
   let api: ReturnType<typeof import('../packages/vscode/src/extension').activate>;
   try { api = require(entry).activate(context); }
   finally { loader._load = original; delete require.cache[entry]; }
-  return { api, sources, state, documents, warnings, layoutWrites, metadata, metadataEntry, pickers, lives,
+  return { api, sources, state, documents, warnings, layoutWrites, metadata, metadataEntry, pickers, lives, sessionStates, globals,
     changeWorkspace(folders: Array<{ uri: { scheme: string; fsPath: string } }> = []) { vscode.workspace.workspaceFolders = folders; workspaceChange.fire(); },
     setFolders(folders: Array<{ uri: { scheme: string; fsPath: string } }>) { vscode.workspace.workspaceFolders = folders; },
     executed, get discoveries() { return discoveries; },
@@ -817,5 +828,104 @@ test('coverage report links each original action to semantic detail rows without
     }
     assert.ok(!doc.text.includes('独立输出'));
     assert.ok(!doc.text.includes('来源范围'));
+  } finally { host.dispose(); }
+});
+
+// A transcript the integration points at must exist before the window follows it.
+const transcript = () => { const file = join(mkdtempSync(join(tmpdir(), 'sidecar-follow-')), 'b.jsonl'); writeFileSync(file, '{}\n'); return file; };
+const liveState = (session: string, extra: Partial<SessionState> = {}): SessionState => ({ provider: session === 'a' ? 'codex' : 'claude', session, transcript: transcript(),
+  cwd: '/fixture', agentPid: process.pid, hostPid: process.pid, startedAt: 1, activeAt: 5, phase: 'working', ...extra });
+const tick = () => new Promise(resolve => setImmediate(resolve));
+const posted = (host: ReturnType<typeof harness>, type: string) => (host.api.observer as any).webview.messages.filter((message: any) => message.type === type);
+/** The follow button as the reader sees it: the page's HTML, then any later follow message. */
+const followButtonShown = (host: ReturnType<typeof harness>, messagesBefore: number) => {
+  const html: string = (host.api.observer as any).webview.html;
+  const later = posted(host, 'follow').slice(messagesBefore);
+  return later.length ? later.at(-1).paused : !/data-action="resumeFollow"[^>]* hidden>/.test(html.slice(html.indexOf('<main')));
+};
+
+test('the window follows its own current session, and only that one', async () => {
+  const host = harness();
+  try {
+    await host.ready();
+    assert.equal(host.api.session?.id, 'a');
+    host.sessionStates.list = [liveState('b', { hostPid: process.pid + 1 })];
+    await host.api.refreshStates();
+    assert.equal(host.api.session?.id, 'a', 'Another window\u2019s session is not followed');
+    host.sessionStates.list = [liveState('b', { cwd: '/elsewhere' })];
+    await host.api.refreshStates();
+    assert.equal(host.api.session?.id, 'a', 'Another project\u2019s session is not followed');
+    host.sessionStates.list = [liveState('b', { transcript: '/fixture/not-written-yet.jsonl' })];
+    await host.api.refreshStates();
+    assert.equal(host.api.session?.id, 'a', 'Nothing to read before the agent writes its transcript');
+    host.sessionStates.list = [liveState('a', { activeAt: 3 }), liveState('b', { activeAt: 9 })];
+    await host.api.refreshStates();
+    assert.equal(host.api.session?.id, 'b', 'The most recently active of this window\u2019s sessions');
+    assert.deepEqual(host.warnings, []);
+  } finally { host.dispose(); }
+});
+
+test('choosing another session pauses following until the reader resumes it', async () => {
+  const host = harness();
+  try {
+    await host.ready();
+    host.sessionStates.list = [liveState('b')];
+    await host.api.refreshStates();
+    assert.equal(host.api.session?.id, 'b');
+    const choosing = host.command('agentSidecar.chooseSession');
+    await tick();
+    host.pickers.at(-1)!.accept('codex:a');
+    await choosing;
+    assert.equal(host.api.session?.id, 'a');
+    assert.equal(host.api.following, false);
+    assert.equal(followButtonShown(host, 0), true);
+    host.sessionStates.list = [liveState('b', { activeAt: 50 })];
+    await host.api.refreshStates();
+    assert.equal(host.api.session?.id, 'a', 'New activity does not override the reader\u2019s choice');
+    const before = posted(host, 'follow').length;
+    host.receive({ type: 'resumeFollow' });
+    for (let i = 0; i < 5; i++) await tick();
+    assert.equal(host.api.session?.id, 'b');
+    assert.equal(followButtonShown(host, before), false);
+    const count = posted(host, 'follow').length;
+    for (let i = 0; i < 3; i++) await host.api.refreshStates();
+    assert.equal(posted(host, 'follow').length, count, 'An unchanged follow state is not posted again');
+  } finally { host.dispose(); }
+});
+
+test('an approval and text on screen reach the newest turn without a new record', async () => {
+  const host = harness();
+  try {
+    await host.ready();
+    host.sessionStates.list = [liveState('a', { phase: 'waiting', approval: { tool: 'Write', summary: '/fixture/numbers.txt', at: 1 } })];
+    await host.api.refreshStates(); for (let i = 0; i < 3; i++) await tick();
+    const waiting = posted(host, 'observation').at(-1);
+    assert.ok(waiting.turns.some((turn: any) => turn.html.includes('等你批准') && turn.html.includes('Write numbers.txt')));
+    host.sessionStates.list = [liveState('a', { phase: 'idle' })];
+    await host.api.refreshStates(); for (let i = 0; i < 3; i++) await tick();
+    assert.ok(!posted(host, 'observation').at(-1).turns.some((turn: any) => turn.html.includes('等你批准')), 'Answered: the wait is gone');
+    const count = posted(host, 'observation').length;
+    await host.api.refreshStates(); for (let i = 0; i < 3; i++) await tick();
+    assert.equal(posted(host, 'observation').length, count, 'Unchanged state posts nothing');
+  } finally { host.dispose(); }
+});
+
+test('an active session with no integration state suggests the integration once, until dismissed', async () => {
+  const host = harness();
+  try {
+    const load = host.sources.load;
+    host.sources.load = async candidate => { const snapshot = await load(candidate); snapshot.items[0].timestamp = new Date().toISOString(); return snapshot; };
+    await host.ready();
+    await host.api.refreshStates();
+    assert.equal(posted(host, 'integrationHint').at(-1)?.show, true);
+    host.sessionStates.list = [liveState('a')];
+    await host.api.refreshStates();
+    assert.equal(posted(host, 'integrationHint').at(-1).show, false, 'Installed: nothing to suggest');
+    host.sessionStates.list = [];
+    await host.api.refreshStates();
+    host.receive({ type: 'dismissHint' });
+    for (let i = 0; i < 3; i++) await tick();
+    assert.equal(posted(host, 'integrationHint').at(-1).show, false);
+    assert.equal(host.globals.get('integrationHintDismissed'), true);
   } finally { host.dispose(); }
 });

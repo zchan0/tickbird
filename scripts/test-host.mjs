@@ -42,7 +42,7 @@ async function launch(name, tests, folder) {
   const args = ['--new-window', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`, `--extensions-dir=${extensions}`,
     `--extensionDevelopmentPath=${root}`, `--extensionTestsPath=${join(root, tests)}`, ...(folder ? [folder] : [])];
   const child = spawn(code, args, { stdio: 'inherit', env: { ...process.env, SIDECAR_TEST_RESULT: resultFile,
-    SIDECAR_TEST_CODEX_ROOT: codex, SIDECAR_TEST_CLAUDE_ROOT: claude } });
+    SIDECAR_TEST_CODEX_ROOT: codex, SIDECAR_TEST_CLAUDE_ROOT: claude, XDG_STATE_HOME: join(runRoot, 'state') } });
   console.log(JSON.stringify({ run: name, runRoot, resultFile, launcherPid: child.pid }));
   const exitCode = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });
   let result;
