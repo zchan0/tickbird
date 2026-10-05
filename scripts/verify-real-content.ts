@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { parseCodex } from '../packages/core/src/codex';
 import { parseClaude } from '../packages/core/src/claude';
 import type { ItemKind, Provider, SessionData, TimelineItem } from '../packages/core/src/model';
+import { sampleFile } from './sample-file';
 
 // Independent fixed-source checks. No parser helpers, current files, referenced
 // URLs, child output paths, or private instruction/reasoning bodies are read.
@@ -27,6 +28,8 @@ const samples: Sample[] = [
   { name: 'CL2', provider: 'claude', file: '/Users/me/.claude/projects/-Users-me-Developer-agent-sidecar/00000000-0000-4000-8000-0000000000a3.jsonl', lines: 244, hash: '3a610a4c728c07d49d7272279d44a8c233853e5c1b01d2392105e89e66331925' },
   { name: 'CL2-child', provider: 'claude', file: '/Users/me/.claude/projects/-Users-me-Developer-agent-sidecar/00000000-0000-4000-8000-0000000000a3/subagents/agent-a0c51d6f6a986ff22.jsonl', lines: 21, hash: '45ff27a95a7b7fe317dbf03658142ed4692f1c4db7812af0a5093d34a808c7f6' },
 ];
+// Codex archives old rollouts: look there too.
+for (const sample of samples) sample.file = sampleFile(sample.file);
 interface Loaded { sample: Sample; rows: Obj[]; normalized: SessionData }
 interface Origin { line: number; block?: number; nestedBlock?: number; field: string; callId?: string; relatedLines?: number[] }
 interface Check { id: string; sample: string; provider: Provider; category: string; source: Origin & { file: string }; comparison: string; passed: boolean; metadata: Obj }

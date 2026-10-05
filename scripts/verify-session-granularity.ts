@@ -6,7 +6,8 @@ import { groupSessionTurns } from '../packages/core/src/timeline';
 import { outlineCoverage, visibleTurnGroups } from '../packages/core/src/outline';
 
 async function main() {
-  const projectPath = resolve(__dirname, '../..');
+  // A worktree has no sessions of its own: SIDECAR_PROJECT_PATH names the project to check.
+  const projectPath = process.env.SIDECAR_PROJECT_PATH ?? resolve(__dirname, '../..');
   const discovery = await discoverSessions({ projectPath });
   const keys = discovery.candidates.map(sessionKey);
   assert.equal(new Set(keys).size, keys.length, 'Session candidates must be unique by provider and session ID');

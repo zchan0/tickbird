@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { parseCodex } from '../packages/core/src/codex';
 import { parseClaude } from '../packages/core/src/claude';
 import type { Provider } from '../packages/core/src/model';
+import { sampleFile } from './sample-file';
 
 const projectPath = '/Users/me/Developer/agent-sidecar';
 const samples: Array<{ name: string; provider: Provider; file: string; lines: number; sha256: string }> = [
@@ -12,6 +13,8 @@ const samples: Array<{ name: string; provider: Provider; file: string; lines: nu
   { name: 'CL2', provider: 'claude', file: '/Users/me/.claude/projects/-Users-me-Developer-agent-sidecar/00000000-0000-4000-8000-0000000000a3.jsonl', lines: 244, sha256: '3a610a4c728c07d49d7272279d44a8c233853e5c1b01d2392105e89e66331925' },
   { name: 'CL2-child', provider: 'claude', file: '/Users/me/.claude/projects/-Users-me-Developer-agent-sidecar/00000000-0000-4000-8000-0000000000a3/subagents/agent-a0c51d6f6a986ff22.jsonl', lines: 21, sha256: '45ff27a95a7b7fe317dbf03658142ed4692f1c4db7812af0a5093d34a808c7f6' }
 ];
+// Codex archives old rollouts: look there too.
+for (const sample of samples) sample.file = sampleFile(sample.file);
 async function main() {
   const results = [];
   for (const sample of samples) {
