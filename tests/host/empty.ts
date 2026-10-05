@@ -17,7 +17,7 @@ export async function run() {
     catch (error) { result.checks.push({ name, passed: false, error: String(error) }); throw error; }
   };
   try {
-    const extension = vscode.extensions.getExtension('agent-sidecar-local.agent-sidecar');
+    const extension = vscode.extensions.getExtension('zchan0.agent-sidecar');
     assert.ok(extension);
     const api = await extension.activate();
     await check('an empty window opens the sidebar view with its reason and an Open Folder action', async () => {

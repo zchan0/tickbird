@@ -88,7 +88,7 @@ test('a window follows its own most recently active live session', async () => {
 });
 
 // The hook runs as the agents run it: a separate node process with JSON on stdin.
-const hook = resolve(__dirname, '../../integration/scripts/hook.mjs');
+const hook = resolve(__dirname, '../../plugins/sidecar-state/scripts/hook.mjs');
 function run(provider: string, input: object, env: NodeJS.ProcessEnv, pid = process.pid) {
   return spawnSync(process.execPath, [hook, provider, String(pid)], { input: JSON.stringify(input), env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env }, encoding: 'utf8' });
 }

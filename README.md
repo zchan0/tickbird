@@ -29,12 +29,12 @@ npm run install:vscode
 它做三件事，每一步都会打印结果，可以重复运行来更新：
 
 1. 用 esbuild 把扩展打成单文件，打包为 `build/agent-sidecar-<版本>.vsix`，用 `code --install-extension` 装进 VS Code。已打开的窗口执行 **Developer: Reload Window** 后生效。
-2. 把本仓库登记为 Claude Code 的本地插件市场（`.claude-plugin/marketplace.json`），装上接入 `agent-sidecar@agent-sidecar-local`。新开的会话生效，`/plugin` 里可以停用。
+2. 把本仓库登记为 Claude Code 的本地插件市场（`.claude-plugin/marketplace.json`），装上插件 `sidecar-state@agent-sidecar`。新开的会话生效，`/plugin` 里可以停用。
 3. 把本仓库登记为 Codex 的本地插件市场（`.agents/plugins/marketplace.json`），装上同一个接入。**还要在 Codex CLI 里执行一次 `/hooks`，按 `t` 信任它的 hook**，否则 Codex 会静默跳过。
 
-装进 Claude Code 和 Codex 的不是终端版，而是接入：一组只写会话状态的 hook，VS Code 版靠它自动跟随会话、显示「等你批准」。以后的终端版也用同一个接入，不会再装第二个。
+装进 Claude Code 和 Codex 的是插件 `sidecar-state`：一组只写会话状态的 hook，VS Code 版靠它自动跟随会话、显示「等你批准」，以后的终端版也用它。终端版另外还会装一个 `sidecar-split`，只负责在 kitty 里自动分屏；只装 VS Code 版时不会装它。
 
-`npm run package:vscode` 只打包，不安装。产品和接入用同一个版本号，用 `npm run set-version -- x.y.z` 修改；改了 `integration/` 后必须升版本再安装，见 [integration/README.md](./integration/README.md)。
+`npm run package:vscode` 只打包，不安装。产品和接入用同一个版本号，用 `npm run set-version -- x.y.z` 修改；改了 `plugins/` 下的插件后必须升版本再安装，见 [plugins/sidecar-state/README.md](./plugins/sidecar-state/README.md)。
 
 ## 使用
 
@@ -57,7 +57,7 @@ npm run install:vscode
    - 是否在运行：Claude Code 以它自己维护的 `~/.claude/sessions/<pid>.json`（busy / idle）为准，中断会立刻停下；Codex 以会话里的回合结束 / 中断事件为准。两者都取不到时，按记录是否仍在写入判断：10 分钟无新记录显示「无新记录」，6 小时以上不再显示运行状态。
    - 跟随：默认跟随最新一轮的末尾。向上滚动、点开记录会暂停；滚回末尾或点「回到最新」恢复；新一轮开始时自动恢复。正在跟随时，一轮结束会把最终回答滑到顶部。
    - 新内容逐项出现：先出 Agent 的话，再逐行出调用。
-   - **装了接入时**（见 `integration/`，安装流程待做）：
+   - **装了 `sidecar-state` 时**（`npm run install:vscode` 会装上）：
      - 自动跟随本窗口最近活跃的会话（Claude Code、Codex 面板都算），不用手选；两个窗口开同一个项目也互不干扰。手动选了别的会话就暂停，工具栏「跟随当前会话」恢复。
      - Agent 停下等你批准时，最新一轮末尾显示「等你批准 · 工具 文件」。
      - Claude Code 的长回答在写进会话记录之前，就以淡色先显示出来。
@@ -96,7 +96,7 @@ npm run test:coexistence
 ## 代码
 
 - `packages/core/src/`：数据模型、Claude / Codex 解析器（`claude.ts`、`codex.ts`）、章节模型（`chapters.ts`）、增量读取与实时会话（`record-stream.ts`、`live-session.ts`）、Agent 运行状态（`agent-status.ts`）、调用归纳与证据呈现（`actions.ts`、`tool-view.ts`、`presentation.ts`）。
-- `packages/core/src/session-state.ts`、`integration/`：接入 hook 写下的会话状态及其读取，格式见 [SESSION_STATE.md](./SESSION_STATE.md)。
+- `plugins/sidecar-state/`、`packages/core/src/session-state.ts`：给 Claude Code 和 Codex 的会话状态插件，及其读取，格式见 [SESSION_STATE.md](./SESSION_STATE.md)。
 - `packages/vscode/src/`：扩展宿主（`extension.ts`）、渲染（`render.ts`、`chapter-view.ts`、`markdown.ts`、`code.ts`）、页面脚本（`live-client.ts`、`follow-client.ts`、`inline-client.ts`）。
 - `tests/`、`scripts/`：可重跑的测试、宿主验证与真实样本核对。
 

@@ -14,7 +14,9 @@ const packageOnly = process.argv.includes('--package-only');
 const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const stage = join(root, 'build', 'vsix');
 const vsix = join(root, 'build', `${manifest.name}-${manifest.version}.vsix`);
-const MARKETPLACE = 'agent-sidecar-local', PLUGIN = 'agent-sidecar', ID = `${PLUGIN}@${MARKETPLACE}`;
+const MARKETPLACE = 'agent-sidecar', PLUGIN = 'sidecar-state', ID = `${PLUGIN}@${MARKETPLACE}`;
+// Names used before 2026-10-05; removed on sight so a reinstall leaves one copy.
+const OLD = { extension: 'agent-sidecar-local.agent-sidecar', marketplace: 'agent-sidecar-local', id: 'agent-sidecar@agent-sidecar-local' };
 let failed = false;
 
 const run = (command, args, options = {}) => {
@@ -40,6 +42,7 @@ if (!packaged.ok || packageOnly) process.exit(packaged.ok ? 0 : 1);
 
 // 2. VS Code.
 const code = process.env.SIDECAR_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+if (run(code, ['--list-extensions']).out.split('\n').includes(OLD.extension)) report(run(code, ['--uninstall-extension', OLD.extension]).ok, `移除旧扩展 ${OLD.extension}`);
 const extension = run(code, ['--install-extension', vsix, '--force']);
 report(extension.ok, 'VS Code 扩展', extension.ok ? '已安装；已打开的窗口执行 Developer: Reload Window 后生效' : extension.out);
 
@@ -47,6 +50,8 @@ report(extension.ok, 'VS Code 扩展', extension.ok ? '已安装；已打开的�
 const claudeMarkets = json('claude', ['plugin', 'marketplace', 'list', '--json']);
 if (!claudeMarkets) report(false, 'Claude Code 接入', '没有找到 claude 命令，跳过');
 else {
+  if ((json('claude', ['plugin', 'list', '--json']) ?? []).some(item => item.id === OLD.id)) report(run('claude', ['plugin', 'uninstall', OLD.id]).ok, `移除旧插件 ${OLD.id}（Claude Code）`);
+  if (claudeMarkets.some(item => item.name === OLD.marketplace)) report(run('claude', ['plugin', 'marketplace', 'remove', OLD.marketplace]).ok, `移除旧市场 ${OLD.marketplace}（Claude Code）`);
   const market = claudeMarkets.some(item => item.name === MARKETPLACE)
     ? run('claude', ['plugin', 'marketplace', 'update', MARKETPLACE]) : run('claude', ['plugin', 'marketplace', 'add', root]);
   const installed = (json('claude', ['plugin', 'list', '--json']) ?? []).some(item => item.id === ID);
@@ -58,11 +63,18 @@ else {
 const codexMarkets = json('codex', ['plugin', 'marketplace', 'list', '--json']);
 if (!codexMarkets) report(false, 'Codex 接入', '没有找到 codex 命令，跳过');
 else {
-  const known = (codexMarkets.marketplaces ?? []).some(item => item.name === MARKETPLACE);
+  // Codex lists a marketplace by the name in its manifest, not the key it was added under:
+  // after a rename the old entry looks like the new one. Try the removals outright, then re-read.
+  // `codex plugin remove` reports success even for a plugin that is not there: run it, do not report it.
+  run('codex', ['plugin', 'remove', OLD.id]);
+  const removedMarket = run('codex', ['plugin', 'marketplace', 'remove', OLD.marketplace]).ok;
+  if (removedMarket) report(true, `移除旧市场 ${OLD.marketplace}（Codex）；旧插件的 hook 信任记录留在 ~/.codex/config.toml，不影响使用`);
+  const markets = removedMarket ? json('codex', ['plugin', 'marketplace', 'list', '--json']) ?? {} : codexMarkets;
+  const known = (markets.marketplaces ?? []).some(item => item.name === MARKETPLACE);
   const market = known ? { ok: true } : run('codex', ['plugin', 'marketplace', 'add', root]);
   const plugin = market.ok && run('codex', ['plugin', 'add', ID]);
   report(Boolean(market.ok && plugin?.ok), 'Codex 接入', !market.ok ? market.out : plugin.ok ? '已安装' : lastLine(plugin.out));
-  if (market.ok && plugin?.ok) console.log('  还差一步：在 Codex CLI 里执行 /hooks，按 t 信任 agent-sidecar 的 hook。未信任时 Codex 会静默跳过它们。');
+  if (market.ok && plugin?.ok) console.log('  还差一步：在 Codex CLI 里执行 /hooks，按 t 信任 sidecar-state 的 hook。未信任时 Codex 会静默跳过它们。');
 }
 
 process.exit(failed ? 1 : 0);

@@ -28,7 +28,7 @@ export async function run() {
     catch (error) { result.checks.push({ name, passed: false, error: String(error), groups: snapshot() }); throw error; }
   };
   try {
-    const extension = vscode.extensions.getExtension('agent-sidecar-local.agent-sidecar');
+    const extension = vscode.extensions.getExtension('zchan0.agent-sidecar');
     assert.ok(extension);
     const api = await extension.activate();
     const placeholder = await vscode.workspace.openTextDocument(join(vscode.workspace.workspaceFolders![0].uri.fsPath, 'AGENT_PLACEHOLDER.txt'));

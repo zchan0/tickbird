@@ -1,5 +1,5 @@
 {
-  "name": "agent-sidecar",
+  "name": "sidecar-state",
   "version": "0.2.0",
   "description": "Agent Sidecar 的接入：把每个会话在做什么（属于哪个窗口、是否在等你批准、屏幕上正在显示的文字）写到本机文件，供 Agent Sidecar 的 VS Code 版和终端版读取。本身不显示界面，不改变 Agent 的行为。",
   "hooks": {

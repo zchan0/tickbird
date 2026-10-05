@@ -62,7 +62,7 @@ export async function run() {
     assert.equal(process.env.SIDECAR_TEST_CLAUDE_ROOT, undefined, 'Real-source test must not use Claude fixture overrides');
     assert.equal(vscode.workspace.workspaceFolders?.length, 1);
     assert.equal(vscode.workspace.workspaceFolders?.[0].uri.fsPath, process.env.SIDECAR_COEXISTENCE_PROJECT);
-    const sidecar = vscode.extensions.getExtension<SidecarApi>('agent-sidecar-local.agent-sidecar');
+    const sidecar = vscode.extensions.getExtension<SidecarApi>('zchan0.agent-sidecar');
     assert.ok(sidecar);
     api = await sidecar.activate();
     const ownApi = api;

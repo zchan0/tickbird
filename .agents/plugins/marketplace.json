@@ -1,11 +1,19 @@
 {
-  "name": "agent-sidecar-local",
-  "interface": { "displayName": "Agent Sidecar (local)" },
+  "name": "agent-sidecar",
+  "interface": {
+    "displayName": "Agent Sidecar"
+  },
   "plugins": [
     {
-      "name": "agent-sidecar",
-      "source": { "source": "local", "path": "./integration" },
-      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "name": "sidecar-state",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sidecar-state"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
       "category": "Productivity"
     }
   ]

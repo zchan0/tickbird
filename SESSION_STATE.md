@@ -1,6 +1,6 @@
 # 会话状态（接入 → 显示端）
 
-状态：已确认（2026-10-05）。实现：`integration/`（hook 与两份插件清单）、`packages/core/src/session-state.ts`（读取与折叠）。
+状态：已确认（2026-10-05）。实现：插件 `sidecar-state`（`plugins/sidecar-state/`，hook 与两份插件清单）、`packages/core/src/session-state.ts`（读取与折叠）。
 
 接入是给 Claude Code 和 Codex 的一组 hook。它只做一件事：把「当前有哪些会话、各自在做什么」写到本机。VS Code 版和终端版读这些文件，决定跟随哪个会话、显示什么状态。接入不显示任何东西，也不改变 Agent 的任何行为。
 
