@@ -1,0 +1,12 @@
+{
+  "name": "agent-sidecar-local",
+  "interface": { "displayName": "Agent Sidecar (local)" },
+  "plugins": [
+    {
+      "name": "agent-sidecar",
+      "source": { "source": "local", "path": "./integration" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}

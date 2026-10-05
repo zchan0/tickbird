@@ -6,9 +6,14 @@
 - 状态文件在 `~/.local/state/agent-sidecar/sessions/`（或 `$XDG_STATE_HOME/agent-sidecar/sessions/`），一个会话一个文件，权限 0600。
 - 只依赖 Node 自带模块。
 
+## 版本
+
+两份清单（`.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`）的 `version` 必须一起改。Claude Code 和 Codex 都按版本号缓存已装的插件：改了 `integration/` 里任何文件，都要把版本号加一，再运行 `npm run install:vscode`，否则已装的插件不会更新。Codex 的 hook 定义一改，还要在 `/hooks` 里重新信任。
+
 ## 本地试用
 
 - Claude Code：`claude --plugin-dir <仓库>/integration`
-- Codex：插件要从插件市场安装，安装流程在 VS Code 版和终端版的私有安装里做。装上后要在 Codex CLI 里执行一次 `/hooks` 信任这些 hook，否则 Codex 会静默跳过它们。
+- 正式安装：`npm run install:vscode` 把本仓库登记为 Claude Code 和 Codex 的本地插件市场（`.claude-plugin/marketplace.json`、`.agents/plugins/marketplace.json`），并装上接入。
+- Codex 装上后要在 Codex CLI 里执行一次 `/hooks`、按 `t` 信任这些 hook，否则 Codex 会静默跳过它们。Codex 把 `SessionEnd`、`Interrupt` 的超时限制在 3 秒，清单里按此设置。
 
 停用：在 Claude Code 的 `/plugin`、Codex 的 `/plugins` 里关掉 agent-sidecar。

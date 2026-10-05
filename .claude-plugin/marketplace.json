@@ -1,0 +1,12 @@
+{
+  "name": "agent-sidecar-local",
+  "owner": { "name": "zchan0" },
+  "metadata": { "description": "Agent Sidecar integration, installed from this checkout by npm run install:vscode." },
+  "plugins": [
+    {
+      "name": "agent-sidecar",
+      "source": "./integration",
+      "description": "Writes what each session is doing to a local file that Agent Sidecar reads. Shows nothing and changes nothing in the agent."
+    }
+  ]
+}

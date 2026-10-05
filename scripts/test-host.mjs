@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+// SIDECAR_EXTENSION_PATH runs the same checks against another build, such as the packaged build/vsix.
+const extensionPath = process.env.SIDECAR_EXTENSION_PATH || root;
 const runRoot = await mkdtemp(join(tmpdir(), 'sidecar-product-host-'));
 const fixture = join(runRoot, 'workspace');
 const userData = join(runRoot, 'user-data');
@@ -40,7 +42,7 @@ const code = process.env.SIDECAR_CODE_CLI || '/Applications/Visual Studio Code.a
 async function launch(name, tests, folder) {
   const resultFile = join(runRoot, `result-${name}.json`);
   const args = ['--new-window', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`, `--extensions-dir=${extensions}`,
-    `--extensionDevelopmentPath=${root}`, `--extensionTestsPath=${join(root, tests)}`, ...(folder ? [folder] : [])];
+    `--extensionDevelopmentPath=${extensionPath}`, `--extensionTestsPath=${join(root, tests)}`, ...(folder ? [folder] : [])];
   const child = spawn(code, args, { stdio: 'inherit', env: { ...process.env, SIDECAR_TEST_RESULT: resultFile,
     SIDECAR_TEST_CODEX_ROOT: codex, SIDECAR_TEST_CLAUDE_ROOT: claude, XDG_STATE_HOME: join(runRoot, 'state') } });
   console.log(JSON.stringify({ run: name, runRoot, resultFile, launcherPid: child.pid }));

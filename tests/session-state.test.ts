@@ -139,6 +139,15 @@ test('the hook ignores what it cannot place and never fails the agent', () => {
   assert.equal(run('claude', { hook_event_name: 'SessionStart', session_id: 'abc' }, { XDG_STATE_HOME: home }).status, 0);
 });
 
+test('only a start opens a session file; an end without a start leaves nothing', () => {
+  const home = mkdtempSync(join(tmpdir(), 'sidecar-hook-'));
+  const directory = sessionStateDirectory({ XDG_STATE_HOME: home });
+  // Codex quits before its first message: SessionEnd with no SessionStart.
+  run('codex', { hook_event_name: 'SessionEnd', session_id: 'never-started', reason: 'other' }, { XDG_STATE_HOME: home });
+  run('codex', { hook_event_name: 'UserPromptSubmit', session_id: 'never-started' }, { XDG_STATE_HOME: home });
+  assert.ok(!existsSync(directory) || readdirSync(directory).length === 0);
+});
+
 test('a new session prunes week-old files of dead agents and keeps live ones', () => {
   const home = mkdtempSync(join(tmpdir(), 'sidecar-hook-'));
   const directory = sessionStateDirectory({ XDG_STATE_HOME: home });

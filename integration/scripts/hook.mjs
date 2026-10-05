@@ -5,7 +5,7 @@
 // Appends one line per event to the session's state file; see SESSION_STATE.md.
 // It prints nothing, because a SessionStart hook's stdout becomes the model's
 // context, and it never fails: a broken Sidecar must not get in the agent's way.
-import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -80,9 +80,13 @@ export function handle(provider, agentPid, input, env = process.env, now = Date.
   const line = record(provider, agentPid, input, now, env);
   if (!line) return;
   const directory = stateDirectory(env);
+  const file = join(directory, `${provider}-${session}.jsonl`);
+  // Only a start opens a session's file. Codex ends a session it never started
+  // when it quits before the first message; that leaves nothing to record.
+  if (line.e !== 'start' && !existsSync(file)) return;
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   // One short line per append: concurrent hooks never interleave inside a line.
-  appendFileSync(join(directory, `${provider}-${session}.jsonl`), JSON.stringify(line) + '\n', { mode: 0o600 });
+  appendFileSync(file, JSON.stringify(line) + '\n', { mode: 0o600 });
   if (line.e === 'start') prune(directory, now);
 }
 

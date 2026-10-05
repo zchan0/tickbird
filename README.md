@@ -18,7 +18,21 @@ npm run dev
 
 改了代码后执行 `npm run build`，再在开发窗口执行 **Developer: Reload Window** 才会生效；Sidecar 里的「刷新」只重新读取会话，不重新加载代码。
 
-也可以在本项目按 F5，选择 `Run Agent Sidecar Development Host`。
+也可以在本项目按 F5，选择 `Run Agent Sidecar Development Host`。在 worktree 里开发时，用 `npm run dev -- <项目目录>` 打开有会话的项目。
+
+### 安装到自己的 VS Code（私有，不经过扩展市场）
+
+```sh
+npm run install:vscode
+```
+
+它做三件事，每一步都会打印结果，可以重复运行来更新：
+
+1. 用 esbuild 把扩展打成单文件，打包为 `build/agent-sidecar-<版本>.vsix`，用 `code --install-extension` 装进 VS Code。已打开的窗口执行 **Developer: Reload Window** 后生效。
+2. 把本仓库登记为 Claude Code 的本地插件市场（`.claude-plugin/marketplace.json`），装上接入 `agent-sidecar@agent-sidecar-local`。新开的会话生效，`/plugin` 里可以停用。
+3. 把本仓库登记为 Codex 的本地插件市场（`.agents/plugins/marketplace.json`），装上同一个接入。**还要在 Codex CLI 里执行一次 `/hooks`，按 `t` 信任它的 hook**，否则 Codex 会静默跳过。
+
+`npm run package:vscode` 只打包，不安装。改了 `integration/` 后，要把两份插件清单的版本号加一再安装，见 [integration/README.md](./integration/README.md)。
 
 ## 使用
 

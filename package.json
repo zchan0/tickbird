@@ -70,8 +70,10 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "dev": "npm run build && node scripts/launch-development.mjs",
+    "package:vscode": "node scripts/install-vscode.mjs --package-only",
+    "install:vscode": "node scripts/install-vscode.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "build:realtime": "tsc -p tsconfig.realtime.json",
     "test:realtime": "npm run build:realtime && node --test .test-artifacts/realtime-build/tests/*.test.js",
@@ -93,6 +95,8 @@
     "@types/markdown-it": "14.2.0",
     "@types/node": "22.20.1",
     "@types/vscode": "1.96.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
     "jsdom": "^26.1.0"
   }
 }

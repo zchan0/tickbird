@@ -1,6 +1,6 @@
 {
   "name": "agent-sidecar",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Writes what each session is doing (its window, approvals it waits for, text on screen) to a local file that Agent Sidecar reads. Shows nothing and changes nothing in the agent.",
   "hooks": {
     "hooks": {
@@ -54,7 +54,7 @@
             {
               "type": "command",
               "command": "node \"$PLUGIN_ROOT/scripts/hook.mjs\" codex \"$PPID\"",
-              "timeout": 5
+              "timeout": 3
             }
           ]
         }
@@ -65,7 +65,7 @@
             {
               "type": "command",
               "command": "node \"$PLUGIN_ROOT/scripts/hook.mjs\" codex \"$PPID\"",
-              "timeout": 5
+              "timeout": 3
             }
           ]
         }
