@@ -1699,7 +1699,7 @@ test('a turn that is over folds its whole process into the line the agent prints
 });
 
 test('the loading word is the agent\'s own: one of Claude Code\'s verbs per turn, Working for Codex', async () => {
-  const { statusVerb } = await import('../packages/vscode/src/verbs');
+  const { statusVerb } = await import('../packages/core/src/verbs');
   assert.equal(statusVerb('codex', 'turn:a'), 'Working');
   const verb = statusVerb('claude', 'turn:a');
   assert.match(verb, /^[A-Z][\w'-]+ing'?…$|^Flambéing…$|^Sautéing…$|^Beboppin'…$/);

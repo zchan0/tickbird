@@ -1,4 +1,4 @@
-import type { Provider } from '../../core/src/model';
+import type { Provider } from './model';
 
 /**
  * The status word each agent shows while it works. Claude Code picks one of

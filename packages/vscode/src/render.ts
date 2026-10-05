@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { describeDisplayAction, presentEvidence, parsePatch, publicLabels, toolOutputContents, invocationInput, recordedFiles, fileEvidenceId, shortFileLabels, fileReading, type FileReading, type InputContent } from '../../core/src/presentation';
 import { renderCode, renderFile } from './code';
 import { uiLabel } from './labels';
+import { publicBody, publicBodyLabels } from '../../core/src/turn-view';
 
 export interface SidecarRenderOptions { projectName: string; session?: SessionData; nonce: string; streamId?: string; locale?: string }
 export interface SidecarProjection { sessionKey: string; name: string; identity: string; map: string; lens: string; warnings: string; empty: string; turns: Array<{ key: string; html: string }> }
@@ -711,10 +712,6 @@ function renderNarrative(item: TimelineItem): string {
   return `<li class="narrative${answer ? ' final-answer' : ''}" data-text-id="${escapeHtml(item.id)}" data-observation-key="${escapeHtml(item.id)}" data-status="${escapeHtml(item.status)}">${answer ? '<div class="answer-label">最终回答</div>' : ''}${item.status === 'failed' ? '<span class="availability">失败</span>' : ''}<div class="${answer ? 'answer-prose' : 'narrative-preview'}">${renderMarkdown(publicBody(item))}</div>${answer ? '' : '<button type="button" class="narrative-more" data-toggle-text aria-expanded="false" hidden>展开全文 ⌄</button>'}${item.availability === 'partial' || item.availability === 'unavailable' ? `<span class="availability">${escapeHtml(availabilityNames[item.availability])}</span>` : ''}${attachments}</li>`;
 }
 
-const publicBodyLabels = new Set(['正文', '公开正文', '用户请求', '用户请求或公开正文', '先前公开文本块', '后续公开文本块']);
-function publicBody(item: TimelineItem): string {
-  return item.detail?.blocks.filter(block => block.kind === 'text' && publicBodyLabels.has(block.label)).map(block => block.text ?? '').join('\n\n') || item.summary || item.title;
-}
 
 function renderActions(group: Extract<OutlineNode, { kind: 'actions' }>): string {
   const sections = actionRowSections(group).flatMap(section => {

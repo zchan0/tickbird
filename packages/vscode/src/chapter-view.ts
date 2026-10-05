@@ -1,9 +1,8 @@
 import type { TimelineItem } from '../../core/src/model';
 import type { TurnGroup } from '../../core/src/timeline';
-import { chapterTurn, type ChapterRow, type ChangedFile, type RowOutcome } from '../../core/src/chapters';
-import { presentEvidence } from '../../core/src/presentation';
+import type { ChapterRow, ChangedFile } from '../../core/src/chapters';
+import { clock, duration, rowView, runStarts, turnView } from '../../core/src/turn-view';
 import { renderMarkdown } from './markdown';
-import { doneVerb, statusVerb } from './verbs';
 import type { Provider } from '../../core/src/model';
 
 /**
@@ -29,44 +28,25 @@ const escapeHtml = (value: unknown): string => String(value ?? '').replace(/[&<>
 
 // Machine strings (paths, patterns, identifiers) and the agent's prose are two voices.
 const MACHINE = new Set(['Read', 'Write', 'Edit', 'Skill', 'Instructions', 'Memory', 'Grep', 'Glob', 'ToolSearch', 'WebFetch']);
-const clock = (iso?: string) => iso ? new Date(iso).toTimeString().slice(0, 5) : '';
-const duration = (ms?: number) => ms === undefined || ms < 1000 ? '' : ms < 60000 ? Math.round(ms / 1000) + 's'
-  : ms < 3600000 ? Math.round(ms / 60000) + 'm' : (ms / 3600000).toFixed(1) + 'h';
-/** The agents' own long format: 12s, 1m 33s, 1h 2m 5s. */
-const elapsed = (ms: number) => { const s = Math.round(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
-  return h ? `${h}h ${m}m ${s % 60}s` : m ? `${m}m ${s % 60}s` : `${s}s`; };
-
-/** In the harness's own terms, as the call rows' machine voice: an exit code, a refusal, a stop. */
-function outcomeWord(outcome: RowOutcome): string {
-  if (outcome.kind === 'denied') return outcome.denial === 'user-rejected' ? 'rejected' : 'denied';
-  if (outcome.kind === 'interrupted') return 'interrupted';
-  if (outcome.kind === 'failed') return outcome.exitCode !== undefined ? `exit ${outcome.exitCode}` : 'failed';
-  return '';
-}
-
 
 function rowHtml(row: ChapterRow, lead: boolean, render: ChapterRenderers, key: string, live: boolean): string {
   const state = row.outcome ? row.outcome.kind === 'empty' ? 'empty' : 'failed' : row.running ? 'running' : 'info';
   // In the live turn a call without a return is still out: its arrow moves, the
   // label stays still. Elsewhere a missing return only means none was recorded.
-  const out = live && (row.pending || row.running) ? ' data-out' : '';
-  const note = row.note ? `<i class="cnone">${escapeHtml(row.note)}</i>` : '';
-  const word = row.outcome ? outcomeWord(row.outcome) : '';
-  const exit = row.outcome?.reason ?? '';
-  // A shared output is a wrapper's transport record; its first line is rarely readable.
-  const output = row.output ? presentEvidence(row.items[0]).outputs.map(block => block.text ?? '').join('\n') : '';
-  const label = row.output ? `返回内容 · ${output.split(/\r?\n/).length} 行` : row.label || '无记录参数';
+  const view = rowView(row, live);
+  const out = view.out ? ' data-out' : '';
+  const note = view.note ? `<i class="cnone">${escapeHtml(view.note)}</i>` : '';
+  const { word, reason: exit, label, tool } = view;
   const voice = row.output || MACHINE.has(row.tool) ? 'machine' : 'prose';
-  const tool = row.output ? 'OUT' : row.tool;
   // A question shows what was chosen under it; waiting in a live turn says so.
-  const answer = !row.choices ? '' : row.choices.map(choice => `<span class="cchoices">${row.choices!.length > 1 && choice.header ? `<i class="cq">${escapeHtml(choice.header)}</i>` : ''}`
+  const answer = !view.choices ? '' : view.choices.map(choice => `<span class="cchoices">${choice.header ? `<i class="cq">${escapeHtml(choice.header)}</i>` : ''}`
     + (choice.chosen.length ? choice.chosen.map(value => `<b class="cchoice">✓ ${escapeHtml(value)}</b>`).join('')
-      : live && row.pending ? '<i class="cq">等待你的选择</i>' : '')
+      : choice.waiting ? '<i class="cq">等待你的选择</i>' : '')
     + '</span>').join('');
   const copy = `<span class="ctool"${lead && tool.length > 7 ? ` title="${escapeHtml(tool)}"` : ''}>${lead ? escapeHtml(tool) : ''}</span>`
     + `<span class="clabel ${voice}${answer ? ' asked' : ''}">${word ? `<b class="cbad">${word}</b> · ` : ''}${escapeHtml(label)}${answer}`
-    + `${row.count > 1 ? `<i class="crep"> · ${row.count} 次</i>` : ''}`
-    + `${row.outcome?.kind === 'empty' ? '<i class="cnone">no match</i>' : ''}`
+    + `${view.count > 1 ? `<i class="crep"> · ${view.count} 次</i>` : ''}`
+    + `${view.empty ? '<i class="cnone">no match</i>' : ''}`
     + `${note}</span>`;
   // The state stays in the tooltip; on the row it is the label's shimmer, not a word.
   const title = [row.tool, label, word, exit, row.running || out ? '进行中' : '', row.openable ? '在编辑器里打开记录' : render.unavailable(row.items)].filter(Boolean).join(' · ');
@@ -81,7 +61,8 @@ function rowHtml(row: ChapterRow, lead: boolean, render: ChapterRenderers, key: 
  *  id changes whenever a repeated call raises the count. Position keeps the node,
  *  so a live update rewrites its text in place instead of replacing the row. */
 function rowsHtml(rows: ChapterRow[], render: ChapterRenderers, chapterKey: string, live: boolean): string {
-  return rows.map((row, index) => rowHtml(row, index === 0 || rows[index - 1].tool !== row.tool || rows[index - 1].output !== row.output, render, `${chapterKey}#${index}`, live)).join('');
+  const leads = runStarts(rows);
+  return rows.map((row, index) => rowHtml(row, leads[index], render, `${chapterKey}#${index}`, live)).join('');
 }
 
 function filesHtml(files: ChangedFile[], turnKey: string): string {
@@ -96,20 +77,10 @@ function filesHtml(files: ChangedFile[], turnKey: string): string {
     + '</section>';
 }
 
-/** Tool-name column width, as a class: the webview CSP forbids style="" attributes. */
-function toolWidth(rows: ChapterRow[]): string {
-  // Capped: one long name (ToolSearch) must not widen every row of the turn.
-  const longest = Math.max(3, ...rows.map(row => (row.output ? 'OUT' : row.tool).length));
-  return `tw-${Math.min(7, longest)}`;
-}
-
 /** `latest` marks the newest turn: only it can still be running. */
 export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, latest = false, provider?: Provider): string {
-  const turn = chapterTurn(group);
-  const live = latest && !turn.ended && Boolean(turn.lastAt);
-  const label = group.turnId ? `第 ${group.ordinal} 轮` : '未归属回合的记录';
-  const chapters = turn.segments.filter(segment => segment.kind === 'chapter');
-  const rows = chapters.flatMap(segment => segment.kind === 'chapter' ? segment.chapter.rows : []);
+  const view = turnView(group, latest, provider);
+  const { turn, live, label } = view;
   const segmentHtml = (segment: typeof turn.segments[number]) => {
     if (segment.kind === 'answer') return `<li class="cseg" data-observation-key="${escapeHtml(segment.item.id)}">${render.answer(segment.item)}</li>`;
     if (segment.kind === 'interjection') return `<li class="cseg interjection" data-observation-key="${escapeHtml(segment.item.id)}"><div class="kicker">你的消息</div>${render.request(segment.item)}</li>`;
@@ -124,25 +95,24 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, la
   };
   // Once a turn is over its whole process folds into the line the agents print
   // ("Crunched for 3m 12s"); the request, the files and the final answer stay.
-  const closing = turn.segments.length - [...turn.segments].reverse().findIndex(segment => segment.kind !== 'answer');
-  const process = live ? turn.segments : turn.segments.slice(0, closing > turn.segments.length ? 0 : closing);
-  const answers = live ? [] : turn.segments.slice(process.length);
-  const calls = rows.filter(row => !row.output).reduce((sum, row) => sum + row.count, 0);
+  const process = live ? turn.segments : view.process;
+  const answers = live ? [] : view.answers;
+  const { calls } = view;
   const stream = process.map(segmentHtml).join('');
   // One status line while the turn runs, as the agents show it. The clock counts
   // from the start of the turn, the same point Claude Code and Codex time from.
-  const verb = statusVerb(provider, group.key);
+  const { verb } = view;
   const tail = live
     ? `<li class="cseg live-tail" data-observation-key="live-tail:${escapeHtml(group.key)}"><div class="ctail"><span class="shimmer" data-live-verb="${verb}">${verb}</span><span data-since="${escapeHtml(turn.start ?? turn.lastAt)}"></span></div></li>` : '';
-  return `<section class="turn-panel chapter-turn ${toolWidth(rows)}" data-turn-panel="${escapeHtml(group.key)}"${live ? ` data-last-at="${escapeHtml(turn.lastAt)}"` : ''} aria-label="${label}">`
+  return `<section class="turn-panel chapter-turn tw-${view.toolWidth}" data-turn-panel="${escapeHtml(group.key)}"${live ? ` data-last-at="${escapeHtml(turn.lastAt)}"` : ''} aria-label="${label}">`
     + `<header class="turn-heading"><span class="tclock">${clock(turn.start)}</span><span class="tlabel">${label}</span>${turn.aborted ? '<span class="tstop">中断</span>' : live ? '<span class="tstop tidle">已停止</span>' : ''}<span class="tdur">${duration(turn.durationMs)}</span></header>`
     + (turn.request ? render.request(turn.request) : '')
     + filesHtml(turn.files, group.key)
-    + (live || !process.length ? `<ol class="cstream${chapters.length > 1 ? ' tracked' : ''}${tail ? ' live' : ''}">${stream}${tail}</ol>`
+    + (live || !process.length ? `<ol class="cstream${view.chapters > 1 ? ' tracked' : ''}${tail ? ' live' : ''}">${stream}${tail}</ol>`
       : `<details class="cprocess" data-fold="process:${escapeHtml(group.key)}"><summary>`
-        + `<span class="cdone">${turn.durationMs ? `${doneVerb(provider, group.key)} for ${elapsed(turn.durationMs)}` : 'Process'}</span>`
+        + `<span class="cdone">${view.done}</span>`
         + `${calls ? `<span class="ccount-calls"> · ${calls} ${calls === 1 ? 'call' : 'calls'}</span>` : ''}<span class="cfold-arrow" aria-hidden="true">›</span></summary>`
-        + `<ol class="cstream${chapters.length > 1 ? ' tracked' : ''}">${stream}</ol></details>`)
+        + `<ol class="cstream${view.chapters > 1 ? ' tracked' : ''}">${stream}</ol></details>`)
     + (answers.length ? `<ol class="cstream">${answers.map(segmentHtml).join('')}</ol>` : '')
     + (turn.segments.length || tail ? '' : '<p class="empty">暂未取得本轮过程。</p>')
     + `<div class="turn-content-end" aria-hidden="true"></div></section>`;
