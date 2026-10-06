@@ -29,7 +29,7 @@ export function activate(context: vscode.ExtensionContext) {
   let preview: EvidenceView | undefined;
   const evidence = new Set<EvidenceView>();
   let generation = 0;
-  // What the integration hooks say about live sessions; see SESSION_STATE.md.
+  // What the integration hooks say about live sessions; see docs/SESSION_STATE.md.
   const stateDirectory = sessionStateDirectory();
   const stateCache: SessionStateCache = new Map();
   let states: SessionState[] = [];

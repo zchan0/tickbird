@@ -4,9 +4,9 @@ dist/
 .DS_Store
 .test-artifacts/
 
-# Local only, never in history: design probes, Codex's prototype output, and
-# superseded plans and reviews (see archived/README.md).
+# Local only, never in history: design probes and Codex's prototype output.
 probes/
 .codex/
-archived/
+# Not shared: the development log and superseded plans (see README, 文档).
+local/
 build/

@@ -7,7 +7,7 @@ import type { Provider } from './model';
  * What the integration hooks say about a live session: which window it belongs
  * to, whether the agent waits for an approval, and text already on screen but
  * not yet in the transcript. The transcript stays the only source of content.
- * The file format is described in SESSION_STATE.md.
+ * The file format is described in docs/SESSION_STATE.md.
  */
 export type SessionPhase = 'idle' | 'working' | 'waiting' | 'ended';
 export interface SessionState {

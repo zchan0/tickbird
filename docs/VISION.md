@@ -3,7 +3,7 @@
 > 状态：愿景对齐稿  
 > 更新时间：2026-09-01
 >
-> **2026-09-23 现状说明**：一句话愿景、产品角色、核心原则、数据真实性三层，仍是现行实现的依据。以下内容已被当前的 VS Code 开发版替代，界面以 [README](./README.md) 为准：
+> **2026-09-23 现状说明**：一句话愿景、产品角色、核心原则、数据真实性三层，仍是现行实现的依据。以下内容已被当前的 VS Code 开发版替代，界面以 [README](../README.md) 为准：
 >
 > - 产品形态：开发版是 VS Code 左侧主侧栏视图，不是原生 macOS App。
 > - 窗口模型、详情 Tab 模型：详情在编辑器区打开，临时预览可「保留此页」。
@@ -332,7 +332,7 @@ Turn diff  /  Session diff  /  当前 Git diff
 
 ### 第一轮：核心阅读流
 
-交互稿：[`sidecar-core-flow.html`](./.codex/visualizations/sidecar-core-flow.html)
+交互稿：`sidecar-core-flow.html`（本地原型 `sidecar-core-flow.html`，未共享）
 
 这一轮已经初步确认：
 
@@ -354,7 +354,7 @@ Turn diff  /  Session diff  /  当前 Git diff
 
 ### 第二轮：v7 与常驻窗口融合
 
-交互稿：[`sidecar-companion-v8.html`](./.codex/visualizations/sidecar-companion-v8.html)
+交互稿：`sidecar-companion-v8.html`（本地原型 `sidecar-companion-v8.html`，未共享）
 
 v7 的确定性分组、跨 harness 降级、thinking 单行预览和节点详情分类予以保留；常驻视觉作以下修正：
 

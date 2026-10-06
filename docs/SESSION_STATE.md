@@ -29,8 +29,8 @@ $XDG_STATE_HOME/agent-sidecar/sessions/     默认 ~/.local/state/agent-sidecar/
 第一行是 `start`，写会话的固定信息；之后每行是一个事件。
 
 ```jsonc
-{"v":1,"t":1791164847514,"e":"start","provider":"claude","session":"389d4b2e-…",
- "transcript":"/Users/…/389d4b2e-….jsonl","cwd":"/Users/…/project",
+{"v":1,"t":1791164847514,"e":"start","provider":"claude","session":"<session-id>",
+ "transcript":"/Users/…/<session-id>.jsonl","cwd":"/Users/…/project",
  "agentPid":68970,"hostPid":61907,"source":"startup",
  "kitty":{"window":"19","socket":"unix:/…/kitty-1604"}}      // 只在 kitty 里
 {"v":1,"t":…,"e":"prompt"}                                    // UserPromptSubmit

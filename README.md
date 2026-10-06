@@ -2,7 +2,7 @@
 
 VS Code 侧边栏里的只读过程观察器：读取当前项目的 Claude Code / Codex 本地会话记录，把 Agent 每一轮做了什么整理成章节，证据在编辑器区打开。原 Agent 负责对话和执行；Sidecar 不发送消息，也不执行记录里的任何命令。
 
-状态：开发中，首轮 goal 尚未验收。进展与每批的验证记录见 [DEVELOPMENT_STATUS.md](./DEVELOPMENT_STATUS.md)，产品愿景与原则见 [VISION.md](./VISION.md)。
+状态：开发中，首轮 goal 尚未验收。现状、已知问题与待办见 [docs/STATUS.md](./docs/STATUS.md)，产品愿景与原则见 [docs/VISION.md](./docs/VISION.md)，终端版设计见 [docs/TERMINAL_DESIGN.md](./docs/TERMINAL_DESIGN.md)。
 
 ## 运行
 
@@ -96,10 +96,13 @@ npm run test:coexistence
 ## 代码
 
 - `packages/core/src/`：数据模型、Claude / Codex 解析器（`claude.ts`、`codex.ts`）、章节模型（`chapters.ts`）、增量读取与实时会话（`record-stream.ts`、`live-session.ts`）、Agent 运行状态（`agent-status.ts`）、调用归纳与证据呈现（`actions.ts`、`tool-view.ts`、`presentation.ts`）。
-- `plugins/sidecar-state/`、`packages/core/src/session-state.ts`：给 Claude Code 和 Codex 的会话状态插件，及其读取，格式见 [SESSION_STATE.md](./SESSION_STATE.md)。
+- `plugins/sidecar-state/`、`packages/core/src/session-state.ts`：给 Claude Code 和 Codex 的会话状态插件，及其读取，格式见 [docs/SESSION_STATE.md](./docs/SESSION_STATE.md)。
 - `packages/vscode/src/`：扩展宿主（`extension.ts`）、渲染（`render.ts`、`chapter-view.ts`、`markdown.ts`、`code.ts`）、页面脚本（`live-client.ts`、`follow-client.ts`、`inline-client.ts`）。
 - `tests/`、`scripts/`：可重跑的测试、宿主验证与真实样本核对。
 
 Webview 的 CSP 与消息边界依据 [VS Code 官方 Webview 文档](https://code.visualstudio.com/api/extension-guides/webview)。不依赖其他 Agent 的私有状态或 UI DOM；读取的只有它们写在本机的会话记录，以及 Claude Code 公开写出的运行状态文件。
 
-已过期的方案、评审和核对记录归档在本地的 `archived/`（不进入版本控制），设计探针在 `probes/`。
+## 文档
+
+- 进仓库、可共享：`README.md`、`docs/`、各插件目录下的 README。不写本机路径、真实会话 ID 或会话内容。
+- 只在本地、不提交：`local/`（开发日志 `DEVELOPMENT_LOG.md`、已过期的方案 `archived/`）、`probes/`（设计探针，含真实会话内容）、`.codex/`（早期原型）。
