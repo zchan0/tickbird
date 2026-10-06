@@ -39,8 +39,10 @@ export function fit(text: string, width: number): string {
   return out + '…';
 }
 
-const WORD = /[A-Za-z0-9_\-./~`'"]/;
+// Characters of a Latin word, a path or a URL: none of them starts a new line on its own.
+const WORD = /[A-Za-z0-9_\-./~`'":?=&%#@+]/;
 // Closing punctuation never starts a line: it takes the character before it along.
+const OPENING = /[（「『《【(\[]/;
 const CLOSING = /[，。、；：！？）」』》】,.;:!?)\]]/;
 
 /**
@@ -51,20 +53,36 @@ export function wrap(text: string, width: number): string[] {
   if (width <= 0) return [];
   const lines: string[] = [];
   for (const paragraph of clean(text).split('\n')) {
-    let line = '', lastSpace = -1;
+    // Where the Latin word being written started: after a space, or after CJK text.
+    let line = '', wordStart = -1;
     for (const char of paragraph) {
       const w = charWidth(char.codePointAt(0)!);
+      const latin = WORD.test(char) && w === 1;
       if (textWidth(line) + w > width) {
-        if (char === ' ') { lines.push(line.trimEnd()); line = ''; lastSpace = -1; continue; }
+        if (char === ' ') { lines.push(line.trimEnd()); line = ''; wordStart = -1; continue; }
         let carry = '';
-        if (WORD.test(char) && w === 1 && lastSpace > 0 && textWidth(line.slice(0, lastSpace)) > width / 3) {
-          carry = line.slice(lastSpace + 1); line = line.slice(0, lastSpace);
+        // A word moves whole, and so does a word that closing punctuation would otherwise split from.
+        // (Only a word longer than a whole line is broken inside.)
+        if ((latin || CLOSING.test(char)) && wordStart > 0 && textWidth(line.slice(wordStart)) + w <= width) {
+          carry = line.slice(wordStart); line = line.slice(0, wordStart);
         } else if (CLOSING.test(char) && line.length > 1) {
-          const chars = [...line]; carry = chars.pop()!; line = chars.join('');
+          // Closing punctuation takes along the closing marks before it, then the word before those.
+          const chars = [...line];
+          const tail: string[] = [];
+          while (chars.length > 1 && CLOSING.test(chars[chars.length - 1])) tail.unshift(chars.pop()!);
+          let start = chars.length;
+          while (start > 0 && WORD.test(chars[start - 1]) && charWidth(chars[start - 1].codePointAt(0)!) === 1) start--;
+          const keep = start > 0 && start < chars.length && textWidth(chars.slice(start).join('') + tail.join('') + char) <= width ? start : chars.length - 1;
+          carry = chars.splice(keep).join('') + tail.join(''); line = chars.join('');
         }
-        lines.push(line.trimEnd()); line = carry; lastSpace = -1;
+        // Opening punctuation never ends a line: it goes with what it opens.
+        const trimmed = [...line.trimEnd()];
+        while (carry && trimmed.length > 1 && OPENING.test(trimmed[trimmed.length - 1])) carry = trimmed.pop()! + carry;
+        line = trimmed.join('');
+        lines.push(line.trimEnd()); line = carry; wordStart = carry && latin ? 0 : -1;
       }
-      if (char === ' ') lastSpace = line.length;
+      if (!latin) wordStart = -1;
+      else if (wordStart < 0) wordStart = line.length;
       line += char;
     }
     lines.push(line.trimEnd());

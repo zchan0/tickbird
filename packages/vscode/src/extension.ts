@@ -8,10 +8,9 @@ import { openLiveSession, type LiveSession } from '../../core/src/live-session';
 import { LiveView } from './live-view';
 import type { SessionCandidate, SessionData, TimelineItem, Provider } from '../../core/src/model';
 import { renderDetail, renderSidecar, renderInlineEvidence, inlineRevision, renderWorkspaceGap, workspaceGaps, type WorkspaceGap } from './render';
-import { hasReadableEvidence, outlineCoverage, resolveOutlineEvidence, visibleTurnGroups } from '../../core/src/outline';
-import { awaitingApproval, currentSession, pendingDraft, readSessionStates, sessionStateDirectory, type SessionState, type SessionStateCache } from '../../core/src/session-state';
-import { publicBody } from '../../core/src/turn-view';
-import type { LiveExtras } from './chapter-view';
+import { hasReadableEvidence, outlineCoverage, resolveOutlineEvidence } from '../../core/src/outline';
+import { currentSession, readSessionStates, sessionStateDirectory, type SessionState, type SessionStateCache } from '../../core/src/session-state';
+import { lastRecordAt, liveExtras as coreLiveExtras, type LiveExtras } from '../../core/src/live-extras';
 import { createSessionPickerMetadata, type SessionPickerEntry } from '../../core/src/session-picker';
 
 interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean }
@@ -87,24 +86,9 @@ export function activate(context: vscode.ExtensionContext) {
         followPaused: postedPaused, integrationHint: hintShown }, liveView?.current);
     }
   }
-  /** Latest source time in the session, for "has the agent moved on since". */
-  function lastRecordAt(snapshot: SessionData): number | undefined {
-    let latest: number | undefined;
-    for (const item of snapshot.items) {
-      const at = item.timestamp ? Date.parse(item.timestamp) : NaN;
-      if (Number.isFinite(at) && (latest === undefined || at > latest)) latest = at;
-    }
-    return latest;
-  }
   /** The approval the newest turn waits for and the text on screen, when the integration reports them. */
   function liveExtras(snapshot: SessionData | undefined): LiveExtras {
-    const state = snapshot && states.find(item => item.provider === snapshot.provider && item.session === snapshot.id);
-    if (!snapshot || !state) return {};
-    const approval = awaitingApproval(state, lastRecordAt(snapshot)) ? state.approval : undefined;
-    // Turn grouping costs a pass over the session: only when there is a draft to check.
-    const latest = state.draft ? visibleTurnGroups(snapshot).at(-1) : undefined;
-    const draft = latest && pendingDraft(state, latest.items.filter(item => item.kind === 'message' || item.kind === 'answer').map(publicBody));
-    return { ...(approval ? { approval: { tool: approval.tool, summary: approval.summary } } : {}), ...(draft ? { draft } : {}) };
+    return coreLiveExtras(snapshot, snapshot && states.find(item => item.provider === snapshot.provider && item.session === snapshot.id));
   }
   function followPaused(): boolean {
     return !follow && Boolean(currentKey) && (!candidate || sessionKey(candidate) !== currentKey);

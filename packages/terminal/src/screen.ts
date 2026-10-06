@@ -9,7 +9,7 @@ export type Color = 'default' | 'black' | 'red' | 'green' | 'yellow' | 'blue' | 
 
 export interface Style {
   fg?: Color; bg?: Color;
-  bold?: boolean; dim?: boolean; italic?: boolean; underline?: boolean; inverse?: boolean;
+  bold?: boolean; dim?: boolean; italic?: boolean; underline?: boolean; inverse?: boolean; strike?: boolean;
   /** OSC 8 target; drawn only when the terminal shows links. */
   link?: string;
 }
@@ -33,6 +33,7 @@ export function sgr(style: Style = {}): string {
   if (style.italic) codes.push('3');
   if (style.underline) codes.push('4');
   if (style.inverse) codes.push('7');
+  if (style.strike) codes.push('9');
   if (style.fg && style.fg !== 'default') codes.push(colorCode(style.fg, 30));
   if (style.bg && style.bg !== 'default') codes.push(colorCode(style.bg, 40));
   return `\x1b[${codes.join(';')}m`;
@@ -86,6 +87,7 @@ export function cutLine(line: Line, width: number): Span[] {
 
 /** Lays out spans left and right on one row: the left side is cut first. */
 export function row(left: Line, right: Line, width: number): Span[] {
+  if (!plainText(right)) return cutLine(left, width);
   const rightWidth = textWidth(plainText(right));
   const leftSpans = cutLine(left, Math.max(0, width - rightWidth - 1));
   const used = textWidth(plainText(leftSpans));

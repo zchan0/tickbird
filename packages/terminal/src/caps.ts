@@ -29,6 +29,7 @@ export interface Capabilities {
 /** Symbols the views draw, and what replaces each one when it is not one cell wide. */
 export const SYMBOLS: Readonly<Record<string, string>> = {
   '●': '*', '✻': '*', '┃': '|', '…': '...', '─': '-', '⏸': '||', '▌': '|', '›': '>', '‹': '<', '│': '|', '✓': 'v', '❯': '>',
+  '☐': '[ ]', '☑': '[x]', '┌': '+', '┬': '+', '┐': '+', '├': '+', '┼': '+', '┤': '+', '└': '+', '┴': '+', '┘': '+',
 };
 
 export const NONE: Capabilities = { probed: false, sync: false, links: false, images: false, notify: false, kittyKeyboard: false, clipboard: false, inTmux: false, symbols: {} };
@@ -119,7 +120,14 @@ export interface ProbeIO {
 }
 
 /** Asks the terminal. The input must already be raw; nothing is asked of a dumb terminal. */
-export async function probe(io: ProbeIO, env: NodeJS.ProcessEnv = process.env, timeoutMs = 150, tmuxFeaturesOf = readTmuxFeatures): Promise<Capabilities> {
+/**
+ * DA1 normally comes back within a few milliseconds, but kitty answers about
+ * 190ms late while its window is in the background. Every terminal answers DA1,
+ * so the wait ends there; the limit only guards against one that never does.
+ */
+export const PROBE_TIMEOUT_MS = 1000;
+
+export async function probe(io: ProbeIO, env: NodeJS.ProcessEnv = process.env, timeoutMs = PROBE_TIMEOUT_MS, tmuxFeaturesOf = readTmuxFeatures): Promise<Capabilities> {
   if (!env.TERM || env.TERM === 'dumb') return NONE;
   const tmuxFeatures = env.TMUX ? tmuxFeaturesOf() : undefined;
   let received = '';

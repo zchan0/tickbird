@@ -26,6 +26,12 @@ test('wrapping fills CJK lines, keeps Latin words whole and never starts a line 
   assert.ok(lines.every(line => !/^[，。、]/.test(line)), JSON.stringify(lines));
   assert.deepEqual(wrap('这是一个很长的中文句子 core 后面还有字', 24), ['这是一个很长的中文句子', 'core 后面还有字']);
   assert.deepEqual(wrap('可以直接 core 中直接复用这些函数', 12), ['可以直接', 'core 中直接', '复用这些函数']);
+  // A Latin word right after CJK punctuation also moves whole.
+  assert.deepEqual(wrap('苹果、banana、cherry', 12), ['苹果、', 'banana、', 'cherry']);
+  // Closing marks after a word take the word along: no line starts with ")。".
+  assert.deepEqual(wrap('详细数据见库存系统 (https://example.com/inventory)。', 36), ['详细数据见库存系统', '(https://example.com/inventory)。']);
+  // A URL is one word.
+  assert.deepEqual(wrap('第二步，运行 curl https://example.com 检查', 24), ['第二步，运行 curl', 'https://example.com 检查']);
 });
 
 test('an encoded row is exactly the pane width, never splits a wide character, and drops escapes from text', () => {
@@ -114,7 +120,7 @@ const KITTY_REPLY = '\x1b[?2026;2$y\x1b[?0u\x1b_Gi=31;OK\x1b\\\x1b]11;rgb:1e1e/1
 // Recorded from tmux 3.6a (default config) inside kitty: only the background, its version, cursor reports and DA1.
 const TMUX_REPLY = '\x1b]11;rgb:1616/1a1a/2020\x1b\\\x1bP>|tmux 3.6a\x1b\\' + Object.keys(SYMBOLS).map(() => '\x1b[1;2R').join('') + '\x1b[?1;2;4c';
 
-function fakeTerminal(reply: string | undefined, chunks = 3): ProbeIO & { written: string[] } {
+function fakeTerminal(reply: string | undefined, chunks = 3, delayMs = 1): ProbeIO & { written: string[] } {
   const written: string[] = [];
   let listener: ((text: string) => void) | undefined;
   return {
@@ -126,7 +132,7 @@ function fakeTerminal(reply: string | undefined, chunks = 3): ProbeIO & { writte
       const size = Math.ceil(reply.length / chunks);
       for (let start = 0; start < reply.length; start += size) {
         const piece = reply.slice(start, start + size);
-        setTimeout(() => listener?.(piece), 1);
+        setTimeout(() => listener?.(piece), delayMs);
       }
     },
     onData(next) { listener = next; return () => { listener = undefined; }; },
@@ -143,6 +149,14 @@ test('probing kitty finds every enhancement and one-cell symbols', async () => {
   });
   assert.ok(Object.keys(SYMBOLS).every(ch => caps.symbols[ch] === 1));
   assert.equal(symbol(caps, '●'), '●');
+});
+
+test('a terminal that answers late is still probed: kitty in the background takes about 190ms', async () => {
+  const started = Date.now();
+  const caps = await probe(fakeTerminal(KITTY_REPLY, 3, 200), { TERM: 'xterm-kitty' });
+  assert.equal(caps.probed, true);
+  assert.equal(caps.images, 'kitty');
+  assert.ok(Date.now() - started < 500, 'The wait ends at DA1, not at the limit');
 });
 
 test('probing inside tmux: no images or notifications, links only when tmux forwards them', async () => {

@@ -4,6 +4,9 @@ import type { ChapterRow, ChangedFile } from '../../core/src/chapters';
 import { clock, duration, rowView, runStarts, turnView } from '../../core/src/turn-view';
 import { renderMarkdown } from './markdown';
 import type { Provider } from '../../core/src/model';
+import type { LiveExtras } from '../../core/src/live-extras';
+
+export type { LiveExtras };
 
 /**
  * One turn as chapters: the agent's own commentary heads each chapter and the
@@ -77,11 +80,6 @@ function filesHtml(files: ChangedFile[], turnKey: string): string {
     + '</section>';
 }
 
-/**
- * What the integration hooks add to the newest turn: the approval the agent is
- * waiting for, and text already on screen but not yet in the transcript.
- */
-export interface LiveExtras { approval?: { tool: string; summary: string }; draft?: string }
 
 /** A path names its file; anything else is kept, shortened by the row's own ellipsis. */
 const waitingFor = ({ tool, summary }: { tool: string; summary: string }): string =>

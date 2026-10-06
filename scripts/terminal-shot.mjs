@@ -5,11 +5,14 @@
 // terminal's alignment, not the browser font's.
 //
 //   node scripts/terminal-shot.mjs --to unix:/path/socket [--match id:1] --out shot.png [--title text] [--font family]
+//   node scripts/terminal-shot.mjs --to … --out shot.png --capture-only     (fast: saves shot.capture.json only)
+//   node scripts/terminal-shot.mjs --from shot.capture.json --out shot.png  (renders a saved capture)
 //
-// Writes shot.png, plus shot.ansi (the raw capture) next to it. Needs `npm run build` first.
-import { execFileSync } from 'node:child_process';
+// Capture-only takes a fraction of a second, so a live screen can be caught
+// every second or two and rendered afterwards. Needs `npm run build` first.
+import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,19 +25,28 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, arg, index,
   if (arg.startsWith('--')) pairs.push([arg.slice(2), all[index + 1]?.startsWith('--') ? 'true' : all[index + 1] ?? 'true']);
   return pairs;
 }, []));
-if (!args.to || !args.out) { console.error('usage: terminal-shot.mjs --to unix:SOCKET [--match id:N] --out FILE.png [--title TEXT]'); process.exit(2); }
-const match = args.match ? ['--match', args.match] : [];
-const kitten = (...rest) => execFileSync('kitten', ['@', '--to', args.to, ...rest], { encoding: 'utf8' });
+if ((!args.to && !args.from) || !args.out) { console.error('usage: terminal-shot.mjs (--to unix:SOCKET [--match id:N] | --from FILE.capture.json) --out FILE.png [--title TEXT] [--capture-only]'); process.exit(2); }
+const out = resolve(args.out);
 
-const ansi = kitten('get-text', '--ansi', ...match);
-const palette = {};
-for (const line of kitten('get-colors', ...match).split('\n')) {
-  const [name, value] = line.trim().split(/\s+/);
-  if (name && value?.startsWith('#')) palette[name] = value;
+function capture() {
+  const match = args.match ? ['--match', args.match] : [];
+  const kitten = (...rest) => execFileSync('kitten', ['@', '--to', args.to, ...rest], { encoding: 'utf8' });
+  const ansi = kitten('get-text', '--ansi', ...match);
+  const palette = {};
+  for (const line of kitten('get-colors', ...match).split('\n')) {
+    const [name, value] = line.trim().split(/\s+/);
+    if (name && value?.startsWith('#')) palette[name] = value;
+  }
+  const windows = JSON.parse(kitten('ls', ...match)).flatMap(os => os.tabs.flatMap(tab => tab.windows));
+  const window = windows.find(w => w.is_focused) ?? windows[0];
+  return { ansi, palette, columns: window.columns, rows: window.lines, at: new Date().toISOString(), ...(args.title ? { title: args.title } : {}) };
 }
-const windows = JSON.parse(kitten('ls', ...match)).flatMap(os => os.tabs.flatMap(tab => tab.windows));
-const window = windows.find(w => w.is_focused) ?? windows[0];
-const columns = window.columns, rows = window.lines;
+
+const saved = args.from ? JSON.parse(readFileSync(args.from, 'utf8')) : capture();
+if (!args.from) writeFileSync(out.replace(/\.png$/, '.capture.json'), JSON.stringify(saved));
+if (args['capture-only']) { console.log(out.replace(/\.png$/, '.capture.json')); process.exit(0); }
+const { ansi, palette, columns, rows } = saved;
+const title = args.title ?? saved.title;
 
 const color = index => palette[`color${index}`] ?? '#888';
 const cube = n => {
@@ -113,7 +125,7 @@ function kittyFont() {
   } catch { return undefined; }
 }
 const font = args.font ?? kittyFont();
-const CW = 9, CH = 20, PAD = 14, TITLE = args.title ? 30 : 0;
+const CW = 9, CH = 20, PAD = 14, TITLE = title ? 30 : 0;
 const fg = palette.foreground ?? '#ddd', bg = palette.background ?? '#111';
 const escape = text => text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 const spans = cells.map(cell => {
@@ -135,18 +147,26 @@ html,body{margin:0;background:${bg}}
 .title{height:${TITLE}px;line-height:${TITLE}px;padding:0 ${PAD}px;font:12px -apple-system,'PingFang SC',sans-serif;color:${fg};opacity:.6;border-bottom:1px solid color-mix(in srgb, ${fg} 15%, ${bg})}
 .grid{position:relative;margin:${PAD}px;width:${columns * CW}px;height:${rows * CH}px;font:15px/${CH}px ${font ? `'${font}',` : ''}Menlo,'SF Mono','PingFang SC',monospace}
 .grid span{position:absolute;height:${CH}px;text-align:center;white-space:pre}
-</style>${TITLE ? `<div class="title">${escape(args.title)}</div>` : ''}<div class="grid">${spans}</div>`;
+</style>${TITLE ? `<div class="title">${escape(title)}</div>` : ''}<div class="grid">${spans}</div>`;
 
-const out = resolve(args.out);
-writeFileSync(out.replace(/\.png$/, '.ansi'), ansi);
 const work = mkdtempSync(join(tmpdir(), 'shot-'));
 const page = join(work, 'shot.html');
 writeFileSync(page, html);
 const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-// Headless Chrome often stays up after it saved the picture: give it a few seconds, then check the file.
 rmSync(out, { force: true });
-try { execFileSync('perl', ['-e', 'alarm 8; exec @ARGV', chrome, '--headless=new', '--disable-gpu', '--hide-scrollbars',
-  `--user-data-dir=${join(work, 'profile')}`, '--force-device-scale-factor=2', `--window-size=${width},${height}`,
-  `--screenshot=${out}`, `file://${page}`], { stdio: 'ignore' }); } catch { /* Checked below. */ }
+// Headless Chrome often stays up after it saved the picture: stop it once the file is complete.
+const child = spawn(chrome, ['--headless=new', '--disable-gpu', '--hide-scrollbars', `--user-data-dir=${join(work, 'profile')}`,
+  '--force-device-scale-factor=2', `--window-size=${width},${height}`, `--screenshot=${out}`, `file://${page}`], { stdio: 'ignore' });
+const started = Date.now();
+let size = -1;
+while (Date.now() - started < 15000) {
+  await new Promise(done => setTimeout(done, 150));
+  const now = existsSync(out) ? statSync(out).size : -1;
+  if (now > 0 && now === size) break;
+  size = now;
+  if (child.exitCode !== null) break;
+}
+child.kill('SIGKILL');
+rmSync(work, { recursive: true, force: true });
 if (!existsSync(out)) { console.error('Chrome wrote no screenshot'); process.exit(1); }
 console.log(`${out}  (${columns}×${rows})`);
