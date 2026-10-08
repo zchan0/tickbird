@@ -97,7 +97,18 @@
   1. 等批准时，`thread/read` 的状态是否带 `waitingOnApproval`（实测因 Codex 用量到达上限而中断）。
   2. VS Code 里的 Claude Code 是否也写 `~/.claude/sessions/<pid>.json`，`entrypoint` 是什么；VS Code 里的 Codex（扩展自己的 app-server）能否同样读到线程和所属进程。
   3. 不用 hook 时怎样触发自动开栏：包一层启动命令、监视会话目录，还是保留 hook 只做这一件事。
-- 之后：根据核实结果写设计（哪些功能有基础来源、哪些只在装了 hook 时才有），再决定实现范围。
+- 方向（2026-10-08 与用户确认）：Claude Code 用 mods（函数 hook）实现，Sidecar 画在 Claude Code 自己的窗格里，不另开分屏；Codex 只能用命令型 hook 和外部分屏。内容和按键所有 Agent 一致（共用核心），位置各用最好的宿主，外部分屏是所有 Agent 的后备。
+- mods 最小验证（2026-10-08，Claude Code 2.1.293，探针 mod 只观察、不改任何事件）：
+  - `session.start` 在加载时触发（`surface: terminal`）；`session.end` 在 `/clear` 时 `reason: clear`，之后 `$.session.id()` 已是新会话；退出时 `reason: prompt_input_exit`。
+  - `$.process.run` 能调用外部命令：`kitten --version`、`tmux display -p '#{pane_id}'`（得到自己的窗格）都成功。mod 也能开外部分屏。
+  - `session.append`：对话每新增一行都经过它，`uuid` 与会话记录文件一致（13/13）；内容是精简版（`type`、`name`、`role`、`content`），没有时间戳、`parentUuid`、`toolUseResult`；多了来源（`door`：prompt、response、tool-result、attachment…）和产生者（`origin`）。
+  - 等批准：调用那一行加入对话后约 30ms，`tool.check` 的结果是 `decision: "ask"`（带工具名和参数），紧接着 `classic.PermissionRequest` 也到达。
+  - 提前显示：700 字的回答，`turn.step` 从第 9.4 秒起每约 50ms 一段送到，第 24.2 秒结束；这一行要到第 24.2 秒才加入对话。比会话记录早约 15 秒，比 MessageDisplay（约 0.5 秒一段）更细。一次短回答的全部正文在 40ms 内到达，原因未查。
+  - 窗格：终端 ≥ 144 列时自动打开，是横跨整宽、位于对话和输入框之间的方框（不是侧栏）；几个窗格以标签页切换；等批准时，批准提示占用这块位置，窗格暂时不显示。
+  - 共用核心能在 mod 里运行：解析 → 按轮视图 → 终端排版打包成 579 KB 的 ESM（`node:crypto`、`node:path` 换成替代件，`node:fs` 等不在这条路径上）。在 mod 里用 `$.fs.read` 读 245 KB 的会话记录，读取 1ms、解析加排版共 65ms，最新一轮画进窗格；颜色、粗体、暗淡都生效（暗淡显示为主题灰色）。空行被压掉，要改。
+  - 要处理：`actions.ts` 用 TypeScript 编译器解析 Codex 代码调用（约 9 MB），验证时换成了桩；`createHash` 要换成纯 JS 的同步实现；mods 接口标注 EARLY ACCESS（可能随版本改变，不另行通知）。
+- 仍待核实：VS Code 里 mods 窗格是否显示、能否代替 VS Code 版的 Claude 部分；Codex 等批准时 `thread/read` 是否带 `waitingOnApproval`；VS Code 里的 Claude Code 是否也写 `~/.claude/sessions/<pid>.json`。
+- 之后：写设计（来源层、共用核心、宿主层；Claude 走 mods，Codex 走 hook + 外部分屏），再决定实现范围。
 
 ## C3 私有安装
 
