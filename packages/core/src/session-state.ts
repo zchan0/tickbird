@@ -44,6 +44,11 @@ const num = (value: unknown): number => typeof value === 'number' && Number.isFi
  * Folds a state file into the session's current state. Background hooks may
  * append out of order, so lines are taken by their own time; a line still
  * being written, or one from a newer format, is skipped.
+ *
+ * The hooks write start, approval and display. Files from 0.2 and 0.3 also
+ * hold prompt, stop and end; they still fold, but nothing relies on them:
+ * when a turn starts or ends comes from the transcript, and a session ends
+ * when its agent's process does.
  */
 export function foldSessionState(text: string, isAlive: (pid: number) => boolean = alive): SessionState | undefined {
   const lines = text.split('\n').flatMap((raw, order): Line[] => {
@@ -81,10 +86,8 @@ export function foldSessionState(text: string, isAlive: (pid: number) => boolean
       state.approval = { tool: str(line.tool), summary: str(line.summary), at: line.t };
     } else if (line.e === 'display') {
       // Display never ends a wait: a background hook's clock can land before the
-      // approval it followed. Only the transcript says the agent moved on. For the
-      // same reason the last part can land after the turn's stop: by then the
-      // text is in the transcript, so an idle session keeps no draft.
-      if (state.phase === 'idle') continue;
+      // approval it followed. Only the transcript says the agent moved on, and
+      // only the transcript retires a draft (see pendingDraft).
       const message = str(line.message);
       if (state.draft?.message !== message) parts = new Map();
       parts.set(num(line.index), str(line.text));
@@ -110,14 +113,19 @@ export function awaitingApproval(state: SessionState | undefined, transcriptLast
 
 const squash = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
+/** A transcript record this much newer than a draft's last part means the agent moved on. */
+export const DRAFT_SUPERSEDED_MS = 1000;
+
 /**
- * The text still worth showing early: none once the session is idle, and none
- * once the transcript holds the same words. Display ids do not match
- * transcript ids, so the words decide.
+ * The text still worth showing early: none once the transcript holds the same
+ * words, and none once the transcript has moved past it (the turn was
+ * interrupted, or the next one began). Display ids do not match transcript
+ * ids, so the words decide.
  */
-export function pendingDraft(state: SessionState | undefined, transcriptTexts: string[]): string | undefined {
+export function pendingDraft(state: SessionState | undefined, transcriptTexts: string[], transcriptLastAt?: number): string | undefined {
   const draft = state?.draft?.text;
-  if (!draft || state.phase === 'idle' || state.phase === 'ended') return undefined;
+  if (!draft || state.phase === 'ended') return undefined;
+  if (transcriptLastAt !== undefined && transcriptLastAt > state.draft!.at + DRAFT_SUPERSEDED_MS) return undefined;
   const head = squash(draft).slice(0, 40);
   if (!head) return undefined;
   return transcriptTexts.some(text => squash(text).startsWith(head)) ? undefined : draft;
@@ -148,6 +156,11 @@ export async function readSessionStates(directory = sessionStateDirectory(), isA
       if (!folded) return undefined;
       // Copies: a cached fold is never changed in place.
       const state: SessionState = { ...folded };
+      // The transcript's last write is the session's latest activity: the hooks no longer report turns.
+      if (state.transcript) {
+        const written = await stat(state.transcript).then(info => info.mtimeMs, () => 0);
+        if (written > state.activeAt) state.activeAt = written;
+      }
       if (state.phase !== 'ended' && state.agentPid && !isAlive(state.agentPid)) {
         state.phase = 'ended'; delete state.approval; delete state.draft;
       }

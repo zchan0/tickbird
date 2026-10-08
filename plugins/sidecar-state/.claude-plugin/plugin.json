@@ -1,7 +1,7 @@
 {
   "name": "sidecar-state",
-  "version": "0.3.0",
-  "description": "Agent Sidecar 的接入：把每个会话在做什么（属于哪个窗口、是否在等你批准、屏幕上正在显示的文字）写到本机文件，供 Agent Sidecar 的 VS Code 版和终端版读取。本身不显示界面，不改变 Agent 的行为。",
+  "version": "0.4.0",
+  "description": "Agent Sidecar 的接入：把会话属于哪个窗口、是否在等你批准、屏幕上正在显示的长回答写到本机文件，供 Agent Sidecar 的 VS Code 版和终端版读取。只记录会话记录里没有或来得太晚的信息；本身不显示界面，不改变 Agent 的行为。",
   "author": {
     "name": "zchan0"
   },
@@ -13,29 +13,6 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook.mjs\" claude \"$PPID\"",
             "timeout": 5
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook.mjs\" claude \"$PPID\"",
-            "timeout": 2
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook.mjs\" claude \"$PPID\"",
-            "timeout": 5,
-            "async": true
           }
         ]
       }
@@ -53,30 +30,6 @@
       }
     ],
     "MessageDisplay": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook.mjs\" claude \"$PPID\"",
-            "timeout": 5,
-            "async": true
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook.mjs\" claude \"$PPID\"",
-            "timeout": 5,
-            "async": true
-          }
-        ]
-      }
-    ],
-    "StopFailure": [
       {
         "hooks": [
           {

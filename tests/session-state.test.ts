@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { awaitingApproval, currentSession, foldSessionState, pendingDraft, readSessionStates, sessionStateDirectory, type SessionStateCache } from '../packages/core/src/session-state';
+import { awaitingApproval, currentSession, DRAFT_SUPERSEDED_MS, foldSessionState, pendingDraft, readSessionStates, sessionStateDirectory, type SessionStateCache } from '../packages/core/src/session-state';
 
 const live = () => true;
 const lines = (...records: object[]) => records.map(record => JSON.stringify({ v: 1, ...record })).join('\n') + '\n';
@@ -38,11 +38,12 @@ test('display parts assemble in index order whatever order the background hooks 
   const next = foldSessionState(lines(start(1), { t: 2, e: 'prompt' }, { t: 3, e: 'display', message: 'm1', index: 0, final: true, text: 'A' },
     { t: 4, e: 'display', message: 'm2', index: 0, final: false, text: 'X' }), live)!;
   assert.equal(next.draft!.text, 'X', 'A new message starts a new draft');
-  assert.equal(foldSessionState(lines(start(1), { t: 2, e: 'prompt' }, { t: 3, e: 'display', message: 'm1', index: 0, final: true, text: 'A' }, { t: 4, e: 'stop' }), live)!.draft, undefined);
-  // Measured with Claude Code 2.1.289: the last part's background hook can land after the turn's stop.
-  const late = foldSessionState(lines(start(1), { t: 2, e: 'prompt' }, { t: 4, e: 'stop' }, { t: 5, e: 'display', message: 'm1', index: 0, final: true, text: 'A' }), live)!;
-  assert.equal(late.phase, 'idle');
-  assert.equal(late.draft, undefined);
+  // The hooks no longer report turns: a draft folds with no prompt before it.
+  assert.equal(foldSessionState(lines(start(1), { t: 3, e: 'display', message: 'm1', index: 0, final: true, text: 'A' }), live)!.draft!.text, 'A');
+  // Measured with Claude Code 2.1.289: the last part's background hook can land after the text is in the
+  // transcript. It folds, and pendingDraft retires it because the transcript holds the same words.
+  const late = foldSessionState(lines(start(1), { t: 5, e: 'display', message: 'm1', index: 0, final: true, text: 'All done here.' }), live)!;
+  assert.equal(pendingDraft(late, ['All done here.'], 4), undefined);
 });
 
 test('a half-written last line, a foreign format and lines before start are skipped', () => {
@@ -93,7 +94,7 @@ function run(provider: string, input: object, env: NodeJS.ProcessEnv, pid = proc
   return spawnSync(process.execPath, [hook, provider, String(pid)], { input: JSON.stringify(input), env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env }, encoding: 'utf8' });
 }
 
-test('the hook appends one silent line per event and records the agent’s window', () => {
+test('the hook appends one silent line per event it records, and records the agent’s window', () => {
   const home = mkdtempSync(join(tmpdir(), 'sidecar-hook-'));
   const env = { XDG_STATE_HOME: home, KITTY_WINDOW_ID: '19', KITTY_LISTEN_ON: 'unix:/tmp/kitty-1' };
   const events = [
@@ -111,15 +112,39 @@ test('the hook appends one silent line per event and records the agent’s windo
   }
   const file = join(sessionStateDirectory({ XDG_STATE_HOME: home }), 'claude-abc-1.jsonl');
   const written = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-  assert.deepEqual(written.map(line => line.e), ['start', 'prompt', 'approval', 'display', 'stop', 'end']);
+  // Turns and the session's end come from the transcript and the agent's process: those events write nothing.
+  assert.deepEqual(written.map(line => line.e), ['start', 'approval', 'display']);
   assert.equal(written[0].agentPid, process.pid);
   assert.equal(written[0].hostPid, process.ppid, 'The agent’s parent is its host');
   assert.deepEqual(written[0].kitty, { window: '19', socket: 'unix:/tmp/kitty-1' });
   assert.ok(!readFileSync(file, 'utf8').includes('secret prompt text'), 'Prompts are not copied');
-  assert.equal(written[2].summary.length, 200);
-  assert.ok(!written[2].summary.includes('\n'));
+  assert.equal(written[1].summary.length, 200);
+  assert.ok(!written[1].summary.includes('\n'));
   assert.equal((statSync(file).mode & 0o777).toString(8), '600');
-  assert.equal(foldSessionState(readFileSync(file, 'utf8'), live)!.phase, 'ended');
+  assert.equal(foldSessionState(readFileSync(file, 'utf8'), live)!.phase, 'waiting');
+});
+
+test('the plugins hook only what the transcript lacks or has too late', () => {
+  const events = (file: string) => {
+    const manifest = JSON.parse(readFileSync(resolve(__dirname, '../..', file), 'utf8'));
+    return Object.keys(manifest.hooks.hooks ?? manifest.hooks).sort();
+  };
+  assert.deepEqual(events('plugins/sidecar-state/.claude-plugin/plugin.json'), ['MessageDisplay', 'PermissionRequest', 'SessionStart']);
+  assert.deepEqual(events('plugins/sidecar-state/.codex-plugin/plugin.json'), ['PermissionRequest', 'SessionStart']);
+  assert.deepEqual(events('plugins/sidecar-split/.claude-plugin/plugin.json'), ['SessionStart']);
+  assert.deepEqual(events('plugins/sidecar-split/.codex-plugin/plugin.json'), ['SessionStart']);
+});
+
+test('a session’s latest activity is its transcript’s last write', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'sidecar-state-'));
+  const transcript = join(directory, 'transcript.jsonl');
+  writeFileSync(transcript, '{}\n');
+  utimesSync(transcript, new Date(50_000), new Date(50_000));
+  writeFileSync(join(directory, 'claude-a.jsonl'), lines(start(1_000, { session: 'a', transcript, hostPid: 100 })));
+  writeFileSync(join(directory, 'claude-b.jsonl'), lines(start(20_000, { session: 'b', hostPid: 100 })));
+  const states = await readSessionStates(directory, live);
+  assert.equal(states.find(state => state.session === 'a')!.activeAt, 50_000);
+  assert.equal(currentSession(states, 100)?.session, 'a', 'The window follows the session that wrote last, not the one that started last');
 });
 
 test('the hook ignores what it cannot place and never fails the agent', () => {
@@ -167,8 +192,11 @@ test('a draft shows until the transcript holds the same words, and never once id
   assert.equal(pendingDraft(state, []), '1. **同时处理多个任务**：你可以一边');
   assert.equal(pendingDraft(state, ['先看一下。']), '1. **同时处理多个任务**：你可以一边');
   assert.equal(pendingDraft(state, ['1. **同时处理多个任务**：你可以一边编辑代码，一边看测试输出。\n2. …']), undefined);
-  assert.equal(pendingDraft({ ...state, phase: 'idle' }, []), undefined);
+  assert.equal(pendingDraft({ ...state, phase: 'ended' }, []), undefined);
   assert.equal(pendingDraft(undefined, []), undefined);
+  // The transcript moved past the draft (an interruption, the next turn): the draft is gone.
+  assert.equal(pendingDraft(state, [], 3 + DRAFT_SUPERSEDED_MS + 1), undefined);
+  assert.equal(pendingDraft(state, [], 3 + DRAFT_SUPERSEDED_MS), '1. **同时处理多个任务**：你可以一边', 'A record written alongside the draft does not retire it');
 });
 
 test('a cached read skips unchanged files but still notices a dead agent', async () => {

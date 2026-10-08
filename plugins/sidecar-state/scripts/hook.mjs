@@ -3,6 +3,11 @@
 //   hook.mjs <claude|codex> <agent pid>        (the hook's JSON arrives on stdin)
 //
 // Appends one line per event to the session's state file; see SESSION_STATE.md.
+// Only what the transcript lacks or has too late: which window the session is
+// in (SessionStart), that the agent waits for an approval (PermissionRequest),
+// and text on screen before the transcript has it (MessageDisplay, Claude).
+// When a turn starts or ends, and when the session ends, come from the
+// transcript and from the agent's process instead.
 // It prints nothing, because a SessionStart hook's stdout becomes the model's
 // context, and it never fails: a broken Sidecar must not get in the agent's way.
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync } from 'node:fs';
@@ -53,14 +58,9 @@ export function record(provider, agentPid, input, now = Date.now(), env = proces
         cwd: input.cwd ?? '', agentPid: pid, hostPid: parentOf(pid) ?? 0, ...(front ? { serverPid: front.server } : {}),
         source: input.source ?? '', ...(kitty ? { kitty } : {}) };
     }
-    case 'UserPromptSubmit': return { ...base, e: 'prompt' };
     case 'PermissionRequest': return { ...base, e: 'approval', tool: oneLine(input.tool_name ?? '', 80), summary: summary(input.tool_input) };
     case 'MessageDisplay': return { ...base, e: 'display', message: String(input.message_id ?? ''), index: Number(input.index) || 0,
       final: Boolean(input.final), text: String(input.delta ?? '').slice(0, TEXT_LIMIT) };
-    case 'Stop': return { ...base, e: 'stop' };
-    case 'StopFailure': return { ...base, e: 'stop', reason: 'failure' };
-    case 'Interrupt': return { ...base, e: 'stop', reason: 'interrupt' };
-    case 'SessionEnd': return { ...base, e: 'end', reason: oneLine(input.reason ?? '', 40) };
     default: return undefined;
   }
 }
@@ -94,8 +94,7 @@ export function handle(provider, agentPid, input, env = process.env, now = Date.
   const line = record(provider, agentPid, input, now, env, front);
   if (!line) return;
   const file = join(directory, `${provider}-${session}.jsonl`);
-  // Only a start opens a session's file. Codex ends a session it never started
-  // when it quits before the first message; that leaves nothing to record.
+  // Only a start opens a session's file.
   if (line.e !== 'start' && !existsSync(file)) return;
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   // One short line per append: concurrent hooks never interleave inside a line.

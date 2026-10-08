@@ -108,7 +108,12 @@
   - 共用核心能在 mod 里运行：解析 → 按轮视图 → 终端排版打包成 579 KB 的 ESM（`node:crypto`、`node:path` 换成替代件，`node:fs` 等不在这条路径上）。在 mod 里用 `$.fs.read` 读 245 KB 的会话记录，读取 1ms、解析加排版共 65ms，最新一轮画进窗格；颜色、粗体、暗淡都生效（暗淡显示为主题灰色）。空行被压掉，要改。
   - 要处理：`actions.ts` 用 TypeScript 编译器解析 Codex 代码调用（约 9 MB），验证时换成了桩；`createHash` 要换成纯 JS 的同步实现；mods 接口标注 EARLY ACCESS（可能随版本改变，不另行通知）。
 - 仍待核实：VS Code 里 mods 窗格是否显示、能否代替 VS Code 版的 Claude 部分；Codex 等批准时 `thread/read` 是否带 `waitingOnApproval`；VS Code 里的 Claude Code 是否也写 `~/.claude/sessions/<pid>.json`。
-- 之后：写设计（来源层、共用核心、宿主层；Claude 走 mods，Codex 走 hook + 外部分屏），再决定实现范围。
+- 实现（0.4.0）：hook 精简到只记录会话记录里没有或来得太晚的信息。Claude Code：`SessionStart`（两个插件）、`PermissionRequest`、`MessageDisplay`，从 8 个减到 4 个；Codex：`SessionStart`（两个插件）、`PermissionRequest`，从 7 个减到 3 个。去掉 `UserPromptSubmit`、`Stop`、`StopFailure`、`Interrupt`、`SessionEnd`：一轮的开始和结束看会话记录，会话结束看 Agent 进程；`activeAt` 加上会话记录最后写入的时间（VS Code 版靠它选当前会话）；提前显示的文字在会话记录出现同样的文字、或出现比它晚 1 秒以上的记录时丢弃。旧版文件里的 prompt、stop、end 照样折叠。
+- 结果（2026-10-08，Claude Code 2.1.293、Codex 0.160.1 共用后台，tmux 3.6a；VS Code 宿主测试 14/14）：
+  - Claude：提交后 1.7s 内显示「运行中」，4.1s 显示「等你批准」；批准后立即回到「运行中」，一轮结束约 2s 后「空闲」；500 字回答的正文在栏里比会话记录早约 10s 出现；`/clear` 改绑、退出关栏正常。状态文件里只有 start、approval（和 display）。
+  - Codex：栏开在前台旁边，「运行中」来自会话记录，14.5s 显示「等你批准」（与 Codex 的批准提示同时）；批准后约 2s 回到「运行中」，结束后「空闲」；`/quit` 后栏关闭。Codex 要信任的 hook 从 7 个变成 3 个。
+  - 端到端发现并修复：折叠时「空闲就丢掉显示文字」原本防止一轮结束后迟到的片段；去掉 prompt hook 后会话一直是空闲，所有提前显示的文字都会被丢掉 → 改为由会话记录判断何时丢弃。
+- 审阅产物：`local/review/c2-5/` 下的栏文字记录（Claude 等批准、完成、长回答；Codex 等批准、完成）。
 
 ## C3 私有安装
 

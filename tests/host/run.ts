@@ -271,7 +271,6 @@ export async function run() {
         const line = (record: object) => appendFile(file, JSON.stringify({ v: 1, t: Date.now(), ...record }) + '\n');
         await line({ e: 'start', provider: 'claude', session: 'cl-fixture', transcript: claude.file, cwd: vscode.workspace.workspaceFolders![0].uri.fsPath,
           agentPid: process.pid, hostPid: process.pid, source: 'startup' });
-        await line({ e: 'prompt' });
         const until = async (done: () => boolean, what: string) => {
           const deadline = Date.now() + 8000;
           while (!done() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
@@ -281,10 +280,11 @@ export async function run() {
         await line({ e: 'approval', tool: 'Write', summary: '/fixture/numbers.txt' });
         await until(() => deliveries.some(message => message.type === 'observation' && message.turns.some((turn: any) => turn.html.includes('等你批准') && turn.html.includes('Write numbers.txt'))),
           'The approval reached the newest turn');
-        await line({ e: 'stop' });
+        // The agent moved on: a newer transcript record answers the approval (the hooks report no turns).
+        await appendFile(claude.file, JSON.stringify({ type: 'assistant', uuid: 'host-after-approval', sessionId: 'cl-fixture', timestamp: new Date(Date.now() + 1).toISOString(),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Approval handled.' }] } }) + '\n');
         await until(() => deliveries.filter(message => message.type === 'observation').at(-1)?.turns.every((turn: any) => !turn.html.includes('等你批准')), 'The answered approval is gone');
         result.followDelivery = { observations: deliveries.filter(message => message.type === 'observation').length };
-        await line({ e: 'end', reason: 'other' });
       } finally { webview.postMessage = originalPost; }
     });
     result.passed = true;

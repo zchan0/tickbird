@@ -111,7 +111,7 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
     const groups = visibleTurnGroups(session);
     const extras = liveExtras(session, state);
     const latest = groups.length ? turnView(groups[groups.length - 1], true, session.provider) : undefined;
-    const status = sessionStatus(latest, extras, Date.now(), { busy: live.health.agent === 'busy' || state?.phase === 'working', ended: state?.phase === 'ended' });
+    const status = sessionStatus(latest, extras, Date.now(), { busy: live.health.agent === 'busy', ended: state?.phase === 'ended' });
     return { session, groups, status, extras, caps, now: Date.now(), width: screen.width, height: screen.height, focusAgent: Boolean(focus) };
   };
   const waitingLines = (message: string): Line[] => {

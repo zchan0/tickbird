@@ -1,6 +1,6 @@
 # sidecar-state
 
-Agent Sidecar 的会话状态插件：给 Claude Code 和 Codex 的一组 hook，VS Code 版和终端版共用。终端版另有 `sidecar-split`（自动分屏），不在这里。它把每个会话「属于哪个窗口、是否在等你批准、屏幕上正在显示的长回答」追加写到本机的状态文件，VS Code 版和终端版读这些文件。它不显示任何东西，不改变 Agent 的行为，hook 的输出始终为空。格式见 [SESSION_STATE.md](../../docs/SESSION_STATE.md)。
+Agent Sidecar 的会话状态插件：给 Claude Code 和 Codex 的一组 hook，VS Code 版和终端版共用。终端版另有 `sidecar-split`（自动分屏），不在这里。它只订阅三种 hook（`SessionStart`、`PermissionRequest`，以及 Claude Code 的 `MessageDisplay`），把每个会话「属于哪个窗口、是否在等你批准、屏幕上正在显示的长回答」追加写到本机的状态文件；一轮的开始结束和会话的结束由显示端从会话记录和 Agent 进程得出，VS Code 版和终端版读这些文件。它不显示任何东西，不改变 Agent 的行为，hook 的输出始终为空。格式见 [SESSION_STATE.md](../../docs/SESSION_STATE.md)。
 
 - 同一个目录既是 Claude Code 插件（`.claude-plugin/plugin.json`），也是 Codex 插件（`.codex-plugin/plugin.json`），共用 `scripts/hook.mjs`。
 - `scripts/front.mjs` 找会话的前台（Codex 共用后台时是终端里的 `codex`），和 `sidecar-split` 里的同名文件必须一致（测试检查）：两个插件分开安装，不能互相引用。
@@ -17,6 +17,6 @@ Claude Code 和 Codex 都按版本号缓存已装的插件：改了这个目录�
 
 - Claude Code：`claude --plugin-dir <仓库>/plugins/sidecar-state`
 - 正式安装：`npm run install:vscode` 把本仓库登记为 Claude Code 和 Codex 的本地插件市场 `agent-sidecar`（`.claude-plugin/marketplace.json`、`.agents/plugins/marketplace.json`），并装上 `sidecar-state@agent-sidecar`。
-- Codex 装上后要在 Codex CLI 里执行一次 `/hooks`、按 `t` 信任这些 hook，否则 Codex 会静默跳过它们。Codex 把 `SessionEnd`、`Interrupt` 的超时限制在 3 秒，清单里按此设置。
+- Codex 装上后要在 Codex CLI 里执行一次 `/hooks`、按 `t` 信任这些 hook，否则 Codex 会静默跳过它们。
 
 停用：在 Claude Code 的 `/plugin`、Codex 的 `/plugins` 里关掉 sidecar-state。

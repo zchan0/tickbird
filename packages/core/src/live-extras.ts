@@ -22,9 +22,10 @@ export function lastRecordAt(session: SessionData): number | undefined {
 /** The extras for `session` from its state file, when the integration reports one. */
 export function liveExtras(session: SessionData | undefined, state: SessionState | undefined): LiveExtras {
   if (!session || !state) return {};
-  const approval = awaitingApproval(state, lastRecordAt(session)) ? state.approval : undefined;
+  const last = lastRecordAt(session);
+  const approval = awaitingApproval(state, last) ? state.approval : undefined;
   // Turn grouping costs a pass over the session: only when there is a draft to check.
   const latest = state.draft ? visibleTurnGroups(session).at(-1) : undefined;
-  const draft = latest && pendingDraft(state, latest.items.filter(item => item.kind === 'message' || item.kind === 'answer').map(publicBody));
+  const draft = latest && pendingDraft(state, latest.items.filter(item => item.kind === 'message' || item.kind === 'answer').map(publicBody), last);
   return { ...(approval ? { approval: { tool: approval.tool, summary: approval.summary } } : {}), ...(draft ? { draft } : {}) };
 }
