@@ -1,4 +1,5 @@
-import { appendFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { SessionCandidate } from '../../core/src/model';
 import { discoverSessions } from '../../core/src/sessions';
@@ -21,12 +22,17 @@ const STATE_POLL_MS = 1000;
 /**
  * Which session to show: the one named (by id or transcript path), or the
  * newest one of this directory. A session named by id is also looked up in the
- * integration's state files, which know its directory.
+ * integration's state files: they hold its transcript, wherever the agent
+ * keeps them (a custom CODEX_HOME too), and its directory.
  */
 export async function resolveSession(target: string | undefined, cwd: string, states: SessionState[]): Promise<SessionCandidate | undefined> {
   if (!target) return (await discoverSessions({ projectPath: cwd })).candidates[0];
   const file = existsSync(target) ? resolve(target) : undefined;
   const state = states.find(item => item.session === target || (file && item.transcript === file));
+  if (state?.transcript && existsSync(state.transcript)) {
+    return { id: state.session, provider: state.provider, file: state.transcript, projectPath: state.cwd,
+      updatedAt: statSync(state.transcript).mtimeMs, activity: 'unverified' };
+  }
   for (const projectPath of [cwd, state?.cwd].filter((path): path is string => Boolean(path))) {
     const found = (await discoverSessions({ projectPath })).candidates.find(candidate => candidate.id === target || candidate.file === file);
     if (found) return found;
@@ -34,12 +40,56 @@ export async function resolveSession(target: string | undefined, cwd: string, st
   return undefined;
 }
 
+/**
+ * How the pane was started. By hand: a session (id or transcript) or the
+ * newest of this directory. By the split plugin: `--agent <pid>` follows that
+ * agent process from session to session and exits with it; `--focus <json
+ * argv>` is the command that brings the agent's pane forward.
+ */
+export interface WatchOptions { target?: string; agent?: number; focus?: string[] }
+
+export function parseWatchArgs(args: string[]): WatchOptions | { error: string } {
+  const options: WatchOptions = {};
+  for (let at = 0; at < args.length; at++) {
+    const arg = args[at];
+    if (arg === '--agent') {
+      const pid = Number(args[++at]);
+      if (!Number.isInteger(pid) || pid <= 1) return { error: '--agent 需要 Agent 的进程号' };
+      options.agent = pid;
+    } else if (arg === '--focus') {
+      try {
+        const argv = JSON.parse(args[++at] ?? '');
+        if (!Array.isArray(argv) || !argv.length || !argv.every(item => typeof item === 'string')) throw new Error();
+        options.focus = argv;
+      } catch { return { error: '--focus 需要 JSON 字符串数组' }; }
+    } else if (arg.startsWith('-')) return { error: `不认识的参数 ${arg}` };
+    else if (options.target === undefined) options.target = arg;
+    else return { error: `多余的参数 ${arg}` };
+  }
+  return options;
+}
+
+/**
+ * The session an agent process is in now: its newest one not ended. /clear
+ * ends one session and starts the next in the same process; between the two,
+ * none is current and the pane keeps what it shows.
+ */
+export function agentSession(states: SessionState[], agentPid: number): SessionState | undefined {
+  return states.filter(state => state.agentPid === agentPid && state.phase !== 'ended').sort((a, b) => b.activeAt - a.activeAt)[0];
+}
+
+const alive = (pid: number): boolean => {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+};
+
 const SET_TITLE = (title: string) => `\x1b]2;${title.replace(/[\x00-\x1f\x7f]/g, ' ')}\x1b\\`;
 // xterm's title stack: keep the tab's own title and give it back on exit.
 const PUSH_TITLE = '\x1b[22;2t', POP_TITLE = '\x1b[23;2t';
 
-/** Runs the pane until q or Ctrl+C. The terminal must already be probed. */
-export async function watch(target: string | undefined, caps: Capabilities): Promise<void> {
+/** Runs the pane until q, Ctrl+C, or the agent it follows exits. The terminal must already be probed. */
+export async function watch(options: WatchOptions, caps: Capabilities): Promise<void> {
+  const { agent, focus } = options;
+  if (agent && !alive(agent)) return;
   const out = process.stdout, input = process.stdin;
   const screen = new Screen(out, caps, out.columns, out.rows);
   const cache: SessionStateCache = new Map();
@@ -49,6 +99,9 @@ export async function watch(target: string | undefined, caps: Capabilities): Pro
   let app: AppState = initialState();
   let title = '';
   let timer: NodeJS.Timeout | undefined;
+  /** The session to show: the one named, the agent's current one, or (undefined) the directory's newest. */
+  let target = options.target;
+  let opening = false;
   const parser = new InputParser();
 
   const stateOf = () => live && states.find(item => item.provider === live!.session.provider && item.session === live!.session.id);
@@ -59,12 +112,18 @@ export async function watch(target: string | undefined, caps: Capabilities): Pro
     const extras = liveExtras(session, state);
     const latest = groups.length ? turnView(groups[groups.length - 1], true, session.provider) : undefined;
     const status = sessionStatus(latest, extras, Date.now(), { busy: live.health.agent === 'busy' || state?.phase === 'working', ended: state?.phase === 'ended' });
-    return { session, groups, status, extras, caps, now: Date.now(), width: screen.width, height: screen.height };
+    return { session, groups, status, extras, caps, now: Date.now(), width: screen.width, height: screen.height, focusAgent: Boolean(focus) };
   };
-  const waitingLines = (message: string): Line[] => [row([{ text: ' Sidecar', style: { bold: true } }], '', screen.width), [], ...prose(message, screen.width - 1, { indent: 3, style: { dim: true } })];
+  const waitingLines = (message: string): Line[] => {
+    const lines: Line[] = [row([{ text: ' Sidecar', style: { bold: true } }], '', screen.width), [], ...prose(message, screen.width - 1, { indent: 3, style: { dim: true } })];
+    while (lines.length < screen.height - 1) lines.push([]);
+    return [...lines.slice(0, screen.height - 1), row('', [{ text: (focus ? 'a 切回 Agent   ' : '') + 'q 退出 ', style: { dim: true } }], screen.width)];
+  };
+  const waitingMessage = () => agent ? '等 Agent 的第一条消息：发出后，这里显示这个会话的过程。'
+    : target ? `找不到会话 ${target}` : '当前目录还没有 Agent 会话，开始一个会话后这里会自动显示。';
   const draw = () => {
     const current = model();
-    if (!current) { screen.render(waitingLines(target ? `找不到会话 ${target}` : '当前目录还没有 Agent 会话，开始一个会话后这里会自动显示。')); return; }
+    if (!current) { screen.render(waitingLines(waitingMessage())); return; }
     app = update(app, current);
     screen.render(frame(app, current));
     const next = windowTitle(current);
@@ -77,7 +136,13 @@ export async function watch(target: string | undefined, caps: Capabilities): Pro
     process.exit(0);
   };
   const say = (text: string, ms = 3000) => { if (text) app = { ...app, message: { text, until: Date.now() + ms } }; };
+  const focusAgent = () => {
+    if (!focus) return;
+    const result = spawnSync(focus[0], focus.slice(1), { stdio: 'ignore', timeout: 2000 });
+    if (result.error || result.status !== 0) say('无法切回 Agent：它的窗格可能已经关闭');
+  };
   const perform = (effect: Effect) => {
+    if (effect.kind === 'focus') { focusAgent(); return; }
     if (effect.kind === 'copy') {
       // OSC 52 only where the terminal says it takes it; otherwise the text is shown to copy by hand.
       if (caps.clipboard) { out.write(clipboardBytes(effect.text)); say(`已复制${effect.what}`); }
@@ -94,7 +159,11 @@ export async function watch(target: string | undefined, caps: Capabilities): Pro
     // SIDECAR_DEBUG_KEYS=<file>: every parsed key and the raw input, for tracking down terminal quirks.
     if (process.env.SIDECAR_DEBUG_KEYS) appendFileSync(process.env.SIDECAR_DEBUG_KEYS, events.map(event => describe(event)).join(' ') + '\n');
     for (const event of events) {
-      if (!current) { if (event.type === 'key' && (event.name === 'q' || (event.ctrl && event.name === 'c'))) finish(); continue; }
+      if (!current) {
+        if (event.type === 'key' && (event.name === 'q' || (event.ctrl && event.name === 'c'))) finish();
+        if (event.type === 'key' && event.name === 'a' && !event.ctrl && !event.alt) focusAgent();
+        continue;
+      }
       app = key(app, event, current);
       if (app.quit) finish();
       if (app.effect) { const effect = app.effect; delete app.effect; perform(effect); }
@@ -116,21 +185,41 @@ export async function watch(target: string | undefined, caps: Capabilities): Pro
   process.on('SIGHUP', finish);
   draw();
 
-  // Find the session; without one, look again until it appears.
-  while (!live) {
-    const candidate = await resolveSession(target, process.cwd(), states).catch(() => undefined);
-    if (candidate) {
-      live = await openLiveSession(candidate);
+  /**
+   * Opens the session to show, once its transcript exists. Bound to an agent,
+   * a new session of that agent (after /clear or /resume) replaces the old one
+   * in the same pane, starting fresh on its newest turn.
+   */
+  const follow = async () => {
+    if (opening) return;
+    opening = true;
+    try {
+      if (agent) {
+        const current = agentSession(states, agent);
+        if (current && current.session !== target) {
+          target = current.session;
+          if (live) { void live.close(); live = undefined; app = initialState(); }
+        }
+        if (!target) return;
+      }
+      if (live) return;
+      const wanted = target;
+      const candidate = await resolveSession(wanted, process.cwd(), states).catch(() => undefined);
+      if (!candidate || target !== wanted) return;
+      const opened = await openLiveSession(candidate);
+      if (target !== wanted || live) { void opened.close(); return; }
+      live = opened;
       live.start(() => draw());
-    } else {
-      await new Promise(done => setTimeout(done, 2000));
-      states = await readSessionStates(stateDir, undefined, cache);
-    }
-  }
+    } finally { opening = false; }
+  };
+
+  await follow();
   draw();
   // The state files and the running clock change without a transcript write.
   setInterval(async () => {
     states = await readSessionStates(stateDir, undefined, cache).catch(() => states);
+    if (agent && !alive(agent)) finish();
+    await follow();
     draw();
   }, STATE_POLL_MS);
 }

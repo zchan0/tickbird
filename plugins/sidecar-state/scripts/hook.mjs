@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { frontOf } from './front.mjs';
 
 const VERSION = 1;
 const KEEP_MS = 7 * 24 * 60 * 60 * 1000;
@@ -37,14 +38,20 @@ function summary(input) {
   return '';
 }
 
-/** Turns one hook input into the record to append, or nothing. */
-export function record(provider, agentPid, input, now = Date.now(), env = process.env) {
+/**
+ * Turns one hook input into the record to append, or nothing. `front` is
+ * the session's front when it is not the hook's agent (see front.mjs): its
+ * process is the session's agent, its environment says where it shows.
+ */
+export function record(provider, agentPid, input, now = Date.now(), env = process.env, front) {
   const base = { v: VERSION, t: now };
   switch (input.hook_event_name) {
     case 'SessionStart': {
-      const kitty = env.KITTY_WINDOW_ID && env.KITTY_LISTEN_ON ? { window: env.KITTY_WINDOW_ID, socket: env.KITTY_LISTEN_ON } : undefined;
+      const at = front ? front.env ?? {} : env, pid = front ? front.pid : agentPid;
+      const kitty = at.KITTY_WINDOW_ID && at.KITTY_LISTEN_ON ? { window: at.KITTY_WINDOW_ID, socket: at.KITTY_LISTEN_ON } : undefined;
       return { ...base, e: 'start', provider, session: input.session_id, transcript: input.transcript_path ?? null,
-        cwd: input.cwd ?? '', agentPid, hostPid: parentOf(agentPid) ?? 0, source: input.source ?? '', ...(kitty ? { kitty } : {}) };
+        cwd: input.cwd ?? '', agentPid: pid, hostPid: parentOf(pid) ?? 0, ...(front ? { serverPid: front.server } : {}),
+        source: input.source ?? '', ...(kitty ? { kitty } : {}) };
     }
     case 'UserPromptSubmit': return { ...base, e: 'prompt' };
     case 'PermissionRequest': return { ...base, e: 'approval', tool: oneLine(input.tool_name ?? '', 80), summary: summary(input.tool_input) };
@@ -77,9 +84,15 @@ export function handle(provider, agentPid, input, env = process.env, now = Date.
   if (provider !== 'claude' && provider !== 'codex') return;
   const session = input.session_id;
   if (typeof session !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(session)) return;
-  const line = record(provider, agentPid, input, now, env);
-  if (!line) return;
   const directory = stateDirectory(env);
+  // Codex's shared background server runs this hook for a front in some terminal: record that front.
+  let front;
+  if (provider === 'codex' && input.hook_event_name === 'SessionStart') {
+    const found = frontOf(agentPid, input.cwd || '');
+    if (found.server) front = found;
+  }
+  const line = record(provider, agentPid, input, now, env, front);
+  if (!line) return;
   const file = join(directory, `${provider}-${session}.jsonl`);
   // Only a start opens a session's file. Codex ends a session it never started
   // when it quits before the first message; that leaves nothing to record.

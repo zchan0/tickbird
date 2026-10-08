@@ -3,6 +3,7 @@
 Agent Sidecar 的会话状态插件：给 Claude Code 和 Codex 的一组 hook，VS Code 版和终端版共用。终端版另有 `sidecar-split`（自动分屏），不在这里。它把每个会话「属于哪个窗口、是否在等你批准、屏幕上正在显示的长回答」追加写到本机的状态文件，VS Code 版和终端版读这些文件。它不显示任何东西，不改变 Agent 的行为，hook 的输出始终为空。格式见 [SESSION_STATE.md](../../docs/SESSION_STATE.md)。
 
 - 同一个目录既是 Claude Code 插件（`.claude-plugin/plugin.json`），也是 Codex 插件（`.codex-plugin/plugin.json`），共用 `scripts/hook.mjs`。
+- `scripts/front.mjs` 找会话的前台（Codex 共用后台时是终端里的 `codex`），和 `sidecar-split` 里的同名文件必须一致（测试检查）：两个插件分开安装，不能互相引用。
 - 状态文件在 `~/.local/state/agent-sidecar/sessions/`（或 `$XDG_STATE_HOME/agent-sidecar/sessions/`），一个会话一个文件，权限 0600。
 - 只依赖 Node 自带模块。
 

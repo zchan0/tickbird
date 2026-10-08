@@ -3,7 +3,7 @@
 // Sets package.json (and its lockfile) and every plugin manifest under plugins/. Claude Code
 // and Codex cache an installed plugin by version, so a changed integration needs a new one.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,7 +11,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const version = process.argv[2];
 if (!/^\d+\.\d+\.\d+$/.test(version ?? '')) { console.error('用法：npm run set-version -- <主版本.次版本.修订号>'); process.exit(1); }
 execFileSync('npm', ['version', version, '--no-git-tag-version', '--allow-same-version'], { cwd: root, stdio: 'ignore' });
-for (const file of ['plugins/sidecar-state/.claude-plugin/plugin.json', 'plugins/sidecar-state/.codex-plugin/plugin.json']) {
+const manifests = readdirSync(join(root, 'plugins')).flatMap(plugin => ['.claude-plugin', '.codex-plugin'].map(kind => `plugins/${plugin}/${kind}/plugin.json`));
+for (const file of manifests) {
   const path = join(root, file), manifest = JSON.parse(readFileSync(path, 'utf8'));
   manifest.version = version;
   writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');

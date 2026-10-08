@@ -24,9 +24,11 @@ export interface Model {
   now: number;
   width: number;
   height: number;
+  /** The split adapter told the pane how to focus the agent: `a` does it. */
+  focusAgent?: boolean;
 }
 
-export type Effect = { kind: 'open'; path: string; line?: number } | { kind: 'copy'; text: string; what: string };
+export type Effect = { kind: 'open'; path: string; line?: number } | { kind: 'copy'; text: string; what: string } | { kind: 'focus' };
 
 export interface AppState {
   mode: 'turn' | 'contents' | 'help' | 'detail';
@@ -203,6 +205,7 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
   // Ctrl-d and Ctrl-u move half a page, as in vim and less; other Ctrl keys mean nothing here.
   const name = ctrl ? (event.name === 'd' ? 'halfdown' : event.name === 'u' ? 'halfup' : '') : event.name;
   if (name === 'q') return { ...state, quit: true };
+  if (name === 'a' && model.focusAgent) return { ...state, effect: { kind: 'focus' } };
   if (state.mode === 'help') return name === '?' || name === 'escape' ? { ...state, mode: state.detail ? 'detail' : 'turn' } : state;
   if (state.mode === 'detail') return detailKey(state, name, model);
   if (state.mode === 'contents') {
@@ -261,6 +264,7 @@ const HELP: Array<[string, string]> = [
   ['g  G', '开头 / 末尾（轮页的 G 回到最新一轮并恢复跟随）'],
   ['␣ b  ^d ^u', '整页 / 半页'],
   ['t  o  y', '目录 / 在编辑器打开 / 复制'],
+  ['a', '切回 Agent'],
   ['q', '退出'],
 ];
 
@@ -333,7 +337,7 @@ export function frame(state: AppState, model: Model): Line[] {
   lines.push(...headerLines(ctx), []);
   if (state.mode === 'help') {
     lines.push([{ text: ' ' }, { text: '按键', style: { bold: true } }], []);
-    for (const [keys, what] of HELP) lines.push(cutLine([{ text: '   ' + keys.padEnd(12) }, dim(what)], width));
+    for (const [keys, what] of HELP.filter(([keys]) => keys !== 'a' || model.focusAgent)) lines.push(cutLine([{ text: '   ' + keys.padEnd(12) }, dim(what)], width));
     lines.push([], cutLine([dim('   只读：按键只用来阅读和跳转，不会向 Agent 输入任何东西。')], width));
     while (lines.length < height - 1) lines.push([]);
     lines.push(row('', [dim('Esc 返回 ')], width));
@@ -353,8 +357,10 @@ export function frame(state: AppState, model: Model): Line[] {
       [{ text: ']', style: { bold: true } }, dim(' 跳到最新 ')], width));
   } else {
     const paused = !state.follow && state.index === model.groups.length - 1;
-    const keys = ['t 目录', targets.length ? (state.call !== undefined ? '⏎ 详情' : '↑↓ 选择') : '', '? 帮助'].filter(Boolean).join('   ');
-    lines.push(row(paused ? [dim(' 已暂停跟随 · G 恢复')] : '', [dim(keys + ' ')], width));
+    const left = ' 已暂停跟随 · G 恢复';
+    const keys = fitKeys(['t 目录', targets.length ? (state.call !== undefined ? '⏎ 详情' : '↑↓ 选择') : '', '? 帮助', model.focusAgent ? 'a 切回 Agent' : ''],
+      width - 2 - (paused ? textWidth(left) + 2 : 0));
+    lines.push(row(paused ? [dim(left)] : '', [dim(keys + ' ')], width));
   }
   return withMessage(lines.slice(0, height), state, model);
 }

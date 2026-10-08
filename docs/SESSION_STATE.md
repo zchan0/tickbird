@@ -31,7 +31,7 @@ $XDG_STATE_HOME/agent-sidecar/sessions/     默认 ~/.local/state/agent-sidecar/
 ```jsonc
 {"v":1,"t":1791164847514,"e":"start","provider":"claude","session":"<session-id>",
  "transcript":"/Users/…/<session-id>.jsonl","cwd":"/Users/…/project",
- "agentPid":68970,"hostPid":61907,"source":"startup",
+ "agentPid":68970,"hostPid":61907,"source":"startup",          // Codex 共用后台时还有 "serverPid"
  "kitty":{"window":"19","socket":"unix:/…/kitty-1604"}}      // 只在 kitty 里
 {"v":1,"t":…,"e":"prompt"}                                    // UserPromptSubmit
 {"v":1,"t":…,"e":"approval","tool":"Write","summary":"numbers.txt"}   // PermissionRequest
@@ -40,7 +40,8 @@ $XDG_STATE_HOME/agent-sidecar/sessions/     默认 ~/.local/state/agent-sidecar/
 {"v":1,"t":…,"e":"end","reason":"prompt_input_exit"}         // SessionEnd
 ```
 
-- `agentPid`：hook 的 `$PPID`，即 claude 进程或 Codex app-server。
+- `agentPid`：显示这个会话的进程（会话的"前台"），它退出就是会话结束。通常是 hook 的 `$PPID`：claude 进程，或 Codex app-server（VS Code、embedded 模式）。Codex 0.157 起默认用共用后台运行所有终端的会话，`$PPID` 是后台；这时记录终端里的 `codex` 前台（找法见 [TERMINAL_DESIGN.md](./TERMINAL_DESIGN.md) 第 9 节），`kitty` 也取自前台的环境变量。找不到或分不清时仍记录后台。
+- `serverPid`：只在上面的情况出现，是 Codex 共用后台的进程号，仅供排查。
 - `hostPid`：`agentPid` 的父进程。在 VS Code 里是所在窗口的扩展宿主；在终端里是 shell，不用于匹配。
 - `summary`：工具参数的一行摘要，最多 200 字符。不写完整参数。
 - `prompt` 事件不记录提示词原文：会话记录里已经有了。
@@ -51,7 +52,7 @@ $XDG_STATE_HOME/agent-sidecar/sessions/     默认 ~/.local/state/agent-sidecar/
 ```ts
 interface SessionState {
   provider: 'claude' | 'codex'; session: string; transcript?: string; cwd: string;
-  agentPid: number; hostPid: number; kitty?: { window: string; socket: string };
+  agentPid: number; hostPid: number; kitty?: { window: string; socket: string };   // serverPid 不折叠
   startedAt: number; activeAt: number;            // 最近一次 prompt / approval / display / stop
   phase: 'idle' | 'working' | 'waiting' | 'ended';
   approval?: { tool: string; summary: string; at: number };   // waiting 时才有
@@ -75,7 +76,7 @@ Agent 进程（`agentPid`）已经不在时，不论最后一个事件是什么�
 ## 显示端怎么用
 
 - **VS Code 版**：取 `hostPid` 等于本扩展 `process.pid`、且未结束的会话，跟随 `activeAt` 最新的那个。一个都没有时，回到现在的会话选择器。
-- **终端版**：kitty 栏按 `session` 绑定；`/clear`、`/resume` 产生新会话时，用同一 `kitty.window` 的新 `start` 改绑。
+- **终端版**：栏按 `agentPid` 绑定，显示这个进程最近活动、未结束的会话；`/clear`、`/resume`（Codex 的 `/new`）在同一进程里产生新的 `start`，栏随之改绑；进程消失时栏退出。会话记录按 `transcript` 打开，所以自定义的 `CODEX_HOME` 也能用。
 - **draft**：会话记录里出现同一段回答后，丢弃 draft。
 
 ## 清理

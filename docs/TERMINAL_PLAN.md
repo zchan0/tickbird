@@ -66,6 +66,15 @@
 - 单元测试：适配器选择（环境变量组合、kitty 里套 tmux）；hook 输出为空；命令参数。
 - 端到端（kitty 和 tmux 各一遍，Claude Code 和 Codex 都跑）：启动 Agent 后截图（栏自动出现、焦点在 Agent）；`/clear` 后截图（同一栏改绑）；在栏里按 `a`，检查焦点回到 Agent；退出 Agent，检查栏关闭；强杀 Agent，检查栏自己退出；在 Terminal.app 里启动，检查不开栏、无报错。
 - 审阅产物：每个场景的截图或窗口列表记录。
+- 结果（2026-10-08，kitty 0.48.2、tmux 3.6a、Claude Code 2.1.293、Codex 0.160.1 / 0.161.0）：
+  - kitty 和 tmux 里，Claude Code、Codex（embedded 和共用后台两种方式）都通过：自动开栏且焦点留在 Agent、`/clear` 或 `/new` 后同一栏改绑、`a` 切回、正常退出和 `kill -9` 后栏关闭。Terminal.app 不开栏、无报错。
+  - 同一目录两个 Codex（共用后台）：栏开在刚发消息的那个旁边；另一个 `/new` 后各自的栏只跟自己的会话。
+  - 端到端发现并修复：
+    - Codex 0.157 起 hook 在共用后台里运行，`$PPID` 是后台、环境变量来自第一个启动它的终端 → 增加 Agent 层（`front.mjs`）：找终端里的 `codex` 前台；`sidecar-state` 也记录前台（新增 `serverPid`）。
+    - "前台已有别的会话"不能用来区分同目录的几个 Codex（`/new` 不结束旧会话）→ 改用终端最近收到输入的时间。
+    - 栏只在默认目录找会话记录，自定义 `CODEX_HOME` 找不到 → 按状态文件里的 `transcript` 打开。
+    - 从 kitty 里启动的 Terminal.app 带着 `KITTY_WINDOW_ID`，日志误报为 kitty 没开远程控制 → kitty 还要求 `TERM=xterm-kitty` 或没有 `TERM_PROGRAM`。
+  - 设计调整：栏按 Agent 进程绑定并自己改绑、自己退出，插件不需要 `SessionEnd` hook；切回命令由插件用 `--focus` 传给栏。
 
 ## C3 私有安装
 

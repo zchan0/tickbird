@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { NONE, probe, symbol, SYMBOLS, type Capabilities, type ProbeIO } from './caps';
 import { describe, InputParser, type InputEvent } from './input';
-import { watch } from './watch';
+import { parseWatchArgs, watch } from './watch';
 import { cutLine, enterBytes, leaveBytes, row, Screen, type Color, type Line, type Span } from './screen';
 
 const ESCAPE_GAP_MS = 30;
@@ -135,9 +135,11 @@ async function main(argv: string[]): Promise<void> {
   if (command === 'demo') return demo();
   if (command === 'watch') {
     if (!process.stdin.isTTY || !process.stdout.isTTY) { process.stderr.write('watch 需要在终端里运行\n'); process.exitCode = 1; return; }
-    return watch(args.find(arg => !arg.startsWith('-')), await detect());
+    const options = parseWatchArgs(args);
+    if ('error' in options) { process.stderr.write(options.error + '\n'); process.exitCode = 2; return; }
+    return watch(options, await detect());
   }
-  process.stderr.write('用法：agent-sidecar watch [会话 ID 或记录文件] | caps [--json] | demo\n');
+  process.stderr.write('用法：agent-sidecar watch [会话 ID 或记录文件] [--agent 进程号 [--focus 命令]] | caps [--json] | demo\n');
   process.exitCode = 2;
 }
 

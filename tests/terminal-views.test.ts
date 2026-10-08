@@ -438,3 +438,20 @@ test('table columns: narrow ones keep their width, the rest share what is left',
 test('the running clock reads like the agents’', () => {
   assert.deepEqual([8_000, 65_000, 245_000, 3_725_000].map(runningClock), ['8s', '1m 05s', '4m 05s', '1h 02m']);
 });
+
+test('a focuses the agent only where the split adapter said how, and says so on screen', () => {
+  const plain = modelOf(parse([...FIRST, ...SECOND]));
+  const split = { ...plain, focusAgent: true };
+  const state = update(initialState(), plain);
+  assert.equal(key(state, keyOf('a'), plain).effect, undefined);
+  assert.ok(!text(frame(state, plain)).at(-1)!.includes('切回 Agent'));
+  assert.deepEqual(key(state, keyOf('a'), split).effect, { kind: 'focus' });
+  assert.deepEqual(key({ ...state, mode: 'contents' }, keyOf('a'), split).effect, { kind: 'focus' }, 'The same key on every page');
+  assert.match(text(frame(state, split)).at(-1)!, /a 切回 Agent $/);
+  assert.ok(text(frame({ ...state, mode: 'help' }, split)).some(line => line.includes('切回 Agent')));
+  assert.ok(!text(frame({ ...state, mode: 'help' }, plain)).some(line => line.includes('切回 Agent')));
+  // A narrow pane drops the hint rather than cutting the others.
+  const narrow = { ...split, width: 30 };
+  const footer = text(frame(update(initialState(), narrow), narrow)).at(-1)!;
+  assert.ok(textWidth(footer) <= 30 && !footer.includes('Agent'), footer);
+});

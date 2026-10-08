@@ -94,16 +94,44 @@ tmux 里：图片和通知需要 `allow-passthrough on`，链接需要 `terminal
 
 ## 9. 分屏适配器（插件 `sidecar-split`）
 
-会话开始时开栏，焦点留在 Agent；会话结束或 Agent 进程消失时关栏；`/clear` 后同一栏改绑新会话（从 `sidecar-state` 的状态文件读，不用原型的绑定文件）。
+会话开始时开栏，焦点留在 Agent；`/clear`（Codex 是 `/new`）后同一栏改绑新会话；Agent 退出或被强杀时栏自己退出；栏里按 `a` 切回 Agent。
 
-| 终端或复用器 | 识别 | 开栏 | 切回 Agent | 优先级 |
-| --- | --- | --- | --- | --- |
-| kitty | `KITTY_LISTEN_ON`、`KITTY_WINDOW_ID` | `kitten @ launch --location=vsplit --next-to … --keep-focus` | `kitten @ focus-window`，窗口号来自 `sidecar-state` | 先做（原型已实测开栏） |
-| tmux | `TMUX`、`TMUX_PANE` | `tmux split-window -h -d -l 35% -t $TMUX_PANE` | `tmux select-pane -t <窗格>` | 先做 |
-| WezTerm | `WEZTERM_PANE` | `wezterm cli split-pane --right --percent 35`，再切回焦点 | `wezterm cli activate-pane` | 接口留好 |
-| iTerm2 | `ITERM_SESSION_ID` | AppleScript 纵向分屏并运行命令 | AppleScript 按会话 ID 选中 | 接口留好 |
-| Zellij | `ZELLIJ` | `zellij run --direction right -- …` | `zellij action move-focus`（只能按方向） | 接口留好 |
-| 其它 | 不匹配 | 不自动开栏；手动 `agent-sidecar watch`（取当前目录最新会话） | 不支持，不显示 `a` | — |
+插件只有一个 `SessionStart` hook。栏按 **Agent 进程**绑定（`watch --agent <pid>`），不按会话：同一进程的新会话在 `sidecar-state` 里有新的 `start`，栏自己改绑；进程消失，栏 1 秒内退出。所以不需要 `SessionEnd` hook。切回 Agent 的命令由插件算好，用 `--focus <JSON 参数数组>` 传给栏，栏不需要认识终端。
+
+### 两层适配
+
+hook 只能知道三样东西：谁启动了它、启动者的环境变量、Agent 发来的会话信息。hook 在哪个进程里运行，决定了它知道什么。所以适配分两层：
+
+1. **Agent 层：找到会话的前台**（`scripts/front.mjs`，`sidecar-state` 里有同一份）。
+2. **终端层：在前台旁边开栏**（`scripts/adapters/`）。只用第 1 层给出的进程和环境变量，不关心是哪个 Agent。
+
+| Agent 的结构 | 例子 | 前台 | 怎么得到 |
+| --- | --- | --- | --- |
+| 一个会话一个进程，在终端里 | Claude Code；Codex 带 `-c`、`--no-daemon` 等（embedded） | 启动 hook 的 Agent | 直接得到，环境变量就是 hook 的 |
+| 编辑器托管 | VS Code 里的 Claude Code、Codex | 所在的 VS Code 窗口 | 不开栏（没有终端）；VS Code 版用 `hostPid` |
+| 共用后台 | Codex 0.157 起的默认方式 | 终端里的 `codex` 前台 | 见下 |
+| 后台会话 | `claude --bg`（每个会话仍是独立进程，在 `claude daemon` 给的虚拟终端里） | 没有，或 `claude attach` 所在的窗格 | 暂不支持：不开栏 |
+
+**Codex 共用后台**（2026-10-08 实测 Codex 0.160–0.161）：所有终端里的 `codex` 只负责显示，hook 在共用后台（`codex app-server … --managed-daemon`）里运行。后台的环境变量来自第一个启动它的终端，和当前窗格无关；后台不随会话退出，还会随 Codex 自动升级换进程。识别到这个后台时，按下面的顺序找前台：
+
+1. 有终端的 `codex` 进程中，当前目录与会话目录相同的（macOS 用 `lsof`，Linux 用 `/proc`）。
+2. 只有一个就用它。有几个时，取终端最近收到输入的那个（终端设备的访问时间，`w` 的空闲时间也用它）：Codex 在发出第一条消息时才开始会话。它必须在 30 秒内，并且比第二个早至少 2 秒，否则不开栏。
+3. 读它的环境变量（macOS 用 `ps -E`，Linux 用 `/proc/<pid>/environ`），交给终端层。
+
+不能用"前台已有别的会话"来排除：Codex 的 `/new` 不结束旧会话。协议（app-server JSON-RPC）里也没有"哪个客户端打开了这个会话"。
+
+### 终端层
+
+| 终端或复用器 | 识别 | 确认 Agent 就在这里 | 开栏 | 切回 Agent | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| tmux | `TMUX`、`TMUX_PANE` | 前台的终端等于窗格的 `pane_tty` | `split-window -h -d -l 35%`，窗格选项 `@sidecar_agent` | `select-window` + `select-pane` | 已做 |
+| kitty | `KITTY_WINDOW_ID`，且 `TERM=xterm-kitty` 或没有 `TERM_PROGRAM`；需要 `KITTY_LISTEN_ON` | 前台在窗口的前台进程里 | `launch --location=vsplit --keep-focus --bias=35`，用户变量 `sidecar_agent` | `focus-window` | 已做 |
+| Zellij、WezTerm、iTerm2 | `ZELLIJ`、`WEZTERM_PANE`、`ITERM_SESSION_ID` | | | | 识别，不开栏 |
+| 其它 | 不匹配 | | 不开栏；手动 `agent-sidecar watch` | 不显示 `a` | |
+
+按从内到外的顺序试（tmux 先于 kitty）。环境变量可能是从别的终端继承来的（比如从 kitty 里启动的 Terminal.app 带着 `KITTY_WINDOW_ID`），所以每个适配器都要确认 Agent 真在它的窗格里；不确定就不开栏，绝不开到别的窗口旁边。
+
+不开栏时，原因写进 `~/.local/state/agent-sidecar/split.log`；hook 没有任何输出。栏从 Agent 的环境里带上 `PATH`、`XDG_STATE_HOME`、`VISUAL`、`EDITOR`（kitty 的新窗口只有 kitty 自己的环境）。栏的程序：`$AGENT_SIDECAR_CLI`（脚本或程序），否则 PATH 上的 `agent-sidecar`。
 
 不想自动分屏：在 Agent 的插件管理里停用 `sidecar-split`。
 
@@ -118,8 +146,8 @@ packages/terminal/
   views/                turn page, contents, detail (file, diff, output), search, picker, help
   app.ts                selection, follow, binding from session state
 plugins/sidecar-state/  session state hooks                  shared with VS Code
-plugins/sidecar-split/  open / rebind / close the pane, focus the agent
-  adapters/             kitty, tmux, wezterm, iterm2, zellij
+plugins/sidecar-split/  open the pane beside the session's front (front.mjs), tell it how to focus the agent
+  adapters/             tmux, kitty; zellij, wezterm, iterm2 recognised only
 ```
 
 渲染层自己写，不用 Ink 等框架：要细控的是图片、链接、同步刷新、增强键盘等终端协议。宽度与断行规则沿用原型（`terminal-prototype` 分支的 `packages/terminal/src/width.ts`）。
