@@ -24,7 +24,11 @@ const LOG_LIMIT = 256 * 1024;
 /** What the pane needs from the agent's environment: a kitty window starts with kitty's own. */
 const PASSED = ['PATH', 'XDG_STATE_HOME', 'VISUAL', 'EDITOR'];
 
-/** The pane's program: $AGENT_SIDECAR_CLI (a script run with this node, or a program), else agent-sidecar on PATH. */
+/**
+ * The pane's program: $AGENT_SIDECAR_CLI (a script run with this node, or a
+ * program), else agent-sidecar on PATH, else where `npm run install:terminal`
+ * puts it: a hook's PATH may be another program's (Codex's background server).
+ */
 export function paneProgram(env, tools = { which }) {
   const named = env.AGENT_SIDECAR_CLI;
   if (named) {
@@ -32,7 +36,7 @@ export function paneProgram(env, tools = { which }) {
     if (!existsSync(file)) return undefined;
     return /\.[cm]?js$/.test(file) ? [process.execPath, file] : [file];
   }
-  const found = tools.which('agent-sidecar', env);
+  const found = tools.which('agent-sidecar', env) ?? tools.which('agent-sidecar', { PATH: join(env.HOME || homedir(), '.local', 'bin') });
   return found ? [found] : undefined;
 }
 

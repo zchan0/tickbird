@@ -32,7 +32,21 @@ npm run install:vscode
 2. 把本仓库登记为 Claude Code 的本地插件市场（`.claude-plugin/marketplace.json`），装上插件 `sidecar-state@agent-sidecar`。新开的会话生效，`/plugin` 里可以停用。
 3. 把本仓库登记为 Codex 的本地插件市场（`.agents/plugins/marketplace.json`），装上同一个接入。**还要在 Codex CLI 里执行一次 `/hooks`，按 `t` 信任它的 hook**，否则 Codex 会静默跳过。
 
-装进 Claude Code 和 Codex 的是插件 `sidecar-state`：一组只写会话状态的 hook，VS Code 版靠它自动跟随会话、显示「等你批准」，以后的终端版也用它。终端版另外还会装一个 `sidecar-split`，只负责在 kitty 里自动分屏；只装 VS Code 版时不会装它。
+装进 Claude Code 和 Codex 的是插件 `sidecar-state`：一组只写会话状态的 hook，VS Code 版靠它自动跟随会话、显示「等你批准」，终端版也用它。终端版另外还会装一个 `sidecar-split`，只负责在 kitty、tmux 里自动开栏；只装 VS Code 版时不会装它。
+
+### 安装终端版（私有）
+
+```sh
+npm run install:terminal
+```
+
+可以重复运行来更新：
+
+1. 把终端版打成单文件 `~/.local/share/agent-sidecar/cli.cjs`，并放一个命令 `~/.local/bin/agent-sidecar`。
+2. 已装的 VS Code 版比它旧时，一起更新 VS Code 扩展：两者读同一份会话状态。
+3. 运行 `agent-sidecar setup`：给 Claude Code 和 Codex 装上 `sidecar-state` 和 `sidecar-split`；检查 tmux；kitty 没开远程控制时，说明要加的两行，在终端里运行时会问你要不要替你备份并加上（加上后要完全退出并重新打开 kitty）。Codex 第一次启动会提示 **Hooks need review**，选 Trust all。
+
+之后在 kitty 或 tmux 里新开 Claude Code 或 Codex 会话，旁边会自动开一栏。不想自动开栏，在 Agent 的插件管理里停用 `sidecar-split`。卸载：`agent-sidecar uninstall`（VS Code 版还装着时保留 `sidecar-state`）。
 
 `npm run package:vscode` 只打包，不安装。产品和接入用同一个版本号，用 `npm run set-version -- x.y.z` 修改；改了 `plugins/` 下的插件后必须升版本再安装，见 [plugins/sidecar-state/README.md](./plugins/sidecar-state/README.md)。
 

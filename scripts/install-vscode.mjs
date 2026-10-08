@@ -2,30 +2,30 @@
 //   1. Bundle the extension and package build/agent-sidecar-<version>.vsix.
 //   2. Install the .vsix into VS Code.
 //   3. Install the integration into Claude Code and Codex from this checkout's marketplaces.
-// `--package-only` stops after step 1. Nothing is published anywhere.
+// `--package-only` stops after step 1, `--extension-only` after step 2 (the terminal
+// install runs it, then installs the plugins itself). Runs after `npm run build`.
+// Nothing is published anywhere.
 import { build } from 'esbuild';
 import { spawnSync } from 'node:child_process';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const packageOnly = process.argv.includes('--package-only');
+const packageOnly = process.argv.includes('--package-only'), extensionOnly = process.argv.includes('--extension-only');
 const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const stage = join(root, 'build', 'vsix');
 const vsix = join(root, 'build', `${manifest.name}-${manifest.version}.vsix`);
-const MARKETPLACE = 'agent-sidecar', PLUGIN = 'sidecar-state', ID = `${PLUGIN}@${MARKETPLACE}`;
-// Names used before 2026-10-05; removed on sight so a reinstall leaves one copy.
-const OLD = { extension: 'agent-sidecar-local.agent-sidecar', marketplace: 'agent-sidecar-local', id: 'agent-sidecar@agent-sidecar-local' };
+// The extension's name before 2026-10-05; removed on sight so a reinstall leaves one copy.
+const OLD = { extension: 'agent-sidecar-local.agent-sidecar' };
 let failed = false;
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, { encoding: 'utf8', ...options });
   return { ok: result.status === 0 && !result.error, out: `${result.stdout ?? ''}${result.stderr ?? ''}`.trim(), missing: result.error?.code === 'ENOENT' };
 };
-const json = (command, args) => { const result = run(command, args); try { return result.ok ? JSON.parse(result.out) : undefined; } catch { return undefined; } };
 const report = (ok, what, note = '') => { if (!ok) failed = true; console.log(`${ok ? '✓' : '✗'} ${what}${note ? `：${note}` : ''}`); };
-const lastLine = text => text.split('\n').filter(Boolean).at(-1) ?? '';
 
 // 1. One bundled file, so the .vsix carries no node_modules.
 await rm(stage, { recursive: true, force: true });
@@ -46,35 +46,13 @@ if (run(code, ['--list-extensions']).out.split('\n').includes(OLD.extension)) re
 const extension = run(code, ['--install-extension', vsix, '--force']);
 report(extension.ok, 'VS Code 扩展', extension.ok ? '已安装；已打开的窗口执行 Developer: Reload Window 后生效' : extension.out);
 
-// 3a. Claude Code: this checkout as a folder marketplace; a changed integration gets a new content version.
-const claudeMarkets = json('claude', ['plugin', 'marketplace', 'list', '--json']);
-if (!claudeMarkets) report(false, 'Claude Code 接入', '没有找到 claude 命令，跳过');
-else {
-  if ((json('claude', ['plugin', 'list', '--json']) ?? []).some(item => item.id === OLD.id)) report(run('claude', ['plugin', 'uninstall', OLD.id]).ok, `移除旧插件 ${OLD.id}（Claude Code）`);
-  if (claudeMarkets.some(item => item.name === OLD.marketplace)) report(run('claude', ['plugin', 'marketplace', 'remove', OLD.marketplace]).ok, `移除旧市场 ${OLD.marketplace}（Claude Code）`);
-  const market = claudeMarkets.some(item => item.name === MARKETPLACE)
-    ? run('claude', ['plugin', 'marketplace', 'update', MARKETPLACE]) : run('claude', ['plugin', 'marketplace', 'add', root]);
-  const installed = (json('claude', ['plugin', 'list', '--json']) ?? []).some(item => item.id === ID);
-  const plugin = market.ok && (installed ? run('claude', ['plugin', 'update', ID]) : run('claude', ['plugin', 'install', ID, '--scope', 'user']));
-  report(Boolean(market.ok && plugin?.ok), 'Claude Code 接入', !market.ok ? market.out : plugin.ok ? `${installed ? '已更新' : '已安装'}（/plugin 里可以停用）；新开的会话生效` : plugin.out);
-}
-
-// 3b. Codex: the same folder through .agents/plugins/marketplace.json.
-const codexMarkets = json('codex', ['plugin', 'marketplace', 'list', '--json']);
-if (!codexMarkets) report(false, 'Codex 接入', '没有找到 codex 命令，跳过');
-else {
-  // Codex lists a marketplace by the name in its manifest, not the key it was added under:
-  // after a rename the old entry looks like the new one. Try the removals outright, then re-read.
-  // `codex plugin remove` reports success even for a plugin that is not there: run it, do not report it.
-  run('codex', ['plugin', 'remove', OLD.id]);
-  const removedMarket = run('codex', ['plugin', 'marketplace', 'remove', OLD.marketplace]).ok;
-  if (removedMarket) report(true, `移除旧市场 ${OLD.marketplace}（Codex）；旧插件的 hook 信任记录留在 ~/.codex/config.toml，不影响使用`);
-  const markets = removedMarket ? json('codex', ['plugin', 'marketplace', 'list', '--json']) ?? {} : codexMarkets;
-  const known = (markets.marketplaces ?? []).some(item => item.name === MARKETPLACE);
-  const market = known ? { ok: true } : run('codex', ['plugin', 'marketplace', 'add', root]);
-  const plugin = market.ok && run('codex', ['plugin', 'add', ID]);
-  report(Boolean(market.ok && plugin?.ok), 'Codex 接入', !market.ok ? market.out : plugin.ok ? '已安装' : lastLine(plugin.out));
-  if (market.ok && plugin?.ok) console.log('  还差一步：在 Codex CLI 里执行 /hooks，按 t 信任 sidecar-state 的 hook。未信任时 Codex 会静默跳过它们。');
+// 3. The integration in Claude Code and Codex, the same code `agent-sidecar setup` runs.
+if (!extensionOnly) {
+  const { claudePlugins, codexPlugins, consoleReport, spawnRunner, STATE } = createRequire(import.meta.url)(join(root, 'dist/packages/terminal/src/setup.js'));
+  const plugins = consoleReport();
+  claudePlugins(spawnRunner, root, [STATE], plugins);
+  if (codexPlugins(spawnRunner, root, [STATE], plugins)) console.log('  还差一步：Codex 第一次启动时会提示 Hooks need review，选 Trust all（或在 Codex 里执行 /hooks，按 t）。未信任时 Codex 会静默跳过它们。');
+  if (plugins.failed) failed = true;
 }
 
 process.exit(failed ? 1 : 0);

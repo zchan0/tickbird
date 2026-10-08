@@ -120,3 +120,11 @@
 - 内容：`npm run install:terminal`、`agent-sidecar setup`（装 `sidecar-state` 与 `sidecar-split`，引导 Codex 信任 hook）；卸载时不误删 VS Code 版仍在用的 `sidecar-state`。
 - 端到端：在你本机安装；新开 kitty 窗口启动 Claude Code，检查自动分屏；运行 `setup` 两遍，检查结果相同；卸载终端版，检查 `sidecar-state` 仍在。
 - 审阅产物：安装输出和一张实际使用中的截图。
+- 结果（2026-10-08，0.4.1）：
+  - `npm run install:terminal`：打包 `~/.local/share/agent-sidecar/cli.cjs`，命令 `~/.local/bin/agent-sidecar`（先用 PATH 上的 node，没有就用安装时的 node）；VS Code 扩展 0.2.0 → 0.4.1 一起更新；`setup` 给 Claude Code 和 Codex 装上 `sidecar-state`、`sidecar-split`（0.4.1）。装插件的代码由 `install:vscode` 和 `setup` 共用（`packages/terminal/src/setup.ts`）。
+  - `setup` 运行两遍：两个 Agent 里的插件和版本相同，没有重复安装。
+  - 实际使用：tmux 里直接运行 `claude`（不加任何参数），自动开栏，栏里运行的是装好的 `cli.cjs`；一轮内容正常；`/exit` 后栏关闭。
+  - `agent-sidecar uninstall`：移除两个 Agent 里的 `sidecar-split`、命令和程序文件；VS Code 版还在，所以保留 `sidecar-state`。之后重新安装，VS Code 扩展已是同一版本，不再重装。
+  - hook 的 PATH 可能来自别的程序（Codex 共用后台）：找不到 `agent-sidecar` 时，退回到 `~/.local/bin/agent-sidecar`。
+  - 待用户完成：在自己的终端运行 `agent-sidecar setup`，同意后由它备份 kitty.conf 并加上远程控制两行，再完全重启 kitty；Codex 共用后台重启后（Codex 会提示），在 Hooks need review 里选 Trust all。
+- 审阅产物：`local/review/c3/`（安装、卸载输出，tmux 里实际使用的栏）。

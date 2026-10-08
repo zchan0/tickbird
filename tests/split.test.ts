@@ -158,6 +158,15 @@ test('the hook prints nothing, never fails, and logs what it decided', () => {
   assert.equal(result.stdout, '');
 });
 
+test('the pane’s program: the named one, else agent-sidecar on PATH, else the install location', () => {
+  const paneProgram = (require(join(pluginDir, 'split.mjs')) as { paneProgram(env: NodeJS.ProcessEnv, tools: { which: (name: string, env: NodeJS.ProcessEnv) => string | undefined }): string[] | undefined }).paneProgram;
+  const looked: string[] = [];
+  const which = (name: string, env: NodeJS.ProcessEnv) => { looked.push(env.PATH ?? ''); return env.PATH === '/home/me/.local/bin' ? `${env.PATH}/${name}` : undefined; };
+  assert.deepEqual(paneProgram({ PATH: '/usr/bin', HOME: '/home/me' }, { which }), ['/home/me/.local/bin/agent-sidecar']);
+  assert.deepEqual(looked, ['/usr/bin', '/home/me/.local/bin']);
+  assert.deepEqual(paneProgram({ AGENT_SIDECAR_CLI: CLI.AGENT_SIDECAR_CLI }, { which }), [process.execPath, CLI.AGENT_SIDECAR_CLI]);
+});
+
 test('the pane’s command line round-trips through watch’s arguments', () => {
   const focus = ['/bin/tmux', '-S', '/tmp/a b', 'select-window', '-t', '%3', ';', 'select-pane', '-t', '%3'];
   const argv = split.paneArgv(['/usr/local/bin/agent-sidecar'], AGENT, focus);
