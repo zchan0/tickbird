@@ -8,7 +8,7 @@ import { claudePlugins, codexPlugins, kitty, kittyRemote, KITTY_LINES, olderThan
 const SOURCE = resolve(__dirname, '../..');
 
 /** claude, codex and code as they answer, remembering what was installed. */
-function agents(options: { vscode?: string; claude?: boolean; codex?: boolean } = {}) {
+function agents(options: { vscode?: string; claude?: boolean; codex?: boolean; kitty?: boolean } = {}) {
   const claude = { markets: [] as string[], plugins: [] as string[] }, codex = { markets: [] as string[], plugins: [] as string[] };
   const calls: string[] = [];
   const ok = (out = '') => ({ ok: true, out });
@@ -37,6 +37,7 @@ function agents(options: { vscode?: string; claude?: boolean; codex?: boolean } 
     }
     if (command.endsWith('code')) return options.vscode ? ok(`ms-python.python@1.0.0\nzchan0.agent-sidecar@${options.vscode}`) : ok('ms-python.python@1.0.0');
     if (command === 'tmux') return ok('tmux 3.6a');
+    if (command === 'kitty') return options.kitty === false ? { ok: false, out: '', missing: true } : ok('kitty 0.48.2');
     return { ok: false, out: '', missing: true };
   };
   return { run, calls, claude, codex };
@@ -129,6 +130,18 @@ test('setup twice leaves the same machine, and says what is left to do', async (
   const nowhere = collect();
   assert.equal(await setup({ ...options, paths: { data: join(data, 'none'), bin: data }, report: nowhere }), false);
   assert.match(nowhere.lines[0]!, /找不到插件来源/);
+});
+
+test('setup leaves kitty alone where kitty is not installed', async () => {
+  const data = mkdtempSync(join(tmpdir(), 'sidecar-data-'));
+  writeFileSync(join(data, 'install.json'), JSON.stringify({ source: SOURCE, version: '0.4.0' }));
+  const report = collect();
+  let asked = false;
+  await setup({ run: agents({ kitty: false }).run, report, paths: { data, bin: join(data, 'bin') }, kittyApp: join(data, 'no-kitty.app'),
+    env: { KITTY_CONFIG_DIRECTORY: join(data, 'no-kitty') }, ask: async () => { asked = true; return true; } });
+  assert.ok(!report.lines.some(line => line.includes('kitty')), report.lines.join('\n'));
+  assert.equal(asked, false);
+  assert.equal(existsSync(join(data, 'no-kitty', 'kitty.conf')), false);
 });
 
 test('uninstall removes the terminal version and keeps sidecar-state while VS Code uses it', async () => {

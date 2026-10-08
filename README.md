@@ -44,7 +44,7 @@ npm run install:terminal
 
 1. 把终端版打成单文件 `~/.local/share/agent-sidecar/cli.cjs`，并放一个命令 `~/.local/bin/agent-sidecar`。
 2. 已装的 VS Code 版比它旧时，一起更新 VS Code 扩展：两者读同一份会话状态。
-3. 运行 `agent-sidecar setup`：给 Claude Code 和 Codex 装上 `sidecar-state` 和 `sidecar-split`；检查 tmux；kitty 没开远程控制时，说明要加的两行，在终端里运行时会问你要不要替你备份并加上（加上后要完全退出并重新打开 kitty）。Codex 第一次启动会提示 **Hooks need review**，选 Trust all。
+3. 运行 `agent-sidecar setup`：给 Claude Code 和 Codex 装上 `sidecar-state` 和 `sidecar-split`；检查 tmux；装了 kitty、但它没开远程控制时，说明要加的两行，在终端里运行时会问你要不要替你备份并加上（加上后要完全退出并重新打开 kitty）。Codex 第一次启动会提示 **Hooks need review**，选 Trust all。
 
 之后在 kitty 或 tmux 里新开 Claude Code 或 Codex 会话，旁边会自动开一栏。不想自动开栏，在 Agent 的插件管理里停用 `sidecar-split`。卸载：`agent-sidecar uninstall`（VS Code 版还装着时保留 `sidecar-state`）。
 

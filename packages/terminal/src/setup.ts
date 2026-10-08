@@ -115,7 +115,12 @@ export function kittyRemote(text: string): { remote: boolean; listen: boolean; s
 /** The lines setup appends: kitty listens on a socket per instance, and only that socket controls it. */
 export const KITTY_LINES = ['# Agent Sidecar: open the Sidecar pane beside an agent (agent-sidecar setup)', 'allow_remote_control socket-only', 'listen_on unix:${TMPDIR}/kitty-{kitty_pid}'];
 
-export interface KittyOptions { env?: NodeJS.ProcessEnv; ask?: (question: string) => Promise<boolean>; now?: Date }
+export interface KittyOptions { env?: NodeJS.ProcessEnv; ask?: (question: string) => Promise<boolean>; now?: Date; kittyApp?: string }
+
+/** kitty is here: its command answers, its app is installed, or it has a config. */
+export function kittyInstalled(run: Runner, env: NodeJS.ProcessEnv = process.env, app = '/Applications/kitty.app'): boolean {
+  return run('kitty', ['--version']).ok || existsSync(app) || existsSync(kittyConfigPath(env));
+}
 
 /**
  * Checks kitty's remote control. With `ask` answering yes, backs up
@@ -173,7 +178,8 @@ export async function setup(options: SetupOptions = {}): Promise<boolean> {
   const extension = vscodeExtension(run, env);
   if (extension && version && olderThan(extension, version)) report.info(`VS Code 版是 ${extension}，比接入（${version}）旧：在仓库里运行 npm run install:vscode 一起更新`);
   if (run('tmux', ['-V']).ok) report.ok('tmux', '可以自动开栏');
-  await kitty(report, options);
+  // Only a terminal that is here is checked; tmux and kitty are the ones with a split adapter today.
+  if (kittyInstalled(run, env, options.kittyApp)) await kitty(report, options);
   report.info('Agent 已经开着的会话不受影响：新开一个会话后生效');
   return !report.failed;
 }
