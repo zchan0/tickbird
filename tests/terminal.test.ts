@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { capabilitiesFrom, NONE, parseAnswers, probe, queries, symbol, SYMBOLS, type ProbeIO } from '../packages/terminal/src/caps';
 import { capsReport, demoLines } from '../packages/terminal/src/cli';
 import { describe, InputParser } from '../packages/terminal/src/input';
+import { clipboardBytes, editorArgs, editorCommand } from '../packages/terminal/src/effects';
 import { encodeLine, plainText, row, Screen } from '../packages/terminal/src/screen';
 import { clean, fit, textWidth, wrap } from '../packages/terminal/src/width';
 
@@ -215,4 +216,20 @@ test('every demo line fits the pane at any width', async () => {
     assert.equal(lines.length, height);
     for (const line of lines) assert.ok(textWidth(plainText(line)) <= width, `${width}: ${plainText(line)}`);
   }
+});
+
+test('o picks $VISUAL, then $EDITOR, then VS Code, then the system opener, each with its own line syntax', () => {
+  const none = () => false, code = (command: string) => command === 'code';
+  assert.deepEqual(editorCommand('/p/a.ts', 12, { VISUAL: 'nvim', EDITOR: 'nano' }, code), { command: 'nvim', args: ['+12', '/p/a.ts'], inPane: true, name: 'nvim' });
+  assert.deepEqual(editorCommand('/p/a.ts', 12, { EDITOR: 'code --wait' }, none), { command: 'code', args: ['--wait', '-g', '/p/a.ts:12'], inPane: false, name: 'code' });
+  assert.deepEqual(editorCommand('/p/a.ts', 12, {}, code), { command: 'code', args: ['-g', '/p/a.ts:12'], inPane: false, name: 'VS Code' });
+  assert.deepEqual(editorCommand('/p/a.ts', 12, {}, none, 'darwin'), { command: 'open', args: ['/p/a.ts'], inPane: false, name: '系统默认程序' });
+  assert.deepEqual(editorCommand('/p/a.ts', 12, {}, none, 'linux').command, 'xdg-open');
+  assert.deepEqual(editorArgs('/usr/local/bin/subl', '/p/a.ts', 3), ['/p/a.ts:3']);
+  assert.deepEqual(editorArgs('unknown-editor', '/p/a.ts', 3), ['/p/a.ts']);
+});
+
+test('y writes OSC 52 with the text in base64', () => {
+  assert.equal(clipboardBytes('npm test'), '\x1b]52;c;bnBtIHRlc3Q=\x1b\\');
+  assert.equal(Buffer.from(clipboardBytes('路径').slice(7, -2), 'base64').toString(), '路径');
 });

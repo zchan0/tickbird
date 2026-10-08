@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { SessionCandidate } from '../../core/src/model';
 import { discoverSessions } from '../../core/src/sessions';
@@ -8,9 +8,10 @@ import { liveExtras } from '../../core/src/live-extras';
 import { visibleTurnGroups } from '../../core/src/outline';
 import { turnView } from '../../core/src/turn-view';
 import type { Capabilities } from './caps';
-import { InputParser } from './input';
+import { describe, InputParser } from './input';
 import { enterBytes, leaveBytes, row, Screen, type Line } from './screen';
-import { frame, initialState, key, update, windowTitle, type AppState, type Model } from './app';
+import { frame, initialState, key, update, windowTitle, type AppState, type Effect, type Model } from './app';
+import { clipboardBytes, openFile } from './effects';
 import { sessionStatus } from './views/turn-page';
 import { prose } from './views/prose';
 
@@ -75,12 +76,28 @@ export async function watch(target: string | undefined, caps: Capabilities): Pro
     if (input.isTTY) input.setRawMode(false);
     process.exit(0);
   };
+  const say = (text: string, ms = 3000) => { if (text) app = { ...app, message: { text, until: Date.now() + ms } }; };
+  const perform = (effect: Effect) => {
+    if (effect.kind === 'copy') {
+      // OSC 52 only where the terminal says it takes it; otherwise the text is shown to copy by hand.
+      if (caps.clipboard) { out.write(clipboardBytes(effect.text)); say(`已复制${effect.what}`); }
+      else say(`这个终端不能直接复制，请手动复制：${effect.text}`, 15000);
+      return;
+    }
+    say(openFile(effect.path, effect.line, {
+      suspend: () => { out.write(leaveBytes(caps.kittyKeyboard)); input.setRawMode(false); },
+      resume: () => { input.setRawMode(true); out.write(enterBytes(caps.kittyKeyboard)); screen.resize(out.columns, out.rows); },
+    }), 4000);
+  };
   const handle = (events: ReturnType<InputParser['feed']>) => {
     const current = model();
+    // SIDECAR_DEBUG_KEYS=<file>: every parsed key and the raw input, for tracking down terminal quirks.
+    if (process.env.SIDECAR_DEBUG_KEYS) appendFileSync(process.env.SIDECAR_DEBUG_KEYS, events.map(event => describe(event)).join(' ') + '\n');
     for (const event of events) {
       if (!current) { if (event.type === 'key' && (event.name === 'q' || (event.ctrl && event.name === 'c'))) finish(); continue; }
       app = key(app, event, current);
       if (app.quit) finish();
+      if (app.effect) { const effect = app.effect; delete app.effect; perform(effect); }
     }
     draw();
   };
@@ -90,6 +107,7 @@ export async function watch(target: string | undefined, caps: Capabilities): Pro
   input.resume();
   input.on('data', chunk => {
     if (timer) clearTimeout(timer);
+    if (process.env.SIDECAR_DEBUG_KEYS) appendFileSync(process.env.SIDECAR_DEBUG_KEYS, 'raw ' + JSON.stringify(chunk.toString('utf8')) + '\n');
     handle(parser.feed(chunk.toString('utf8')));
     if (parser.pending) timer = setTimeout(() => handle(parser.flush()), ESCAPE_GAP_MS);
   });

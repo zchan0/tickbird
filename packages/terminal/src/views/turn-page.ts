@@ -138,7 +138,11 @@ function callLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waiting
       : call.note ? [{ text: call.note, style: DIM }]
       : call.out ? [{ text: waitingOn && isLast ? '?' : symbol(ctx.caps, '…'), style: YELLOW }]
       : [];
-    lines.push(row([{ text: '     ' }, { text: tool, style: DIM }, { text: '  ' }, { text: label }], right.length ? [...right, { text: ' ' }] : '', ctx.width));
+    // A call with a record to show ends in a dim arrow, as in the VS Code panel.
+    const arrow: Span[] = chapterRow.openable ? [{ text: (right.length ? ' ' : '') + symbol(ctx.caps, '→'), style: DIM }] : [];
+    const line = row([{ text: '     ' }, { text: tool, style: DIM }, { text: '  ' }, { text: label }], right.length || arrow.length ? [...right, ...arrow, { text: ' ' }] : '', ctx.width);
+    if (chapterRow.openable) CALL_OF.set(line, chapterRow);
+    lines.push(line);
     for (const choice of call.choices ?? []) {
       const chosen = choice.chosen.length ? choice.chosen.map(value => `${symbol(ctx.caps, '✓')} ${value}`).join('  ') : choice.waiting ? '等待你的选择' : '';
       if (chosen) lines.push(cutLine([{ text: ' '.repeat(7 + toolWidth) }, ...(choice.header ? [{ text: choice.header + '  ', style: DIM }] : []), { text: chosen, style: choice.chosen.length ? { bold: true } : DIM }], ctx.width));
@@ -183,6 +187,19 @@ function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
   if (view.turn.aborted) return [[{ text: ` 中断${calls}`, style: DIM }]];
   if (!view.turn.segments.length) return [];
   return [[{ text: ` ${s('✻')} ${view.done}${calls}`, style: DIM }]];
+}
+
+/** Which call a row line shows; lines are only ever reused, never copied, between here and the app. */
+const CALL_OF = new WeakMap<object, ChapterRow>();
+
+export interface CallTarget { line: number; row: ChapterRow }
+
+/** The page and where each call row is on it, for selecting and opening calls. */
+export function turnLayout(ctx: PageContext): { lines: Line[]; targets: CallTarget[] } {
+  const lines = turnBody(ctx);
+  const targets: CallTarget[] = [];
+  lines.forEach((line, index) => { const call = typeof line === 'object' ? CALL_OF.get(line) : undefined; if (call) targets.push({ line: index, row: call }); });
+  return { lines, targets };
 }
 
 /** The whole turn, top to bottom. Blocks are one blank line apart; a chapter's calls stay together. */

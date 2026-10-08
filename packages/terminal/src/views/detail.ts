@@ -1,0 +1,217 @@
+import { isAbsolute, join } from 'node:path';
+import type { SessionData } from '../../../core/src/model';
+import type { TurnGroup } from '../../../core/src/timeline';
+import { resolveOutlineEvidence } from '../../../core/src/outline';
+import { describeDisplayAction, fileLanguage, fileReading, presentEvidence, recordedFiles, toolOutputContents, type FileReading, type InputContent, type PatchFile } from '../../../core/src/presentation';
+import { chapterTurn, type ChapterRow } from '../../../core/src/chapters';
+import { outcomeWord } from '../../../core/src/turn-view';
+import { recordedToolInputs } from '../../../core/src/actions';
+import { plainText, type Line, type Span, type Style } from '../screen';
+import { textWidth } from '../width';
+import { hardWrap, highlightLines } from './code';
+import type { Glyph } from './prose';
+
+/**
+ * A call opened in the pane: a read shows the file as read, a change shows the
+ * diff as recorded, anything else its input and its return. Always the content
+ * of the time, from the transcript; the file on disk is only opened with `o`.
+ */
+export interface DetailDoc {
+  kind: 'file' | 'diff' | 'call';
+  /** File name, or the call's label. */
+  title: string;
+  /** Directory of the file, for the second header line. */
+  directory?: string;
+  /** Absolute path, for `o` and `y`. */
+  path?: string;
+  /** First line shown, for `o`. */
+  line?: number;
+  /** Right side of the header: "Read · 第 1–12 行", "Edit · 第 2 次 / 共 3 次". */
+  meta: string;
+  /** What `y` copies, and its name. */
+  copy: { text: string; what: string };
+  /** Other changes to the same file in this turn, switched with < >. */
+  edits?: { index: number; total: number };
+  lines: Line[];
+}
+
+const DIM: Style = { dim: true };
+const base = (path: string) => path.replace(/\\/g, '/').split('/').at(-1) || path;
+const dir = (path: string) => { const parts = path.replace(/\\/g, '/').split('/'); parts.pop(); return parts.length ? parts.join('/') + '/' : ''; };
+const absolute = (path: string, session: SessionData) => isAbsolute(path) ? path : join(session.projectPath, path);
+/** A path inside the project reads relative to it. */
+const shown = (path: string, session: SessionData) => {
+  const full = absolute(path, session), root = session.projectPath.replace(/\/$/, '') + '/';
+  return full.startsWith(root) ? full.slice(root.length) : full;
+};
+
+/**
+ * Every detail is made of panels of one shape: a left column, a bar, the text.
+ * The left column holds a line number, a + or -, or nothing. Long lines wrap
+ * under the bar with an empty left column.
+ */
+export interface PanelRow { mark?: string; markStyle?: Style; spans: Span[] }
+const GUTTER = 4;
+
+export function panel(rows: PanelRow[], width: number, glyph: Glyph): Line[] {
+  const gutter = Math.max(GUTTER, ...rows.map(row => textWidth(row.mark ?? '')));
+  const bar = glyph('│');
+  const room = Math.max(8, width - gutter - 4);
+  return rows.flatMap(row => (row.spans.length ? hardWrap(row.spans, room) : [[]]).map((part, piece) => [
+    { text: ' ' + (piece ? '' : row.mark ?? '').padStart(gutter), style: row.markStyle ?? DIM },
+    { text: ` ${bar} `, style: DIM }, ...part,
+  ]));
+}
+
+/** A file as read: its line numbers in the left column, the text highlighted. */
+export function fileLines(reading: Pick<FileReading, 'lines' | 'start' | 'language'>, width: number, glyph: Glyph): Line[] {
+  return panel(highlightLines(reading.lines.join('\n'), reading.language).map((spans, index) => ({
+    ...(reading.start !== undefined ? { mark: String(reading.start + index) } : {}), spans,
+  })), width, glyph);
+}
+
+/** A recorded change: + and - in the left column. A whole file written is all +. */
+export function diffLines(file: PatchFile, width: number, glyph: Glyph): Line[] {
+  const rows: PanelRow[] = file.lines.map(raw => {
+    if (file.operation === 'write') return { mark: '+', markStyle: { fg: 'green' }, spans: [{ text: raw, style: { fg: 'green' } }] };
+    if (raw.startsWith('@@')) return { spans: [{ text: raw, style: { fg: 'cyan', dim: true } }] };
+    const sign = raw[0] === '+' || raw[0] === '-' ? raw[0] : '';
+    const style: Style = sign === '+' ? { fg: 'green' } : sign === '-' ? { fg: 'red' } : {};
+    return { mark: sign, markStyle: style, spans: [{ text: sign || raw[0] === ' ' ? raw.slice(1) : raw, style }] };
+  });
+  return panel(rows, width, glyph);
+}
+
+/** Code or output: a panel with an empty left column. */
+const codePanel = (text: string, language: string | undefined, width: number, glyph: Glyph): Line[] =>
+  panel(highlightLines(text.replace(/\n$/, ''), language).map(spans => ({ spans })), width, glyph);
+
+/** name: value rows, the name dim. A value's own lines stay lines. */
+const fieldRows = (fields: Array<[string, string]>): PanelRow[] => fields.flatMap(([name, value]) =>
+  value.split('\n').map((line, index) => ({ spans: index ? [{ text: '  ' + line }] : [{ text: name + ': ', style: DIM }, { text: line }] })));
+
+/** Extra arguments as fields. The description is left out: it is already the title. */
+function argumentFields(content: InputContent): Array<[string, string]> | undefined {
+  if (content.kind !== 'code' || content.label !== '参数') return undefined;
+  try {
+    const value = JSON.parse(content.text) as Record<string, unknown>;
+    return Object.entries(value).filter(([key]) => key !== 'description').map(([key, item]) => [key, typeof item === 'string' ? item : JSON.stringify(item)]);
+  } catch { return undefined; }
+}
+
+/** One call's input, as one panel. */
+function inputLines(contents: InputContent[], width: number, glyph: Glyph): Line[] {
+  const rows: PanelRow[] = [];
+  const lines: Line[] = [];
+  const flush = () => { if (rows.length) lines.push(...panel(rows.splice(0), width, glyph)); };
+  for (const content of contents) {
+    const fields = argumentFields(content);
+    if (fields) { rows.push(...fieldRows(fields)); continue; }
+    if (content.kind === 'fields') { rows.push(...fieldRows(content.rows.filter(([name]) => name !== '描述'))); continue; }
+    if (content.kind === 'code') { rows.push(...highlightLines(content.text.replace(/\n$/, ''), content.language).map(spans => ({ spans }))); continue; }
+    flush();
+    for (const file of content.files) {
+      if (content.files.length > 1) lines.push(section(file.path));
+      lines.push(...diffLines(file, width, glyph));
+    }
+  }
+  flush();
+  return lines;
+}
+
+/** Output contents as one panel. */
+const outputLines = (contents: InputContent[], width: number, glyph: Glyph): Line[] => panel(contents.flatMap((content): PanelRow[] =>
+  content.kind === 'fields' ? fieldRows(content.rows)
+    : content.kind === 'code' ? highlightLines(content.text.replace(/\n$/, ''), content.language).map(spans => ({ spans }))
+    : content.files.flatMap(file => file.lines.map(line => ({ spans: [{ text: line }] })))), width, glyph);
+
+const section = (title: string): Line => [{ text: ' ' + title, style: { ...DIM, bold: true } }];
+const join2 = (blocks: Line[][]): Line[] => blocks.filter(block => block.length).flatMap((block, index) => index ? [[], ...block] : block);
+
+/** Every change to `path` in the turn, in order, as (row, file) pairs. */
+function changesOf(path: string, rows: ChapterRow[], session: SessionData): Array<{ row: ChapterRow; file: PatchFile }> {
+  return rows.flatMap(row => recordedFiles(row.items, resolveOutlineEvidence(session, row.id)?.entry).filter(file => file.path === path).map(file => ({ row, file })));
+}
+
+export interface DetailInput {
+  session: SessionData;
+  group: TurnGroup;
+  row: ChapterRow;
+  width: number;
+  glyph: Glyph;
+  /** Which change of the same file, when switched with < >; the row's own by default. */
+  edit?: number;
+}
+
+export function detailDoc({ session, group, row, width, glyph, edit }: DetailInput): DetailDoc | undefined {
+  const evidence = resolveOutlineEvidence(session, row.id);
+  const records = evidence ? evidence.items ?? [evidence.item] : row.items;
+  if (!records.length) return undefined;
+  const calls = records.flatMap(record => recordedToolInputs(record));
+  const tool = row.tool;
+  const word = row.outcome ? outcomeWord(row.outcome) : '';
+
+  // A read of one file, or of the same file several times.
+  const reads = records.filter(record => !record.commandInput || !records.some(parent => parent.id === record.commandInput!.itemId)).map(parent => {
+    const native = records.find(record => record.commandInput?.itemId === parent.id);
+    return (native && fileReading(native)) || fileReading(parent);
+  });
+  if (reads.length && reads.every(Boolean)) {
+    const first = reads[0]!;
+    const range = (reading: FileReading) => reading.start !== undefined ? `第 ${reading.start}–${reading.start + reading.lines.length - 1} 行` : `${reading.lines.length} 行`;
+    const blocks = reads.map((reading, index) => [...(reads.length > 1 ? [section(`第 ${index + 1} 次读取 · ${range(reading!)}`)] : []), ...fileLines(reading!, width, glyph)]);
+    return {
+      kind: 'file', title: base(first.path), directory: dir(shown(first.path, session)), path: absolute(first.path, session), line: first.start ?? 1,
+      meta: `${tool} · ${reads.length > 1 ? `${reads.length} 次读取` : range(first)}`, copy: { text: absolute(first.path, session), what: '路径' }, lines: join2(blocks),
+    };
+  }
+
+  // A change: the diff as recorded, and every other change to the same file in this turn.
+  const files = recordedFiles(row.items, evidence?.entry);
+  if (files.length) {
+    const rows = chapterTurn(group).segments.flatMap(segment => segment.kind === 'chapter' ? segment.chapter.rows : []);
+    const path = files[0].path;
+    const changes = changesOf(path, rows, session);
+    const own = Math.max(0, changes.findIndex(change => change.row.id === row.id));
+    const index = Math.max(0, Math.min(changes.length - 1, edit ?? own));
+    const current = changes[index] ?? { row, file: files[0] };
+    const shownFiles = changes.length ? [current.file] : files;
+    const failed = current.row.outcome ? ` · ${outcomeWord(current.row.outcome)}` : '';
+    const what = current.file.operation === 'write' ? ` · 写入 ${current.file.lines.length} 行` : '';
+    const outputs = current.row.items.flatMap(item => presentEvidence(item).outputs).filter(block => block.label === '修改返回错误' || current.row.outcome);
+    return {
+      kind: 'diff', title: base(path), directory: dir(shown(path, session)), path: absolute(path, session),
+      meta: `${current.row.tool}${changes.length > 1 ? ` · 第 ${index + 1} 次 / 共 ${changes.length} 次` : what}${failed}`,
+      copy: { text: absolute(path, session), what: '路径' },
+      ...(changes.length > 1 ? { edits: { index, total: changes.length } } : {}),
+      lines: join2([
+        ...shownFiles.map((file, n) => [...(shownFiles.length > 1 || n ? [[{ text: ' ' + shown(file.path, session), style: { bold: true } } as Span]] : []), ...diffLines(file, width, glyph)]),
+        outputs.length ? [section('返回'), ...codePanel(outputs.map(block => block.text ?? '').join('\n'), undefined, width, glyph)] : [],
+      ]),
+    };
+  }
+
+  // Anything else: what was asked, and what came back.
+  const parents = records.filter(record => !record.commandInput || !records.some(parent => parent.id === record.commandInput!.itemId));
+  const blocks = parents.flatMap(record => {
+    const natives = records.filter(other => other.commandInput?.itemId === record.id);
+    const presentation = presentEvidence(record);
+    const outputs = (natives.length ? natives : [record]).flatMap(source => presentEvidence(source).outputs.flatMap(block => toolOutputContents(source, block.text ?? '')));
+    const state = parents.length === 1 ? row.outcome : undefined;
+    return [
+      [...(parents.length > 1 ? [section(describeDisplayAction(record).label)] : []),
+        ...(presentation.calls.some(call => call.contents.length) ? [section('输入'), ...presentation.calls.flatMap(call => inputLines(call.contents, width, glyph))] : [])],
+      outputs.length ? [section(`返回${state ? ' · ' + outcomeWord(state) : ''}`), ...outputLines(outputs, width, glyph)]
+        : [[{ text: ' ' + (record.status === 'running' ? '还没有返回' : '没有记录返回内容'), style: DIM }]],
+    ];
+  });
+  const command = calls.map(call => { const args = call.input as Record<string, unknown>; return typeof args?.command === 'string' ? args.command : typeof args?.cmd === 'string' ? args.cmd : ''; }).filter(Boolean).join('\n');
+  return {
+    kind: 'call', title: row.label || tool, meta: [tool, word].filter(Boolean).join(' · '),
+    copy: command ? { text: command, what: '命令' } : { text: row.label, what: '标签' }, lines: join2(blocks),
+  };
+}
+
+/** Width check helper for tests and the app: the widest line in cells. */
+export const widest = (lines: Line[]): number => Math.max(0, ...lines.map(line => textWidth(plainText(line))));
+

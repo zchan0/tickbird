@@ -167,6 +167,6 @@ while (Date.now() - started < 15000) {
   if (child.exitCode !== null) break;
 }
 child.kill('SIGKILL');
-rmSync(work, { recursive: true, force: true });
+try { rmSync(work, { recursive: true, force: true }); } catch { /* Chrome may still be closing its profile; the OS temp dir cleans up. */ }
 if (!existsSync(out)) { console.error('Chrome wrote no screenshot'); process.exit(1); }
 console.log(`${out}  (${columns}×${rows})`);

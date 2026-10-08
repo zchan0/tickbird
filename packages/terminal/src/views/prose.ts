@@ -1,6 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import { charWidth, clean, textWidth, wrap } from '../width';
 import type { Span, Style } from '../screen';
+import { highlightLines } from './code';
 
 /**
  * The agent's words as screen lines. Markdown is parsed the way the VS Code
@@ -153,8 +154,10 @@ function block(node: Node, width: number, ctx: Context): Line[] {
       return prefix(blocks(node.children, Math.max(4, width - 2), ctx), bar, bar);
     }
     case 'fence': case 'code_block': {
-      const code = clean(token.content).replace(/\n$/, '').split('\n');
-      return code.map(text => cut([{ text: '  ' + text, style: merge(ctx.base, { fg: 'cyan' }) }], width, ctx.glyph));
+      // Highlighted where the fence names a language; otherwise one colour, as before.
+      const language = token.info.trim().split(/\s/)[0] || undefined;
+      const highlighted = highlightLines(token.content.replace(/\n$/, ''), language, merge(ctx.base, language ? {} : { fg: 'cyan' }));
+      return highlighted.map(spans => cut([{ text: '  ' }, ...spans], width, ctx.glyph));
     }
     case 'hr': return [[{ text: ctx.glyph('─').repeat(Math.max(1, Math.min(width, 40))), style: merge(ctx.base, DIM) }]];
     case 'table_open': return table(node, width, ctx);
