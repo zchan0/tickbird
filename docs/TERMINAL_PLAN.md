@@ -97,7 +97,7 @@
   1. 等批准时，`thread/read` 的状态是否带 `waitingOnApproval`（实测因 Codex 用量到达上限而中断）。
   2. VS Code 里的 Claude Code 是否也写 `~/.claude/sessions/<pid>.json`，`entrypoint` 是什么；VS Code 里的 Codex（扩展自己的 app-server）能否同样读到线程和所属进程。
   3. 不用 hook 时怎样触发自动开栏：包一层启动命令、监视会话目录，还是保留 hook 只做这一件事。
-- 方向（2026-10-08 与用户确认）：Claude Code 用 mods（函数 hook）实现，Sidecar 画在 Claude Code 自己的窗格里，不另开分屏；Codex 只能用命令型 hook 和外部分屏。内容和按键所有 Agent 一致（共用核心），位置各用最好的宿主，外部分屏是所有 Agent 的后备。
+- 决定（2026-10-08，用户确认）：两个 Agent 都用命令型 hook 和外部分屏，不用 Claude Code 的 mods。原因：mods 窗格是横在对话和输入框之间的整宽方框，不是侧栏，放不下一轮的内容，还会挤占对话；mods 接口是 EARLY ACCESS；两个 Agent 用同一套做法更统一。hook 要做得克制：只保留会话记录里没有、或来得太晚的信息。下面 mods 的验证结果留作参考（曾考虑的方向：Claude 用 mods 画在自己的窗格里）。
 - mods 最小验证（2026-10-08，Claude Code 2.1.293，探针 mod 只观察、不改任何事件）：
   - `session.start` 在加载时触发（`surface: terminal`）；`session.end` 在 `/clear` 时 `reason: clear`，之后 `$.session.id()` 已是新会话；退出时 `reason: prompt_input_exit`。
   - `$.process.run` 能调用外部命令：`kitten --version`、`tmux display -p '#{pane_id}'`（得到自己的窗格）都成功。mod 也能开外部分屏。
