@@ -76,6 +76,29 @@
     - 从 kitty 里启动的 Terminal.app 带着 `KITTY_WINDOW_ID`，日志误报为 kitty 没开远程控制 → kitty 还要求 `TERM=xterm-kitty` 或没有 `TERM_PROGRAM`。
   - 设计调整：栏按 Agent 进程绑定并自己改绑、自己退出，插件不需要 `SessionEnd` hook；切回命令由插件用 `--focus` 传给栏。
 
+## C2-5 盘点 hook：基础功能不依赖 hook
+
+- 目标：不装 hook 也能用；hook 只做增强（更早、更全）。先核实各项功能有没有不靠 hook 的来源，再决定改不改、改哪些。这一步决定 C3 装什么，所以放在 C3 之前。
+- 背景：hook 是公开、有文档的接口；下面的替代来源大多是内部文件或内部协议，可能随版本变化。换掉 hook 是用一种脆弱换另一种，要逐项权衡，不能只看能不能绕过去。
+
+| 功能 | 现在用的 hook | Claude Code 不用 hook | Codex 不用 hook |
+| --- | --- | --- | --- |
+| 会话属于哪个进程、哪个窗口 | SessionStart | `~/.claude/sessions/<pid>.json` + 进程树 | 终端：新会话记录出现后，按 `front.mjs` 找前台；VS Code：待查 |
+| 工作中 / 空闲 | UserPromptSubmit、Stop | 同一文件的 `status` | 会话记录里的事件；或后台协议的线程状态 |
+| 等你批准 | PermissionRequest | `status: waiting`、`waitingFor: "permission prompt"`；工具取自会话记录 | 后台协议 `activeFlags: waitingOnApproval`（待验证） |
+| 提前显示长回答 | MessageDisplay | 没有替代 | Codex 本来就没有 |
+| 会话结束 | SessionEnd | 进程消失、文件删除 | 前台进程消失 |
+| 自动开栏 | SessionStart（sidecar-split） | 要有触发：hook、包一层启动命令，或我们自己的常驻进程 | 同左 |
+
+- 已核实（2026-10-08）：
+  - Claude Code 2.1.293 为每个进程写 `~/.claude/sessions/<pid>.json`（未公开）：`sessionId`（`/clear` 后变）、`cwd`、`kind`、`entrypoint`、`status`（`idle` → `busy` → `waiting` + `waitingFor: "permission prompt"`，拒绝后回到 `idle`），在 tmux 里还有自己的窗格（`tmux: "<会话>:@<窗口>.%<窗格>"`）；进程退出时删除。
+  - Codex 0.160.1 的后台控制 socket（`~/.codex/app-server-control/app-server-control.sock`）说 WebSocket（`GET /rpc`），上面是 JSON-RPC。外部客户端只调用 `initialize`、`thread/loaded/list`、`thread/read` 就能读到每个已加载线程的状态（`idle`、`active`、`systemError`）；实测看到 `idle` → `active` 的变化。`codex app-server proxy` 只转发原始字节，不做 WebSocket 握手。
+- 待核实：
+  1. 等批准时，`thread/read` 的状态是否带 `waitingOnApproval`（实测因 Codex 用量到达上限而中断）。
+  2. VS Code 里的 Claude Code 是否也写 `~/.claude/sessions/<pid>.json`，`entrypoint` 是什么；VS Code 里的 Codex（扩展自己的 app-server）能否同样读到线程和所属进程。
+  3. 不用 hook 时怎样触发自动开栏：包一层启动命令、监视会话目录，还是保留 hook 只做这一件事。
+- 之后：根据核实结果写设计（哪些功能有基础来源、哪些只在装了 hook 时才有），再决定实现范围。
+
 ## C3 私有安装
 
 - 内容：`npm run install:terminal`、`agent-sidecar setup`（装 `sidecar-state` 与 `sidecar-split`，引导 Codex 信任 hook）；卸载时不误删 VS Code 版仍在用的 `sidecar-state`。
