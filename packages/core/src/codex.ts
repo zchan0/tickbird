@@ -249,6 +249,31 @@ export function* createCodexParser(input: ParserContext): SessionParser {
     item.summary = item.status === 'running' ? '已取得阶段输出，仍在运行。' : item.status === 'failed' ? '来源报告失败；保留本次调用及结果。' : item.status === 'completed' ? '已取得结束状态和可核对的输出。' : '已取得返回内容；最终成功状态未确认。';
   };
 
+  /** `<send_user_message_question_reply>[{answer, question, questionItemId}]</…>`: the answers, recorded on the question they answer. */
+  const questionReply = (entry: RecordEntry, raw: string): boolean => {
+    const body = /^\s*<send_user_message_question_reply>\s*([\s\S]*?)\s*<\/send_user_message_question_reply>\s*$/.exec(raw)?.[1];
+    if (body === undefined) return false;
+    let replies: unknown;
+    try { replies = JSON.parse(body); } catch { return false; }
+    if (!Array.isArray(replies)) return false;
+    const byCall = new Map<TimelineItem, Array<{ question: string; answer: string }>>();
+    for (const reply of replies.map(obj)) {
+      let callId = '';
+      try { const id = JSON.parse(str(reply.questionItemId)); if (Array.isArray(id)) callId = str(id[1]); } catch { /* not a call reference */ }
+      const item = calls.get(callId);
+      if (item?.kind !== 'question') return false;
+      byCall.set(item, [...(byCall.get(item) ?? []), { question: str(reply.question), answer: str(reply.answer) }]);
+    }
+    if (!byCall.size) return false;
+    for (const [item, answers] of byCall) {
+      addSource(item, entry);
+      const recorded = JSON.stringify({ questions: answers.map(({ question }) => ({ question })), answers: Object.fromEntries(answers.map(({ question, answer }) => [question, answer])) }, null, 2);
+      // The reply is written twice, as a response and as an event.
+      if (!item.detail?.blocks.some(block => block.text === recorded)) append(item, [textBlock('问题及记录的回答', recorded, 'json')]);
+      cover(entry, 'user:question-reply', 'merged', '异步提问的回复，记在对应的提问调用上，不计为新的用户请求。', item);
+    }
+    return true;
+  };
   const message = (entry: RecordEntry, p: Obj, channel: string): void => {
     const role = str(p.role); const phase = str(p.phase);
     if (role === 'system' || role === 'developer' || phase === 'analysis' || p.channel === 'analysis') {
@@ -273,6 +298,11 @@ export function* createCodexParser(input: ParserContext): SessionParser {
       excludeContents(entry, content, '中断占位文字不重复展示。'); return;
     }
     if (!content.length) { cover(entry, 'user:injected-context', 'excluded', '自动附带技能或环境上下文，不计为新的用户请求。'); return; }
+    // An async question is also sent as a message; it reads once, as the call that asked it.
+    const asked = role === 'assistant' && Array.isArray(p.questions) ? calls.get(str(p.id)) : undefined;
+    if (asked?.kind === 'question') { addSource(asked, entry); cover(entry, 'assistant:async-question', 'merged', '异步提问的展示消息，与同 ID 的提问调用合并。', asked); return; }
+    // The answer to an async question comes back as a user message; it belongs to that question.
+    if (role === 'user' && questionReply(entry, raw)) return;
     let request = raw; let context = '';
     if (role === 'user' && /^# Context from my IDE setup:/m.test(raw)) {
       const split = /^## My request:\s*$/m.exec(raw);
