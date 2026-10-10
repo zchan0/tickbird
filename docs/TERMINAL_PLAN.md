@@ -126,5 +126,6 @@
   - 实际使用：tmux 里直接运行 `claude`（不加任何参数），自动开栏，栏里运行的是装好的 `cli.cjs`；一轮内容正常；`/exit` 后栏关闭。
   - `agent-sidecar uninstall`：移除两个 Agent 里的 `sidecar-split`、命令和程序文件；VS Code 版还在，所以保留 `sidecar-state`。之后重新安装，VS Code 扩展已是同一版本，不再重装。
   - hook 的 PATH 可能来自别的程序（Codex 共用后台）：找不到 `agent-sidecar` 时，退回到 `~/.local/bin/agent-sidecar`。
-  - 待用户完成：在自己的终端运行 `agent-sidecar setup`，同意后由它备份 kitty.conf 并加上远程控制两行，再完全重启 kitty；Codex 共用后台重启后（Codex 会提示），在 Hooks need review 里选 Trust all。
+  - kitty：用户运行 `setup` 并同意，kitty.conf 已备份并加上远程控制两行；完全重启 kitty 后，在 kitty 里启动 Claude Code 自动分屏，栏里运行的是装好的 `cli.cjs`（2026-10-08）。
+  - 待用户完成：Codex 共用后台重启后（Codex 会提示），在 Hooks need review 里选 Trust all。
 - 审阅产物：`local/review/c3/`（安装、卸载输出，tmux 里实际使用的栏）。
