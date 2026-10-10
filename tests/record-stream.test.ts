@@ -204,3 +204,21 @@ test('unknown and hostile event-type shapes cannot select inherited names or lea
     assert.deepEqual(observeRecord('codex', frame), [{ category: 'other-event', turnKey: undefined }]);
   }
 });
+
+test('a session whose first message carries a pasted image (a row past 128 KB) still opens', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'sidecar-record-stream-test-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project'); await mkdir(project);
+  const file = join(root, 'session.jsonl');
+  // As Claude Code writes it: rows with the session id but no cwd, then the request with the image.
+  const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(300_000) } };
+  await writeFile(file, jsonl({ type: 'permission-mode', sessionId: 'session-a', permissionMode: 'default' })
+    + jsonl({ type: 'file-history-snapshot', snapshot: {} })
+    + jsonl({ type: 'user', sessionId: 'session-a', cwd: project, uuid: 'request-a', message: { role: 'user', content: [{ type: 'text', text: '看这张图' }, image] } }));
+  const candidate: SessionCandidate = { id: 'session-a', provider: 'claude', file, projectPath: project, updatedAt: 0, activity: 'unverified' };
+  const cursor = await SessionRecordCursor.open(candidate);
+  t.after(() => cursor.close());
+  assert.equal((await drain(cursor)).filter(row => row.kind === 'json').length, 3);
+  const { loadSession } = await import('../packages/core/src/sessions');
+  assert.equal((await loadSession(candidate)).id, 'session-a');
+});

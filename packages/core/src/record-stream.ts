@@ -80,6 +80,29 @@ async function readExactly(handle: FileHandle, start: number, length: number): P
   return buffer;
 }
 
+/**
+ * The log's first complete rows, in order, for finding its identity. A row is
+ * read whole even when it is long: a first message with a pasted image runs
+ * past any fixed prefix, and the identity is often on that row. Reading stops
+ * at `limit` bytes; the caller stops when it has what it needs.
+ */
+export async function* leadingRows(handle: FileHandle, size: number, rows = 50, limit = 64 * 1024 * 1024): AsyncGenerator<string> {
+  const end = Math.min(size, limit);
+  let offset = 0, count = 0, pending: Buffer[] = [];
+  while (offset < end && count < rows) {
+    const bytes = await readExactly(handle, offset, Math.min(131072, end - offset));
+    offset += bytes.length;
+    let start = 0;
+    for (let at = bytes.indexOf(10); at >= 0; at = bytes.indexOf(10, start)) {
+      pending.push(bytes.subarray(start, at));
+      yield Buffer.concat(pending).toString('utf8');
+      pending = []; start = at + 1;
+      if (++count >= rows) return;
+    }
+    pending.push(bytes.subarray(start));
+  }
+}
+
 const inProject = (root: string, child: string): boolean => {
   const part = relative(root, child);
   return part === '' || (!part.startsWith(`..${sep}`) && part !== '..' && !part.startsWith(sep));
@@ -129,10 +152,9 @@ export class SessionRecordCursor {
       const info = await handle.stat();
       if (!info.isFile()) throw new Error('会话来源不是普通文件。');
       const prefix = await readExactly(handle, 0, Math.min(info.size, 131072));
-      // Only complete prefix rows can establish identity. Never inspect arbitrary bodies first.
-      const lines = prefix.toString('utf8').split('\n').slice(0, -1).slice(0, 50);
+      // Only complete leading rows can establish identity. Never inspect arbitrary bodies first.
       let meta: { id: string; cwd: string } | undefined;
-      for (const line of lines) {
+      for await (const line of leadingRows(handle, info.size)) {
         let record: any;
         try { record = JSON.parse(line); } catch { continue; }
         if (candidate.provider === 'codex') {

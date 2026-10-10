@@ -6,6 +6,7 @@ import { createInterface } from 'node:readline';
 import type { Provider, SessionCandidate, SessionData } from './model';
 import { createCodexParser } from './codex';
 import { createClaudeParser } from './claude';
+import { leadingRows } from './record-stream';
 import { applyCodexSessionTitle } from './session-title';
 
 export interface DiscoveryOptions { projectPath: string; codexRoot?: string; claudeRoot?: string }
@@ -87,17 +88,10 @@ export async function loadSession(candidate: SessionCandidate): Promise<SessionD
   try {
     const before = await handle.stat();
     if (!before.isFile()) throw new Error('会话来源不是普通日志文件。');
-    // Revalidate a bounded identity prefix from this same handle BEFORE loading the body.
-    const buffer = Buffer.alloc(Math.min(before.size, 131072));
-    let offset = 0;
-    const prefixSize = Math.min(buffer.length, 131072);
-    while (offset < prefixSize) {
-      const read = await handle.read(buffer, offset, prefixSize - offset, offset);
-      if (!read.bytesRead) throw new Error('读取期间日志被截短；未提交此快照。');
-      offset += read.bytesRead;
-    }
+    // Revalidate the identity from this same handle BEFORE loading the body: the
+    // first complete rows, read whole even past a long first message.
     let meta: { id: string; cwd: string } | undefined;
-    for (const line of buffer.subarray(0, offset).toString('utf8').split('\n').slice(0, 50)) {
+    for await (const line of leadingRows(handle, before.size)) {
       let record: any;
       try { record = JSON.parse(line); } catch { continue; }
       const value = candidate.provider === 'codex' && record.type === 'session_meta' ? record.payload : record;
