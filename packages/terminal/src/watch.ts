@@ -18,6 +18,8 @@ import { prose } from './views/prose';
 
 const ESCAPE_GAP_MS = 30;
 const STATE_POLL_MS = 1000;
+/** How often a paused transcript is opened again. */
+const REOPEN_MS = 2000;
 
 /**
  * Which session to show: the one named (by id or transcript path), or the
@@ -96,6 +98,7 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
   const stateDir = sessionStateDirectory();
   let states = await readSessionStates(stateDir, undefined, cache);
   let live: LiveSession | undefined;
+  let pausedRetry = 0;
   let app: AppState = initialState();
   let title = '';
   let timer: NodeJS.Timeout | undefined;
@@ -121,7 +124,8 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
     }
     const { groups, latest } = turns;
     const extras = liveExtras(session, state);
-    const status = sessionStatus(latest, extras, Date.now(), { busy: live.health.agent === 'busy', ended: state?.phase === 'ended' });
+    const agentState = live.health.agent;
+    const status = sessionStatus(latest, extras, Date.now(), { busy: agentState === 'busy' || agentState === 'waiting', ended: state?.phase === 'ended', ...(agentState ? { state: agentState } : {}) });
     return { session, groups, status, extras, caps, now: Date.now(), width: screen.width, height: screen.height, focusAgent: Boolean(focus) };
   };
   const waitingLines = (message: string): Line[] => {
@@ -224,12 +228,20 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
         }
         if (!target) return;
       }
-      if (live) return;
+      // Reading stops when the transcript looks rewritten, or a read fails. That
+      // is checked again by opening it afresh; the old copy stays on screen
+      // until the new one is read, and the page stays where it is.
+      const stale = live?.health.state === 'paused' ? live : undefined;
+      if (live && !stale) return;
+      if (stale && Date.now() - pausedRetry < REOPEN_MS) return;
+      if (stale) pausedRetry = Date.now();
       const wanted = target;
       const candidate = await resolveSession(wanted, process.cwd(), states).catch(() => undefined);
       if (!candidate || target !== wanted) return;
-      const opened = await openLiveSession(candidate);
-      if (target !== wanted || live) { void opened.close(); return; }
+      const opened = await openLiveSession(candidate).catch(() => undefined);
+      if (!opened) return;
+      if (target !== wanted || live !== stale) { void opened.close(); return; }
+      if (stale) { void stale.close(); revision++; }
       live = opened;
       live.start(change => { if (change.contentChanged) revision++; draw(); });
     } finally { opening = false; }

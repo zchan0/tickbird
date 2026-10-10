@@ -8,7 +8,7 @@ import { contentsEntries, contentsLines, contentsOffset, ENTRY_LINES } from './v
 import { callLink, detailDoc, recordedImage, type DetailDoc, type RecordedImage } from './views/detail';
 import { wrapSpans } from './views/prose';
 import { textWidth } from './width';
-import { MARGIN, chip, headerLines, markSelected, viewOf, providerName, turnLayout, type CallTarget, type PageContext, type SessionStatus } from './views/turn-page';
+import { MARGIN, label, headerLines, markSelected, viewOf, providerName, turnLayout, type CallTarget, type PageContext, type SessionStatus } from './views/turn-page';
 
 /**
  * The watch pane's state and what each key does to it. No I/O here: the
@@ -503,7 +503,7 @@ export function frame(state: AppState, model: Model): Line[] {
     const group = model.groups[state.notice];
     const request = (group?.request ?? '').replace(/\s+/g, ' ');
     // Set as the answer is, a label in a block of colour: 新一轮, then what was asked. A click or ] goes there.
-    lines.push(cutLine([{ text: ' '.repeat(MARGIN - 1) }, chip('New turn', 'yellow', model.caps.background), dim(request ? ' ' + request : '')], width));
+    lines.push(cutLine([{ text: ' '.repeat(MARGIN) }, label('New turn', 'yellow'), dim(request ? ' ' + request : '')], width));
   }
   return withMessage(lines.slice(0, height), state, model);
 }

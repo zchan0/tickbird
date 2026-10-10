@@ -188,7 +188,7 @@ export const liveClient = `
       if (title && typeof message.identity === 'string') title.title = message.identity;
       version = message.version; resyncPending = false;
       const health = message.health;
-      agentState = health && (health.agent === 'busy' || health.agent === 'idle') ? health.agent : '';
+      agentState = health && (health.agent === 'busy' || health.agent === 'waiting') ? 'busy' : health && health.agent === 'idle' ? 'idle' : '';
       if (health && health.state === 'paused') pause(health.reason === 'source-changed'
         ? '会话来源发生替换或改写，已暂停；保留当前内容。可刷新后重新核验。' : '暂时无法读取会话，已暂停；保留当前内容。可刷新后重试。');
       else if (health && health.state === 'observing') {

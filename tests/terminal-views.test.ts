@@ -232,10 +232,16 @@ test('waiting for an approval replaces the status line, marks the call and chang
   const model = modelOf(parse([...FIRST, ...SECOND]), { extras: { approval: { tool: 'Bash', summary: 'grep -rn "assert.equal(expected" tests' } } });
   assert.equal(model.status.kind, 'waiting');
   const lines = text(turnBody(ctxOf(model, 1)));
-  assert.match(lines.at(-2)!, /^ {2}Needs approval {2}Bash · grep -rn "assert/);
+  // As Final Answer is: the label on its own line, what it asks about under it.
+  assert.equal(lines.at(-3), '  Needs approval');
+  assert.match(lines.at(-2)!, /^ {2}Bash · grep -rn "assert/);
   assert.equal(lines.at(-1), '  在 Claude Code 里选择批准或拒绝。');
-  assert.match(lines.at(-4)!, /^  └ Search for reversed assertions \? *$/);
-  assert.match(text(headerLines(ctxOf(model, 1)))[0], / Needs approval  $/);
+  assert.match(lines.at(-5)!, /^  └ Search for reversed assertions \? *$/);
+  assert.match(text(headerLines(ctxOf(model, 1)))[0], / Needs approval *$/);
+  // Claude Code says when it stops waiting: an approved command that runs for a while is no longer waiting on you.
+  const groups = model.groups, latest = turnView(groups.at(-1)!, true, 'claude');
+  assert.equal(sessionStatus(latest, model.extras, model.now, { busy: true, state: 'busy' }).kind, 'running');
+  assert.equal(sessionStatus(latest, model.extras, model.now, { busy: true, state: 'waiting' }).kind, 'waiting');
   assert.equal(windowTitle(model), '⏸ 等你批准 — Sidecar · Claude Code');
 });
 
@@ -282,8 +288,8 @@ test('following shows the newest turn and jumps to a new one; an older turn on s
   assert.equal(state.notice, 2);
   // A label in a block of colour, as 答复 is, then what was asked.
   const notice = frame(state, third).at(-1)!;
-  assert.equal(plainText(notice).trimEnd(), '  New turn  提交吧');
-  assert.deepEqual(spans(notice).find(span => span.text.includes('New turn'))?.style, { fg: 'yellow', inverse: true, bold: true });
+  assert.equal(plainText(notice).trimEnd(), '  New turn 提交吧');
+  assert.deepEqual(spans(notice).find(span => span.text.includes('New turn'))?.style, { fg: 'yellow', bold: true });
   // A click on the notice, or 】 from a Chinese input method, does what ] does.
   const noticeY = text(frame(state, third)).length;
   assert.deepEqual([key(state, { type: 'mouse', action: 'press', button: 0, x: 3, y: noticeY }, third).index, key(state, { type: 'mouse', action: 'press', button: 0, x: 3, y: noticeY - 1 }, third).index], [2, 0]);

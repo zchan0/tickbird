@@ -35,10 +35,12 @@ export const QUIET_MS = 10 * 60_000;
 
 /**
  * What the session is doing now. The newest turn's records say whether it is
- * open; the agent's own state, where reported, says whether it still works.
+ * open; the agent's own state, where reported, says whether it still works,
+ * and whether it still waits on you: an approved command that runs for a while
+ * writes nothing until it ends, but the agent is no longer waiting.
  */
-export function sessionStatus(latest: TurnView | undefined, extras: LiveExtras, now: number, agent?: { busy?: boolean; ended?: boolean }): SessionStatus {
-  if (extras.approval) return { kind: 'waiting', approval: extras.approval };
+export function sessionStatus(latest: TurnView | undefined, extras: LiveExtras, now: number, agent?: { busy?: boolean; ended?: boolean; state?: 'busy' | 'idle' | 'waiting' }): SessionStatus {
+  if (extras.approval && (!agent?.state || agent.state === 'waiting')) return { kind: 'waiting', approval: extras.approval };
   if (agent?.ended) return { kind: 'ended' };
   if (latest?.live) {
     const lastAt = latest.turn.lastAt ? Date.parse(latest.turn.lastAt) : NaN;
@@ -98,26 +100,20 @@ const OWNER = new WeakMap<Style, string>();
 const CHIP = new WeakSet<Style>();
 const owned = (style: Style, id: string): Style => { const own = { ...style }; OWNER.set(own, id); return own; };
 
-/** Roughly the hues of the label colours, to tint the background toward. */
-const HUES: Partial<Record<Color, readonly [number, number, number]>> = { blue: [108, 182, 255], green: [63, 185, 80], yellow: [227, 179, 65], red: [244, 112, 103] };
-
 /**
- * A label: Prompt, Final Answer, New turn, an approval. Its words in its
- * colour on a faint wash of that colour, so it sits close to the line under it
- * without pressing on it. On a terminal whose background is unknown, a block
- * of colour (inverse keeps the words in the theme's own background colour).
+ * A label's word: Prompt, Final Answer, Needs approval, Interrupted, New
+ * turn. Bold in its colour and nothing behind it, the same for every label: a
+ * block of colour presses on the line below it.
  */
-export function chip(text: string, fg: Color, background?: Capabilities['background']): Span {
-  const hue = HUES[fg];
-  const wash = background && hue ? [background.r, background.g, background.b].map((c, i) => Math.round(c + (hue[i] - c) * (background.dark ? 0.18 : 0.22))) as unknown as readonly [number, number, number] : undefined;
-  const style: Style = wash ? { fg, bold: true, bgRgb: wash } : { fg, inverse: true, bold: true };
+export function label(text: string, fg: Color): Span {
+  const style: Style = { fg, bold: true };
   CHIP.add(style);
-  return { text: ` ${text} `, style };
+  return { text, style };
 }
 
 /** What the session is doing, on the right of the header; nothing while it runs or after it is done. */
-function statusSpans(status: SessionStatus, background?: Capabilities['background']): Span[] {
-  if (status.kind === 'waiting') return [chip('Needs approval', 'yellow', background)];
+function statusSpans(status: SessionStatus): Span[] {
+  if (status.kind === 'waiting') return [label('Needs approval', 'yellow')];
   if (status.kind === 'quiet') return [{ text: '无新记录', style: DIM }];
   if (status.kind === 'ended') return [{ text: '已退出', style: DIM }];
   return [];
@@ -131,7 +127,7 @@ export function headerLines(ctx: PageContext, aside: Span[] = []): Line[] {
   const { session, groups, index, width } = ctx;
   const group = groups[index];
   const narrow = width < 50;
-  const status = statusSpans(ctx.status, ctx.caps.background);
+  const status = statusSpans(ctx.status);
   const right: Span[] = status.length ? [...status, { text: ' ' }] : aside.length ? [...aside, { text: ' ' }] : [];
   if (!group) return [row([{ text: ' '.repeat(MARGIN) + '还没有记录', style: DIM }], right, width)];
   const ordinal = group.ordinal ?? index + 1;
@@ -153,8 +149,6 @@ const requestText = (item: TimelineItem | undefined, group: TurnGroup): string =
  * hanging from the tree.
  */
 export const MARGIN = 2;
-/** A label starts a cell before the words, so the words in it line up with them. */
-const labelLead = (): Span => ({ text: ' '.repeat(MARGIN - 1) });
 
 /**
  * The label over a block of words, Prompt or Final Answer: a coloured word on
@@ -162,9 +156,7 @@ const labelLead = (): Span => ({ text: ' '.repeat(MARGIN - 1) });
  * colour presses on the line below, and a blank line between is too much.
  */
 function heading(text: string, fg: Color): Span[] {
-  const style: Style = { fg, bold: true };
-  CHIP.add(style);
-  return [{ text: ' '.repeat(MARGIN) }, { text, style }];
+  return [{ text: ' '.repeat(MARGIN) }, label(text, fg)];
 }
 
 /**
@@ -450,7 +442,7 @@ function segmentBlocks(segment: TurnSegment, view: TurnView, ctx: PageContext, w
 function answerLines(view: TurnView, ctx: PageContext): Line[] {
   const text = view.answers.map(segment => segment.kind === 'answer' ? publicBody(segment.item) : '').filter(Boolean).join('\n\n');
   const lead: Span[] = [{ text: ' '.repeat(MARGIN) }];
-  if (!text) return view.turn.aborted ? [[labelLead(), chip('Interrupted', 'red', ctx.caps.background)]] : [];
+  if (!text) return view.turn.aborted ? [heading('Interrupted', 'red')] : [];
   // As the prompt is: the label over the answer; folded, one full line of it and a ▾ to open it.
   const head = heading('Final Answer', 'green');
   if (ctx.answerOpen) {
@@ -470,8 +462,10 @@ function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
   const lead: Span = { text: ' '.repeat(MARGIN) };
   if (latest && status.kind === 'waiting') {
     const what = [status.approval.tool, /^\/.+\/[^/]+$/.test(status.approval.summary) ? status.approval.summary.split('/').at(-1)! : status.approval.summary].filter(Boolean);
+    // As Final Answer is: the label on its own line, what it asks about under it.
     return [
-      cutLine([labelLead(), chip('Needs approval', 'yellow', ctx.caps.background), ...(what.length ? [{ text: ' ' + what[0], style: { bold: true } }, ...(what[1] ? [{ text: ' · ' + what[1].replace(/\s+/g, ' ') }] : [])] : [])], ctx.width),
+      heading('Needs approval', 'yellow'),
+      ...(what.length ? [cutLine([lead, { text: what[0], style: { bold: true } }, ...(what[1] ? [{ text: ' · ' + what[1].replace(/\s+/g, ' ') }] : [])], ctx.width)] : []),
       cutLine([lead, { text: `在 ${providerName(ctx.session.provider)} 里选择批准或拒绝。`, style: DIM }], ctx.width),
     ];
   }
