@@ -114,6 +114,9 @@ export function describeDisplayAction(item: TimelineItem): ActionDescription {
 
 /** File entries use recorded content only; full paths stay in evidence, not the rail. */
 export function recordedFiles(items: TimelineItem[], entry?: ActionEntry): PatchFile[] {
+  // The harness's own record of the change, with line numbers and context, before the call's input.
+  const recorded = items.length === 1 ? harnessPatch(items[0]) : [];
+  if (recorded.length) return recorded;
   if (entry?.key.startsWith('["invocation",')) {
     const [, , input, index] = JSON.parse(entry.key);
     const call = recordedToolInputs(items[0])[index ?? 0];
@@ -132,6 +135,12 @@ export function recordedFiles(items: TimelineItem[], entry?: ActionEntry): Patch
       return block.kind === 'code' && content ? [{ path: content[1], operation: content[2] === '新增' ? 'add' as const : 'delete' as const, lines: (block.text ?? '').split('\n').map(line => (content[2] === '新增' ? '+' : '-') + line) }] : [];
     });
   });
+}
+/** Hunks an Edit's or an overwrite's result recorded (Claude Code's structuredPatch), one file per block. */
+function harnessPatch(item: TimelineItem): PatchFile[] {
+  if (item.kind !== 'file-change' || !recordedToolInputs(item).some(call => ['Edit', 'MultiEdit', 'Write'].includes(call.name))) return [];
+  return (item.detail?.blocks ?? []).filter(block => block.kind === 'patch' && block.text?.startsWith('@@ -'))
+    .map(block => ({ path: block.label, operation: 'update' as const, lines: (block.text ?? '').split('\n') }));
 }
 export const fileEvidenceId = (rowId: string, index: number, path: string): string => 'write-file:' + createHash('sha256').update(JSON.stringify([rowId, index, path])).digest('hex');
 export function shortFileLabels(paths: string[]): string[] {

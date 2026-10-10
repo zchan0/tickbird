@@ -57,6 +57,23 @@ const asyncLaunchWrapper = (text: string, result: Obj): boolean => {
 };
 
 /** A supplied snapshot is data only: no execution, source-file reads, or URL resolution. */
+/**
+ * `toolUseResult.structuredPatch` of an Edit or a Write: unified hunks, each
+ * with its first line numbers and its lines already marked ' ', '-' or '+'.
+ */
+function recordedPatch(structured: Record<string, unknown>): { path: string; text: string } | undefined {
+  const hunks = structured.structuredPatch;
+  if (typeof structured.filePath !== 'string' || !Array.isArray(hunks) || !hunks.length) return undefined;
+  const parts: string[] = [];
+  for (const value of hunks) {
+    const hunk = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+    const { oldStart, oldLines, newStart, newLines, lines } = hunk;
+    if (![oldStart, oldLines, newStart, newLines].every(n => Number.isInteger(n)) || !Array.isArray(lines) || !lines.every(line => typeof line === 'string' && /^[ +\-\\]/.test(line))) return undefined;
+    parts.push(`@@ -${oldStart},${oldLines} +${newStart},${newLines} @@`, ...(lines as string[]).filter(line => !line.startsWith('\\')));
+  }
+  return { path: structured.filePath, text: parts.join('\n') };
+}
+
 export function parseClaude(input: ParseInput): SessionData {
   return parseSnapshot(input, 'claude', createClaudeParser);
 }
@@ -346,6 +363,9 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
         const returned = [...output];
         if (excludedRuntimeWrapper) returned.push(textBlock('当时异步启动状态', JSON.stringify({ status: structured.status, isAsync: structured.isAsync }, null, 2), 'json'));
         if (item.kind === 'question' && (structured.questions || structured.answers)) returned.push(textBlock('问题及记录的回答', JSON.stringify({ questions: structured.questions, answers: structured.answers, annotations: structured.annotations }, null, 2), 'json'));
+        // An edit's result carries the change as Claude Code drew it: hunks with their line numbers and context.
+        const patch = recordedPatch(structured);
+        if (patch) returned.push(textBlock(patch.path, patch.text, 'patch'));
         if (structured.stdout && !output.some(b => b.text === structured.stdout)) returned.push(textBlock('记录的 stdout', publicText(string(structured.stdout), ref, item)));
         if (structured.stderr && !output.some(b => b.text === structured.stderr)) returned.push(textBlock('记录的 stderr（不单独判定失败）', publicText(string(structured.stderr), ref, item)));
         append(item, returned);
@@ -364,6 +384,7 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
           Artifact: ['artifact_id', 'audience', 'capabilities', 'contract', 'liveSubscription', 'path', 'stored', 'title', 'updated', 'url', 'version'],
         };
         for (const key of metadataFields[item.title] ?? []) known.add(key);
+        if (patch) known.add('structuredPatch');
         const file = object(structured.file);
         if (item.title === 'Read' && typeof file.base64 === 'string' && Object.keys(file).every(key => ['base64', 'type', 'originalSize', 'dimensions'].includes(key)) && returned.some(b => b.kind === 'image' && b.data === file.base64.replace(/\s/g, ''))) known.add('file');
         if (item.title === 'ToolSearch' && Array.isArray(structured.matches)) {
