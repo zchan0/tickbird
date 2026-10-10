@@ -3,16 +3,21 @@ import type { TurnGroup } from '../../../core/src/timeline';
 import type { ChapterRow, TurnSegment } from '../../../core/src/chapters';
 import type { LiveExtras } from '../../../core/src/live-extras';
 import { plainPasted } from '../../../core/src/pasted';
-import { clock, publicBody, rowView, runStarts, turnView, type TurnView } from '../../../core/src/turn-view';
+import { clock, publicBody, rowView, turnView, type TurnView } from '../../../core/src/turn-view';
 import { symbol, type Capabilities } from '../caps';
-import { cutLine, row, type Line, type Span, type Style } from '../screen';
+import { cutLine, plainText, row, spans, type Color, type Line, type Span, type Style } from '../screen';
 import { textWidth } from '../width';
-import { prose } from './prose';
+import { inlineSpans, prose, wrapSpans } from './prose';
+import { recordedFiles } from '../../../core/src/presentation';
+import { resolveOutlineEvidence } from '../../../core/src/outline';
 
 /**
- * One turn per screen: the request, the files it changed, the chapters in the
- * order they happened, and the turn's status at the end. Plain data in, styled
- * lines out; the app decides which turn and which part of it is on screen.
+ * One turn per screen, to read beside the agent: the request as the page's
+ * title, the agent's words in the body colour with the calls they explain on
+ * a band under them, as a tree under each tool's name, and how the turn ended
+ * after a label in a block of colour. Nothing here is drawn the way the
+ * agents draw their own transcript. Plain data in, styled lines out; the app
+ * decides which turn and which part of it is on screen.
  */
 
 export type SessionStatus =
@@ -49,6 +54,21 @@ export function runningClock(ms: number): string {
 
 export const providerName = (provider: Provider): string => provider === 'codex' ? 'Codex' : 'Claude Code';
 
+
+/**
+ * A turn's view, kept per group: the controller hands in the same groups until
+ * the transcript changes, and the header, the page and 目录 all ask for it.
+ */
+const VIEWS = new WeakMap<TurnGroup, Map<string, TurnView>>();
+export function viewOf(group: TurnGroup, latest: boolean, provider: Provider): TurnView {
+  let kept = VIEWS.get(group);
+  if (!kept) VIEWS.set(group, kept = new Map());
+  const key = `${latest}:${provider}`;
+  let view = kept.get(key);
+  if (!view) kept.set(key, view = turnView(group, latest, provider));
+  return view;
+}
+
 const DIM: Style = { dim: true };
 const YELLOW: Style = { fg: 'yellow' };
 
@@ -59,58 +79,79 @@ export interface PageContext {
   index: number;
   status: SessionStatus;
   extras: LiveExtras;
-  caps: Pick<Capabilities, 'symbols'>;
+  caps: Pick<Capabilities, 'symbols' | 'background'>;
   width: number;
   now: number;
+  /** The closing answer is opened in full. */
+  answerOpen?: boolean;
 }
 
-/** The status on the right of the first line. */
-function statusSpans(status: SessionStatus, ctx: PageContext): Span[] {
-  const s = (ch: string) => symbol(ctx.caps, ch);
-  if (status.kind === 'waiting') return [{ text: `${s('⏸')} 等你批准`, style: { ...YELLOW, bold: true } }];
-  if (status.kind === 'running') {
-    const since = status.since ? Date.parse(status.since) : NaN;
-    return [{ text: s('●'), style: YELLOW }, { text: ' 运行中' }, ...(Number.isFinite(since) ? [{ text: ' ' + runningClock(ctx.now - since), style: DIM }] : [])];
-  }
+/**
+ * Spans are known by their style object: cutting, wrapping and laying a line
+ * on the band copy spans but keep their style, so what a span belongs to
+ * survives every step from here to the screen.
+ */
+const OWNER = new WeakMap<Style, string>();
+const CHIP = new WeakSet<Style>();
+const owned = (style: Style, id: string): Style => { const own = { ...style }; OWNER.set(own, id); return own; };
+
+/**
+ * A label set in a block of colour: the answer, an approval, your message.
+ * Inverse keeps the text in the theme's own background colour, so it reads
+ * on any palette.
+ */
+export function chip(text: string, fg: Color): Span {
+  const style: Style = { fg, inverse: true, bold: true };
+  CHIP.add(style);
+  return { text: ` ${text} `, style };
+}
+
+/** What the session is doing, on the right of the header; nothing while it runs or after it is done. */
+function statusSpans(status: SessionStatus): Span[] {
+  if (status.kind === 'waiting') return [chip('等你批准', 'yellow')];
   if (status.kind === 'quiet') return [{ text: '无新记录', style: DIM }];
   if (status.kind === 'ended') return [{ text: '已退出', style: DIM }];
-  return [{ text: '空闲', style: DIM }];
+  return [];
 }
 
-/** Two lines: who and which session, then which turn. */
-export function headerLines(ctx: PageContext): Line[] {
+/**
+ * One line: which turn and when it started, then the session's state, or
+ * `aside` (what the app has to say: following paused, where the keys are).
+ */
+export function headerLines(ctx: PageContext, aside: Span[] = []): Line[] {
   const { session, groups, index, width } = ctx;
   const group = groups[index];
   const narrow = width < 50;
-  const status = statusSpans(ctx.status, ctx);
-  const title = session.title && !narrow ? [{ text: ` · ${session.title}`, style: DIM }] : [];
-  const first = row([{ text: ' ' }, { text: providerName(session.provider), style: { bold: true } }, ...title], [...status, { text: ' ' }], width);
-  if (!group) return [first, row([{ text: ' 还没有记录', style: DIM }], '', width)];
-  const view = turnView(group, index === groups.length - 1, session.provider);
+  const status = statusSpans(ctx.status);
+  const right: Span[] = status.length ? [...status, { text: ' ' }] : aside.length ? [...aside, { text: ' ' }] : [];
+  if (!group) return [row([{ text: ' 还没有记录', style: DIM }], right, width)];
   const ordinal = group.ordinal ?? index + 1;
   const total = groups.at(-1)?.ordinal ?? groups.length;
-  const started = clock(view.turn.start);
-  const finished = !view.live && view.turn.durationMs ? ` · ${runningClock(view.turn.durationMs)}` : '';
-  const right = started ? `${started}${narrow ? '' : ' 开始'}${finished} ` : '';
-  const left = group.turnId ? ` 第 ${ordinal} 轮 / 共 ${total}` : ' 未归属回合的记录';
-  return [first, row([{ text: left, style: DIM }], [{ text: right, style: DIM }], width)];
+  const started = clock(viewOf(group, index === groups.length - 1, session.provider).turn.start);
+  const left: Span[] = group.turnId
+    ? [{ text: ' ' }, { text: `第 ${ordinal} 轮`, style: { bold: true } }, { text: ` / 共 ${total} 轮${started ? ` · ${started}${narrow ? '' : ' 开始'}` : ''}`, style: DIM }]
+    : [{ text: ' 未归属回合的记录', style: DIM }];
+  return [row(left, right, width)];
 }
 
 const requestText = (item: TimelineItem | undefined, group: TurnGroup): string =>
   plainPasted(item ? publicBody(item) : group.request).trim() || '（未取得本轮请求）';
 
-/** The request: a blue bar and bold text, every wrapped line under the bar. */
-function requestLines(text: string, ctx: PageContext, bold = true): Line[] {
-  const bar: Span = { text: ` ${symbol(ctx.caps, '┃')} `, style: { fg: 'blue' } };
-  return prose(text, ctx.width - 1, { glyph: ch => symbol(ctx.caps, ch), indent: 3, style: bold ? { bold: true } : {} }).map(line => line.length ? [bar, ...line.slice(1)] : [bar]);
-}
+/** Everything starts one cell in: the request, the agent's words, the kind of each call. */
+const MARGIN = 1;
 
+/** The request is the page's title: bold. */
+const requestLines = (text: string, ctx: PageContext): Line[] =>
+  prose(text, ctx.width - 1, { glyph: ch => symbol(ctx.caps, ch), indent: MARGIN, style: { bold: true } });
+
+const base = (path: string) => path.replace(/\\/g, '/').split('/').at(-1) || path;
+
+/** The files the turn changed, under the request. */
 function changedLine(view: TurnView, ctx: PageContext): Line[] {
   const files = view.turn.files;
   if (!files.length) return [];
-  const base = (path: string) => path.replace(/\\/g, '/').split('/').at(-1) || path;
-  const spans: Span[] = [{ text: '   ' }, { text: 'Changed', style: DIM }];
-  let used = 10, shown = 0;
+  const spans: Span[] = [{ text: ' ' }, { text: '改动', style: DIM }];
+  let used = 5, shown = 0;
   for (const file of files) {
     const piece = `  ${file.mark} ${base(file.path)}`;
     const rest = files.length - shown - 1;
@@ -123,101 +164,407 @@ function changedLine(view: TurnView, ctx: PageContext): Line[] {
   return [cutLine(spans, ctx.width)];
 }
 
-/** One call row: indented under its chapter, the tool name once per run, the outcome on the right. */
-function callLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean): Line[] {
-  const toolWidth = ctx.width < 50 ? Math.min(5, view.toolWidth) : view.toolWidth;
-  const leads = runStarts(rows);
-  const lines: Line[] = [];
-  rows.forEach((chapterRow, index) => {
-    const call = rowView(chapterRow, view.live || waitingOn);
-    const tool = leads[index] ? (call.tool.length > toolWidth ? call.tool.slice(0, toolWidth) : call.tool.padEnd(toolWidth)) : ' '.repeat(toolWidth);
-    const label = call.label.replace(/\s+/g, ' ') + (call.count > 1 ? ` · ${call.count} 次` : '');
-    const isLast = index === rows.length - 1;
-    const right: Span[] = call.word ? [{ text: call.word, style: { fg: 'red' } }]
-      : call.empty ? [{ text: 'no match', style: DIM }]
-      : call.note ? [{ text: call.note, style: DIM }]
-      : call.out ? [{ text: waitingOn && isLast ? '?' : symbol(ctx.caps, '…'), style: YELLOW }]
-      : [];
-    // A call with a record to show ends in a dim arrow, as in the VS Code panel.
-    const arrow: Span[] = chapterRow.openable ? [{ text: (right.length ? ' ' : '') + symbol(ctx.caps, '→'), style: DIM }] : [];
-    const line = row([{ text: '     ' }, { text: tool, style: DIM }, { text: '  ' }, { text: label }], right.length || arrow.length ? [...right, ...arrow, { text: ' ' }] : '', ctx.width);
-    if (chapterRow.openable) CALL_OF.set(line, chapterRow);
-    lines.push(line);
-    for (const choice of call.choices ?? []) {
-      const chosen = choice.chosen.length ? choice.chosen.map(value => `${symbol(ctx.caps, '✓')} ${value}`).join('  ') : choice.waiting ? '等待你的选择' : '';
-      if (chosen) lines.push(cutLine([{ text: ' '.repeat(7 + toolWidth) }, ...(choice.header ? [{ text: choice.header + '  ', style: DIM }] : []), { text: chosen, style: choice.chosen.length ? { bold: true } : DIM }], ctx.width));
+/** Commands the summaries name as a read or a search in their first words, and the words to drop. */
+const SHELL_READ = /^读取 /;
+const SHELL_SEARCH = /^(搜索代码|查找文件|查看目录) · /;
+const SHELL = /^(Bash|exec_command|shell|local_shell|BashOutput|KillShell|Terminal|Script)$/i;
+
+/**
+ * The tool, by the name the agent gives it: Bash, Read, Write. A write that
+ * patched a file is an Edit; an MCP tool goes by its own last name.
+ */
+function toolName(chapterRow: ChapterRow, ctx: PageContext): string {
+  if (chapterRow.output) return 'Output';
+  const tool = chapterRow.tool;
+  if (/^Write$/i.test(tool) && changeSize(chapterRow, ctx)?.edited) return 'Edit';
+  if (/^mcp__/.test(tool)) return tool.split('__').at(-1) || tool;
+  return tool;
+}
+
+/** Edits and writes are what the turn leaves behind: their names read in the body colour, their size on the right. */
+const isChange = (chapterRow: ChapterRow): boolean => !chapterRow.output
+  && (/^(Write|Edit|MultiEdit|apply_patch|NotebookEdit)$/i.test(chapterRow.tool) || (chapterRow.items.length > 0 && chapterRow.items.every(item => item.kind === 'file-change')));
+
+/** Top-level pieces of a shell line and the separator after each: quotes, $( ), ( ) and { } are not split. */
+function shellPieces(line: string): Array<{ text: string; at: number; sep: string }> {
+  const pieces: Array<{ text: string; at: number; sep: string }> = [];
+  let quote = '', depth = 0, start = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) { if (ch === quote) quote = ''; else if (ch === '\\' && quote === '"') i++; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; continue; }
+    if (ch === '\\') { i++; continue; }
+    if (ch === '(' || ch === '{') { depth++; continue; }
+    if ((ch === ')' || ch === '}') && depth) { depth--; continue; }
+    if (depth) continue;
+    const two = line.slice(i, i + 2);
+    const sep = two === '&&' || two === '||' ? two : ch === ';' || ch === '|' ? ch : '';
+    if (!sep) continue;
+    pieces.push({ text: line.slice(start, i), at: start, sep });
+    i += sep.length - 1; start = i + 1;
+  }
+  pieces.push({ text: line.slice(start), at: start, sep: '' });
+  return pieces.filter(piece => piece.text.trim());
+}
+
+/** Set-up a command line starts with: moving into a directory, setting a variable, defining a function. */
+const SETUP = [/^cd\s/, /^(export\s+)?([A-Za-z_]\w*=("[^"]*"|'[^']*'|\$\([^)]*\)|\S)*\s*)+$/, /^[A-Za-z_][\w-]*\s*\(\)\s*\{/, /^set\s+-/, /^(source|\.)\s/];
+/** Commands that only print or wait between the ones that do the work. */
+const FILLER = /^(echo|printf|sleep|true|:)(\s|$)/;
+
+/**
+ * A command as it reads best: the first one its first line runs (a heredoc's
+ * body is not the command), without the set-up before it, with the project's
+ * and the home directory's paths shortened; and how many more it runs after.
+ */
+export function commandText(command: string, project = '', home = process.env.HOME ?? ''): { text: string; more: number } {
+  const line = command.split('\n').find(part => part.trim()) ?? '';
+  const pieces = shellPieces(line);
+  const firstAt = pieces.findIndex(piece => !SETUP.some(pattern => pattern.test(piece.text.trim())));
+  const kept = firstAt < 0 ? pieces : pieces.slice(firstAt);
+  // The first command runs up to the first ; && or ||; a pipe stays part of it.
+  let last = 0;
+  while (last < kept.length - 1 && kept[last].sep === '|') last++;
+  let text = kept.length ? line.slice(kept[0].at, kept[last].at + kept[last].text.length).trim() : line.trim();
+  const more = kept.slice(last + 1).filter((piece, index, rest) => (index === 0 || rest[index - 1].sep !== '|') && !FILLER.test(piece.text.trim())).length;
+  const script = text.match(/^(python3?|node|ruby|bash|sh|zsh)\s+(-\S*\s+)*-?\s*<<-?\s*['"]?\w+['"]?\s*$/);
+  if (script) text = `${script[1]} script`;
+  text = text.replace(/\s*<<-?\s*['"]?\w+['"]?\s*$/, '');
+  if (project) text = text.split(project.replace(/\/$/, '') + '/').join('');
+  if (home) text = text.split(home + '/').join('~/');
+  return { text: text.replace(/\s+/g, ' '), more };
+}
+
+/**
+ * The words of a call's line: the agent's own description, the summary's
+ * first part, or the command itself where the summary only repeats it; and
+ * how many more parts it has.
+ */
+function callText(chapterRow: ChapterRow, ctx: PageContext): { text: string; more: number; command?: boolean } {
+  let label = chapterRow.label.replace(/^调用 Bash · /, '').replace(/（(动态参数|含管道|复合命令)）/g, '');
+  const command = chapterRow.command;
+  const shell = SHELL.test(chapterRow.tool);
+  const squash = (text: string) => text.replace(/\s+/g, '');
+  if (shell && command !== undefined && squash(label).slice(0, 12) === squash(command).slice(0, 12)) {
+    const shown = commandText(command, ctx.session.projectPath);
+    return { text: shown.text || chapterRow.tool, more: shown.more, command: true };
+  }
+  // A command's parts and a search's queries are joined by ；: the first one reads, the rest are counted.
+  const parts = shell || WEB.test(chapterRow.tool) ? label.split('；') : [label];
+  label = parts[0];
+  if (shell) {
+    const named = label.replace(SHELL_READ, '').replace(SHELL_SEARCH, '');
+    // A summary that names no file or pattern ("检索项目记忆") says less than the command it stands for.
+    if (named === label && command !== undefined && /[\u3400-\u9fff]/.test(label) && !/^运行 \S+ 脚本$/.test(label)) {
+      const shown = commandText(command, ctx.session.projectPath);
+      if (shown.text) return { text: shown.text, more: shown.more, command: true };
     }
-  });
-  return lines;
+    // "运行 python3 脚本" is the command, said in other words: it reads as a command does.
+    if (/^运行 /.test(named)) return { text: named.replace(/^运行 (\S+) 脚本$/, '$1 script').replace(/^运行 /, ''), more: parts.length - 1, command: true };
+    label = named;
+  }
+  label = label.replace(/^文件变化 · /, '');
+  // What was searched or fetched reads like a command: as it was given, on one line.
+  return { text: label.replace(/\s+/g, ' ').trim() || chapterRow.tool, more: parts.length - 1, ...(WEB.test(chapterRow.tool) ? { command: true } : {}) };
 }
 
-function segmentLines(segment: TurnSegment, view: TurnView, ctx: PageContext, waitingOn: boolean): Line[] {
-  if (segment.kind === 'answer') return prose(publicBody(segment.item), ctx.width - 1, { glyph: ch => symbol(ctx.caps, ch), indent: 3 });
-  if (segment.kind === 'interjection') return [[{ text: '   你的消息', style: DIM }], ...requestLines(publicBody(segment.item), ctx, false)];
-  const { chapter } = segment;
+const WEB = /^(WebSearch|WebFetch|WEB|Web)$/;
+/** The sources a web search returned, recorded apart from the call. */
+const isSources = (chapterRow: ChapterRow): boolean => chapterRow.items.length > 0 && chapterRow.items.every(item => item.title === 'Web 来源');
+
+/**
+ * The calls as steps. A shared output and the sources of a search the row
+ * before already made are records of a step, not steps: they open from the
+ * call, and take no line of their own. Sources with no call before them are
+ * the search itself.
+ */
+function steps(rows: ChapterRow[]): ChapterRow[] {
+  const kept: ChapterRow[] = [];
+  for (const chapterRow of rows) {
+    if (chapterRow.output) continue;
+    if (isSources(chapterRow)) {
+      if (kept.length && WEB.test(kept.at(-1)!.tool)) continue;
+      kept.push({ ...chapterRow, tool: 'WebSearch', label: chapterRow.items[0].summary.replace(/\s*\.\.\.$/, '') });
+      continue;
+    }
+    kept.push(chapterRow);
+  }
+  return kept;
+}
+
+/** Lines added and removed by a recorded change, and whether it wrote a new file. */
+const SIZES = new WeakMap<ChapterRow, { added: number; removed: number; edited: boolean } | undefined>();
+function changeSize(chapterRow: ChapterRow, ctx: PageContext): { added: number; removed: number; edited: boolean } | undefined {
+  if (SIZES.has(chapterRow)) return SIZES.get(chapterRow);
+  const size = measureChange(chapterRow, ctx);
+  SIZES.set(chapterRow, size);
+  return size;
+}
+function measureChange(chapterRow: ChapterRow, ctx: PageContext): { added: number; removed: number; edited: boolean } | undefined {
+  const all = recordedFiles(chapterRow.items, resolveOutlineEvidence(ctx.session, chapterRow.id)?.entry);
+  const files = all.length > 1 ? all.filter(file => base(file.path) === base(chapterRow.label)) : all;
+  if (!files.length) return undefined;
+  let added = 0, removed = 0;
+  for (const file of files) for (const line of file.lines) {
+    if (file.operation === 'write') added++;
+    else if (line.startsWith('+') && !line.startsWith('+++')) added++;
+    else if (line.startsWith('-') && !line.startsWith('---')) removed++;
+  }
+  return { added, removed, edited: files.some(file => file.operation === 'update' || file.operation === 'delete') };
+}
+
+/**
+ * The band behind a run of calls: the terminal's own background moved a
+ * little toward its text. Unknown background, no band.
+ */
+export function bandColor(background: Capabilities['background']): readonly [number, number, number] | undefined {
+  if (!background) return undefined;
+  const { r, g, b, dark } = background;
+  const mix = (c: number) => Math.round(dark ? c + (255 - c) * 0.07 : c * 0.95);
+  return [mix(r), mix(g), mix(b)];
+}
+
+/** Lines laid on the band, each filled to the full width. */
+function band(lines: Line[], width: number, tint: readonly [number, number, number] | undefined): Line[] {
+  if (!tint) return lines;
+  return lines.map(line => {
+    const laid = spans(line).map(span => {
+      const style: Style = { ...span.style, bgRgb: tint };
+      const owner = span.style && OWNER.get(span.style);
+      if (owner !== undefined) OWNER.set(style, owner);
+      return { ...span, style };
+    });
+    const used = textWidth(plainText(laid));
+    return used < width ? [...laid, { text: ' '.repeat(width - used), style: { bgRgb: tint } }] : laid;
+  });
+}
+
+/** A call's words wrap to at most this many lines: enough to read a step at a glance. */
+export const CALL_LINES = 2;
+
+interface LineTarget { row: ChapterRow; height: number; from?: number; to?: number }
+/** The calls a line starts. */
+const TARGETS = new WeakMap<object, LineTarget[]>();
+/** The closing answer's line. */
+const ANSWER = new WeakSet<object>();
+
+/** What shows on the right of a call: a failure in red, a call still out, the size of a change. */
+function callEnd(chapterRow: ChapterRow, ctx: PageContext, live: boolean, asking: boolean): Span[] {
+  const call = rowView(chapterRow, live);
+  if (call.word) return [{ text: call.word, style: { fg: 'red' } }];
+  if (call.empty) return [{ text: 'no match', style: DIM }];
+  if (call.out) return [{ text: asking ? '?' : symbol(ctx.caps, '…'), style: YELLOW }];
+  if (isChange(chapterRow)) {
+    const size = changeSize(chapterRow, ctx);
+    if (size) return [...(size.added ? [{ text: `+${size.added}`, style: { fg: 'green' } as Style }] : []), ...(size.added && size.removed ? [{ text: ' ' }] : []), ...(size.removed ? [{ text: `-${size.removed}`, style: { fg: 'red' } as Style }] : [])];
+  }
+  return call.note ? [{ text: call.note, style: DIM }] : [];
+}
+
+/** A call that only read a file: its name reads in grey, as a command does. */
+const isRead = (chapterRow: ChapterRow): boolean => !chapterRow.output
+  && (/^(Read|view|view_image|NotebookRead)$/i.test(chapterRow.tool) || (SHELL.test(chapterRow.tool) && SHELL_READ.test(chapterRow.label)));
+
+/** A run's tool name, on a line of its own above its calls. */
+const TOOL: Style = { dim: true, bold: true };
+
+/** `line` cut to `room` cells with `tail` after it; the text gives way, the tail stays whole. */
+function withTail(line: Span[], tail: Span[], room: number): Span[] {
+  const need = textWidth(plainText(tail));
+  return [...cutLine(line, Math.max(1, room - need)), ...tail];
+}
+
+/**
+ * A step's calls on a band, under the words that explain them, as a tree: the
+ * tool's name on a line of its own, once for a run of one tool, and each call
+ * of the run hung from it on ├, the last on └. A call's second line goes on
+ * under │, so it never reads as the next call. Every call is shown: the reader
+ * is here for the process. The agent's own description reads in the body
+ * colour; a command, a file or a query in grey, on one line, what it runs
+ * after counted. A failure, a call still out or a change's size follows it.
+ */
+function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean): Line[] {
+  const rows = steps(all);
+  const tint = bandColor(ctx.caps.background);
+  const live = view.live || waitingOn;
+  const names = rows.map(chapterRow => toolName(chapterRow, ctx));
+  const lead = ' '.repeat(MARGIN);
+  // Two cells stay free at the right edge for the ⏎ a selected call ends in.
+  const room = Math.max(8, ctx.width - MARGIN - 2 - 3);
   const lines: Line[] = [];
-  chapter.headings.forEach((heading, index) => {
-    const failed = heading.status === 'failed';
-    const dot: Span = { text: ` ${symbol(ctx.caps, '●')} `, style: failed ? { fg: 'red' } : DIM };
-    if (index) lines.push([]);
-    lines.push(...prose(publicBody(heading), ctx.width - 1, { glyph: ch => symbol(ctx.caps, ch), indent: 3, lead: [dot] }));
-  });
-  lines.push(...callLines(chapter.rows, view, ctx, waitingOn));
+  const push = (line: Span[], targets: LineTarget[]) => {
+    const laid = band([line], ctx.width, tint)[0];
+    if (targets.length) TARGETS.set(laid as object, targets);
+    lines.push(laid);
+  };
+  for (let at = 0; at < rows.length;) {
+    let last = at;
+    while (last + 1 < rows.length && names[last + 1] === names[at]) last++;
+    const run = rows.slice(at, last + 1);
+    push([{ text: lead }, { text: names[at], style: TOOL }], []);
+    run.forEach((chapterRow, index) => {
+      const end = index === run.length - 1;
+      const branch: Span = { text: lead + symbol(ctx.caps, end ? '└' : '├') + ' ', style: DIM };
+      const through: Span = { text: lead + (end ? ' ' : symbol(ctx.caps, '│')) + ' ', style: DIM };
+      const shown = callText(chapterRow, ctx);
+      const style = owned(shown.command || isRead(chapterRow) ? DIM : {}, chapterRow.id);
+      const label = shown.text + (chapterRow.count > 1 ? ` · ${chapterRow.count} 次` : '');
+      const outcome = callEnd(chapterRow, ctx, live, waitingOn && chapterRow === rows.at(-1));
+      const tail: Span[] = [...(shown.more ? [{ text: ` +${shown.more}`, style: owned({ dim: true, bold: true }, chapterRow.id) }] : []), ...(outcome.length ? [{ text: ' ' }, ...outcome] : [])];
+      let wrapped: Span[][];
+      if (shown.command) wrapped = [withTail([{ text: label, style }], tail, room)];
+      else {
+        const parts = wrapSpans([{ text: label, style }], room);
+        if (parts.length > CALL_LINES) parts.splice(CALL_LINES - 1, Infinity, [...cutLine([{ text: parts.slice(CALL_LINES - 1).map(plainText).join(' ') + '  ', style }], room)]);
+        const lastPart = parts.length - 1;
+        parts[lastPart] = textWidth(plainText(parts[lastPart]) + plainText(tail)) <= room ? [...parts[lastPart], ...tail] : withTail(parts[lastPart], tail, room);
+        wrapped = parts;
+      }
+      wrapped.forEach((part, piece) => push([piece ? through : branch, ...part], piece === 0 && chapterRow.openable ? [{ row: chapterRow, height: wrapped.length }] : []));
+      for (const choice of rowView(chapterRow, live).choices ?? []) {
+        const chosen = choice.chosen.length ? choice.chosen.map(value => `${symbol(ctx.caps, '✓')} ${value}`).join('  ') : choice.waiting ? '等待你的选择' : '';
+        if (chosen) push(cutLine([through, ...(choice.header ? [{ text: choice.header + '  ', style: DIM }] : []), { text: chosen, style: choice.chosen.length ? { bold: true } : DIM }], ctx.width), []);
+      }
+    });
+    at = last + 1;
+  }
   return lines;
 }
 
-/** The end of the turn: what it is doing now, or the line the agents print when done. */
+/** Puts `lead` over the blank cells a line starts with. */
+function withLead(line: Line, lead: Span[]): Span[] {
+  let cut = textWidth(plainText(lead));
+  const rest: Span[] = [];
+  for (const span of spans(line)) {
+    if (cut > 0 && !span.text.trim()) {
+      const take = Math.min(cut, span.text.length);
+      cut -= take;
+      if (span.text.length > take) rest.push({ ...span, text: span.text.slice(take) });
+      continue;
+    }
+    rest.push(span);
+  }
+  return [...lead, ...rest];
+}
+
+/** The agent's words, in the body colour: they say why the calls under them ran. */
+const wordLines = (source: string, ctx: PageContext, style: Style = {}, indent = MARGIN): Span[][] =>
+  prose(source, ctx.width - 1, { glyph: ch => symbol(ctx.caps, ch), indent, style });
+
+/** A segment as blocks, one blank line apart: the agent's words, then the band of its calls. */
+function segmentBlocks(segment: TurnSegment, view: TurnView, ctx: PageContext, waitingOn: boolean): Line[][] {
+  if (segment.kind === 'answer') return [wordLines(publicBody(segment.item), ctx)];
+  if (segment.kind === 'interjection') {
+    // Your own words sent during the turn, after a label of their own.
+    const you = chip('你', 'blue');
+    const lines = wordLines(publicBody(segment.item), ctx, {}, MARGIN + textWidth(you.text) + 1);
+    if (lines.length) lines[0] = withLead(lines[0], [{ text: ' '.repeat(MARGIN) }, you, { text: ' ' }]);
+    return [lines];
+  }
+  const { chapter } = segment;
+  // The words, then the calls they explain, a blank line between: the calls are a block of their own.
+  const words = chapter.headings.map(heading => wordLines(publicBody(heading), ctx)).filter(lines => lines.length);
+  const calls = callLines(chapter.rows, view, ctx, waitingOn);
+  return calls.length ? [...words, calls] : words;
+}
+
+/** The answer that closed the turn: its label and its first line, the whole of it when opened. */
+function answerLines(view: TurnView, ctx: PageContext): Line[] {
+  const text = view.answers.map(segment => segment.kind === 'answer' ? publicBody(segment.item) : '').filter(Boolean).join('\n\n');
+  const lead: Span[] = [{ text: ' '.repeat(MARGIN) }];
+  if (!text) return view.turn.aborted ? [[...lead, chip('中断', 'red')]] : [];
+  const label = chip('答复', 'green');
+  if (ctx.answerOpen) {
+    const head = [...lead, label];
+    ANSWER.add(head);
+    return [head, [], ...wordLines(text, ctx)];
+  }
+  const firstText = text.split(/\n/).map(line => line.trim()).find(Boolean) ?? '';
+  const flat = inlineSpans(firstText.replace(/^#+\s*|^[-*]\s+|^\d+\.\s+/, ''));
+  const line = cutLine([...lead, label, { text: ' ' }, ...flat, ...(text.trim() !== firstText ? [{ text: ' …', style: DIM }] : [])], ctx.width);
+  ANSWER.add(line);
+  return [line];
+}
+
+/** The end of the turn: waiting on you, no word for a while, or the answer it closed with. While it runs, nothing. */
 function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
-  const s = (ch: string) => symbol(ctx.caps, ch);
   const status = ctx.status;
+  const lead: Span = { text: ' '.repeat(MARGIN) };
   if (latest && status.kind === 'waiting') {
     const what = [status.approval.tool, /^\/.+\/[^/]+$/.test(status.approval.summary) ? status.approval.summary.split('/').at(-1)! : status.approval.summary].filter(Boolean);
-    const bar: Span = { text: ` ${s('▌')} `, style: YELLOW };
     return [
-      cutLine([bar, { text: '等你批准', style: { ...YELLOW, bold: true } }, ...(what.length ? [{ text: '  ' + what[0], style: DIM }, ...(what[1] ? [{ text: ' · ' + what[1].replace(/\s+/g, ' ') }] : [])] : [])], ctx.width),
-      cutLine([bar, { text: `在 ${providerName(ctx.session.provider)} 里选择批准或拒绝。`, style: DIM }], ctx.width),
+      cutLine([lead, chip('等你批准', 'yellow'), ...(what.length ? [{ text: ' ' + what[0], style: { bold: true } }, ...(what[1] ? [{ text: ' · ' + what[1].replace(/\s+/g, ' ') }] : [])] : [])], ctx.width),
+      cutLine([lead, { text: `在 ${providerName(ctx.session.provider)} 里选择批准或拒绝。`, style: DIM }], ctx.width),
     ];
   }
-  if (latest && status.kind === 'running') {
-    const since = status.since ? Date.parse(status.since) : NaN;
-    return [[{ text: ` ${s('●')} ${status.verb}`, style: YELLOW }, ...(Number.isFinite(since) ? [{ text: ' ' + runningClock(ctx.now - since), style: DIM }] : [])]];
-  }
-  if (view.live && latest) return [[{ text: ` 无新记录${status.kind === 'quiet' && status.lastAt ? ` · 最后一条 ${clock(status.lastAt)}` : ''}`, style: DIM }]];
-  const calls = view.calls ? ` · ${view.calls} ${view.calls === 1 ? 'call' : 'calls'}` : '';
-  if (view.turn.aborted) return [[{ text: ` 中断${calls}`, style: DIM }]];
+  if (latest && status.kind === 'running') return [];
+  if (view.live && latest) return [[lead, { text: `无新记录${status.kind === 'quiet' && status.lastAt ? ` · 最后一条 ${clock(status.lastAt)}` : ''}`, style: DIM }]];
   if (!view.turn.segments.length) return [];
-  return [[{ text: ` ${s('✻')} ${view.done}${calls}`, style: DIM }]];
+  return answerLines(view, ctx);
 }
 
-/** Which call a row line shows; lines are only ever reused, never copied, between here and the app. */
-const CALL_OF = new WeakMap<object, ChapterRow>();
+/**
+ * Marks the call or answer under the cursor or the pointer as a link does:
+ * golden yellow, and its first line ends in a ⏎, the key that opens it.
+ * `owner` is the call's id; without one the line is the answer's.
+ */
+export function markSelected(line: Line, caps: Pick<Capabilities, 'symbols' | 'background'>, width: number, first: boolean, owner?: string): Line {
+  const gold = (span: Span): Span => ({ ...span, style: { ...span.style, ...YELLOW, dim: false } });
+  const answer = ANSWER.has(line as object);
+  const marked = spans(line).map(span => {
+    const style = span.style;
+    const mine = owner !== undefined ? Boolean(style && OWNER.get(style) === owner) : answer && Boolean(span.text.trim()) && !(style && CHIP.has(style));
+    return mine ? gold(span) : span;
+  });
+  if (!first) return marked;
+  // ⏎ takes two cells at the right edge: from the blank at the end, else from the gap before the outcome.
+  const tint = marked.find(span => span.style?.bgRgb)?.style?.bgRgb;
+  const enter: Span[] = [{ text: symbol(caps, '⏎'), style: { ...YELLOW, bold: true } }, { text: ' ' }];
+  const blank = (span: Span | undefined) => Boolean(span && span.text.length && !span.text.trim());
+  const body = blank(marked.at(-1)) && marked.at(-1)!.text.length < 3 ? marked.slice(0, -1) : marked;
+  const gap = body.map((span, index) => index > 0 && blank(span) && span.text.length >= 3).lastIndexOf(true);
+  if (gap > 0 && gap < body.length - 1) {
+    const room = textWidth(plainText(body)) + 2 - width;
+    const shrunk = [...body.slice(0, gap), { ...body[gap], text: ' '.repeat(body[gap].text.length - Math.max(0, room)) }, ...body.slice(gap + 1), { text: ' ' }, ...enter];
+    return band([shrunk], width, tint)[0];
+  }
+  const left = blank(marked.at(-1)) ? marked.slice(0, -1) : marked;
+  return band([row(left, enter, width)], width, tint)[0];
+}
 
-export interface CallTarget { line: number; row: ChapterRow }
+/** A call or the answer on the page: its first line, how many lines it takes, and its cells when it shares the line. */
+export interface CallTarget { line: number; height: number; row?: ChapterRow; answer?: boolean; from?: number; to?: number }
 
-/** The page and where each call row is on it, for selecting and opening calls. */
+/** The page and where each call row and the answer are on it, for selecting and opening them. */
 export function turnLayout(ctx: PageContext): { lines: Line[]; targets: CallTarget[] } {
   const lines = turnBody(ctx);
   const targets: CallTarget[] = [];
-  lines.forEach((line, index) => { const call = typeof line === 'object' ? CALL_OF.get(line) : undefined; if (call) targets.push({ line: index, row: call }); });
+  lines.forEach((line, index) => {
+    if (typeof line !== 'object') return;
+    for (const target of TARGETS.get(line) ?? []) targets.push({ line: index, ...target });
+    if (ANSWER.has(line)) targets.push({ line: index, height: 1, answer: true });
+  });
   return { lines, targets };
 }
 
-/** The whole turn, top to bottom. Blocks are one blank line apart; a chapter's calls stay together. */
+/**
+ * The whole turn, top to bottom: the request as the title and what it
+ * changed, then the agent's words with the calls each explains on a band
+ * under them, then how the turn ended. Blocks are one blank line apart.
+ */
 export function turnBody(ctx: PageContext): Line[] {
   const group = ctx.groups[ctx.index];
-  if (!group) return [[{ text: '   这个会话还没有可显示的记录。', style: DIM }]];
+  if (!group) return [[{ text: ' 这个会话还没有可显示的记录。', style: DIM }]];
   const latest = ctx.index === ctx.groups.length - 1;
-  const view = turnView(group, latest, ctx.session.provider);
+  const view = viewOf(group, latest, ctx.session.provider);
   const waitingOn = latest && ctx.status.kind === 'waiting';
-  const blocks: Line[][] = [requestLines(requestText(view.turn.request, group), ctx)];
-  const changed = changedLine(view, ctx);
-  if (changed.length) blocks.push(changed);
-  for (const segment of view.turn.segments) blocks.push(segmentLines(segment, view, ctx, waitingOn));
+  const going = latest && (ctx.status.kind === 'running' || waitingOn);
+  // A finished turn's closing answer folds to one line; an open turn shows everything so far.
+  const closed = !(latest && (view.live || waitingOn));
+  const blocks: Line[][] = [[...requestLines(requestText(view.turn.request, group), ctx), ...changedLine(view, ctx)]];
+  for (const segment of closed ? view.process : view.turn.segments) blocks.push(...segmentBlocks(segment, view, ctx, waitingOn));
   // On screen in the agent, not yet in the transcript: faint until the record arrives.
-  if (latest && ctx.extras.draft && (ctx.status.kind === 'running' || ctx.status.kind === 'waiting')) {
-    blocks.push(prose(ctx.extras.draft, ctx.width - 1, { glyph: ch => symbol(ctx.caps, ch), indent: 3, style: { dim: true, italic: true } }));
-  }
-  const tail = tailLines(view, latest, ctx);
-  if (tail.length) blocks.push(tail);
+  if (latest && ctx.extras.draft && going) blocks.push(wordLines(ctx.extras.draft, ctx, { dim: true, italic: true }));
+  blocks.push(tailLines(view, latest, ctx));
   return blocks.filter(block => block.length).flatMap((block, index) => index ? [[], ...block] : block);
 }

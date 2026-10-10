@@ -110,6 +110,8 @@ test('input: SGR mouse and late terminal replies', () => {
     { type: 'mouse', action: 'wheelUp', button: 64, x: 3, y: 9 },
     { type: 'mouse', action: 'wheelDown', button: 65, x: 3, y: 9 },
   ]);
+  // Sideways steps (66, 67) are their own direction, never up or down; a modifier keeps the direction (68 is Shift+up).
+  assert.deepEqual(new InputParser().feed('\x1b[<66;1;1M\x1b[<67;1;1M\x1b[<68;1;1M').map(event => event.type === 'mouse' ? event.action : ''), ['wheelLeft', 'wheelRight', 'wheelUp']);
   // A reply that arrives after the probe gave up is skipped, not typed.
   assert.deepEqual(new InputParser().feed('\x1b]11;rgb:0000/0000/0000\x1b\\\x1bP>|kitty(0.43)\x1b\\\x1b_Gi=31;OK\x1b\\\x1b]99;x\x07j').map(describe), ['j']);
   assert.deepEqual(new InputParser().feed('\x1b[?62;c\x1b[?2026;2$yk').map(describe), ['k']);

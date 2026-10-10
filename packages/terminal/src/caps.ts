@@ -29,7 +29,7 @@ export interface Capabilities {
 /** Symbols the views draw, and what replaces each one when it is not one cell wide. */
 export const SYMBOLS: Readonly<Record<string, string>> = {
   '●': '*', '✻': '*', '┃': '|', '…': '...', '─': '-', '⏸': '||', '▌': '|', '›': '>', '‹': '<', '│': '|', '✓': 'v', '❯': '>', '→': '>',
-  '☐': '[ ]', '☑': '[x]', '┌': '+', '┬': '+', '┐': '+', '├': '+', '┼': '+', '┤': '+', '└': '+', '┴': '+', '┘': '+',
+  '☐': '[ ]', '☑': '[x]', '┌': '+', '┬': '+', '┐': '+', '├': '+', '┼': '+', '┤': '+', '└': '+', '┴': '+', '┘': '+', '┆': ':', '▸': '>', '▾': 'v', '⏎': '<', '≡': '=', '±': '~',
 };
 
 export const NONE: Capabilities = { probed: false, sync: false, links: false, images: false, notify: false, kittyKeyboard: false, clipboard: false, inTmux: false, symbols: {} };

@@ -457,7 +457,9 @@ export function describeAction(item: TimelineItem): ActionDescription {
     try { decoded = JSON.parse(input); } catch { /* Custom tool input is not JSON. */ }
     actions = toolActions(item.title, decoded);
   } else if (item.kind === 'file-change') {
-    const targets = item.detail?.blocks.filter(block => block.kind === 'patch').map(block => block.label) || [];
+    const patched = item.detail?.blocks.filter(block => block.kind === 'patch').map(block => block.label) || [];
+    // A fragment the agent was shown of a file changed outside its own edits names only the file.
+    const targets = patched.length ? patched : [item.summary].filter(Boolean);
     actions = [fileAtom('file-change', '文件变化', targets)];
   } else if (item.kind === 'question') actions = [atom('question', '等待确认')];
   else if (item.kind === 'subagent') {

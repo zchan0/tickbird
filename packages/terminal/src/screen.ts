@@ -12,6 +12,8 @@ export interface Style {
   bold?: boolean; dim?: boolean; italic?: boolean; underline?: boolean; inverse?: boolean; strike?: boolean;
   /** OSC 8 target; drawn only when the terminal shows links. */
   link?: string;
+  /** A background mixed from the terminal's own, where it reported one: a band, never a palette colour. */
+  bgRgb?: readonly [number, number, number];
 }
 
 export interface Span { text: string; style?: Style }
@@ -29,13 +31,18 @@ const colorCode = (color: Color, base: number): string => {
 export function sgr(style: Style = {}): string {
   const codes = ['0'];
   if (style.bold) codes.push('1');
-  if (style.dim) codes.push('2');
+  // Dim with no colour of its own is drawn as the theme's grey (colour 8):
+  // terminals can turn faint off (kitty's dim_opacity 1.0), the palette stays.
+  const grey = style.dim && (!style.fg || style.fg === 'default');
+  if (style.dim && !grey) codes.push('2');
   if (style.italic) codes.push('3');
   if (style.underline) codes.push('4');
   if (style.inverse) codes.push('7');
   if (style.strike) codes.push('9');
-  if (style.fg && style.fg !== 'default') codes.push(colorCode(style.fg, 30));
-  if (style.bg && style.bg !== 'default') codes.push(colorCode(style.bg, 40));
+  if (grey) codes.push('90');
+  else if (style.fg && style.fg !== 'default') codes.push(colorCode(style.fg, 30));
+  if (style.bgRgb) codes.push(`48;2;${style.bgRgb.join(';')}`);
+  else if (style.bg && style.bg !== 'default') codes.push(colorCode(style.bg, 40));
   return `\x1b[${codes.join(';')}m`;
 }
 
@@ -127,8 +134,8 @@ export class Screen {
   }
 }
 
-/** Alternate screen, hidden cursor, SGR mouse, and kitty key disambiguation where supported. */
+/** Alternate screen, hidden cursor, SGR mouse with pointer motion, and kitty key disambiguation where supported. */
 export const enterBytes = (kittyKeyboard: boolean): string =>
-  '\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h' + (kittyKeyboard ? '\x1b[>1u' : '');
+  '\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1003h\x1b[?1006h' + (kittyKeyboard ? '\x1b[>1u' : '');
 export const leaveBytes = (kittyKeyboard: boolean): string =>
-  (kittyKeyboard ? '\x1b[<u' : '') + '\x1b[?1006l\x1b[?1000l\x1b[0m\x1b[?25h\x1b[?1049l';
+  (kittyKeyboard ? '\x1b[<u' : '') + '\x1b[?1006l\x1b[?1003l\x1b[?1000l\x1b[0m\x1b[?25h\x1b[?1049l';

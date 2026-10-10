@@ -70,16 +70,122 @@ export function fileLines(reading: Pick<FileReading, 'lines' | 'start' | 'langua
   })), width, glyph);
 }
 
-/** A recorded change: + and - in the left column. A whole file written is all +. */
-export function diffLines(file: PatchFile, width: number, glyph: Glyph): Line[] {
-  const rows: PanelRow[] = file.lines.map(raw => {
-    if (file.operation === 'write') return { mark: '+', markStyle: { fg: 'green' }, spans: [{ text: raw, style: { fg: 'green' } }] };
-    if (raw.startsWith('@@')) return { spans: [{ text: raw, style: { fg: 'cyan', dim: true } }] };
-    const sign = raw[0] === '+' || raw[0] === '-' ? raw[0] : '';
-    const style: Style = sign === '+' ? { fg: 'green' } : sign === '-' ? { fg: 'red' } : {};
-    return { mark: sign, markStyle: style, spans: [{ text: sign || raw[0] === ' ' ? raw.slice(1) : raw, style }] };
-  });
-  return panel(rows, width, glyph);
+type Rgb = readonly [number, number, number];
+/** Claude Code's diff colours (its dark and light themes): the changed line, and the words that changed in it. */
+const DIFF_COLOURS: Record<'dark' | 'light', { add: Rgb; del: Rgb; addWord: Rgb; delWord: Rgb }> = {
+  dark: { add: [34, 92, 43], del: [122, 41, 54], addWord: [56, 166, 96], delWord: [179, 89, 107] },
+  light: { add: [199, 225, 203], del: [253, 210, 216], addWord: [105, 219, 124], delWord: [255, 168, 180] },
+};
+export type Background = { r: number; g: number; b: number; dark: boolean } | undefined;
+
+interface DiffRow { sign: ' ' | '+' | '-'; no?: number; text: string; words?: Array<[number, number]> }
+type DiffPiece = DiffRow | { gap: string };
+
+/** Where two lines differ, as character ranges of each, word by word; nothing when they share too little to compare. */
+export function changedWords(before: string, after: string): { before: Array<[number, number]>; after: Array<[number, number]> } | undefined {
+  const split = (text: string) => text.match(/\w+|\s+|[^\w\s]/g) ?? [];
+  const a = split(before), b = split(after);
+  if (!a.length || !b.length || a.length * b.length > 40_000) return undefined;
+  const table = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) table[i][j] = a[i] === b[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+  const keptA = new Set<number>(), keptB = new Set<number>();
+  for (let i = 0, j = 0; i < a.length && j < b.length;) {
+    if (a[i] === b[j]) { keptA.add(i++); keptB.add(j++); } else if (table[i + 1][j] >= table[i][j + 1]) i++; else j++;
+  }
+  const same = [...keptA].reduce((n, i) => n + a[i].length, 0);
+  // Mostly rewritten: the whole line is the change, as Claude Code shows it.
+  if (same < Math.max(before.length, after.length) * 0.4) return undefined;
+  const ranges = (tokens: string[], kept: Set<number>) => {
+    const out: Array<[number, number]> = [];
+    let at = 0;
+    tokens.forEach((token, index) => {
+      if (!kept.has(index) && token.trim()) { const last = out.at(-1); if (last && last[1] === at) last[1] = at + token.length; else out.push([at, at + token.length]); }
+      at += token.length;
+    });
+    return out;
+  };
+  return { before: ranges(a, keptA), after: ranges(b, keptB) };
+}
+
+/** A recorded change's lines, numbered where the record says where they are, the words that changed in a replaced line marked. */
+function diffRows(file: PatchFile): DiffPiece[] {
+  if (file.operation === 'write') return file.lines.map((text, index) => ({ sign: '+' as const, no: index + 1, text }));
+  const pieces: DiffPiece[] = [];
+  let oldNo: number | undefined, newNo: number | undefined;
+  for (const raw of file.lines) {
+    if (raw.startsWith('@@')) {
+      const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/.exec(raw);
+      oldNo = at ? Number(at[1]) : undefined; newNo = at ? Number(at[2]) : undefined;
+      // Between hunks, a gap; the first hunk needs none.
+      if (pieces.length || (at ? at[3] : raw.replace(/^@@\s*/, ''))) pieces.push({ gap: at ? at[3] : raw.replace(/^@@\s*/, '') });
+      continue;
+    }
+    const sign = raw[0] === '+' || raw[0] === '-' ? raw[0] : ' ';
+    const text = sign !== ' ' || raw[0] === ' ' ? raw.slice(1) : raw;
+    const no = sign === '-' ? oldNo : newNo;
+    if (sign !== '+' && oldNo !== undefined) oldNo++;
+    if (sign !== '-' && newNo !== undefined) newNo++;
+    pieces.push({ sign, ...(no !== undefined ? { no } : {}), text });
+  }
+  // A run of removed lines followed by added ones: the k-th of each are the same line, changed.
+  for (let i = 0; i < pieces.length;) {
+    const removed: DiffRow[] = [], added: DiffRow[] = [];
+    let j = i;
+    while (j < pieces.length && 'sign' in pieces[j] && (pieces[j] as DiffRow).sign === '-') removed.push(pieces[j++] as DiffRow);
+    while (j < pieces.length && 'sign' in pieces[j] && (pieces[j] as DiffRow).sign === '+') added.push(pieces[j++] as DiffRow);
+    if (removed.length && added.length) for (let k = 0; k < Math.min(removed.length, added.length); k++) {
+      const words = changedWords(removed[k].text, added[k].text);
+      if (words) { removed[k].words = words.before; added[k].words = words.after; }
+    }
+    i = j > i ? j : i + 1;
+  }
+  return pieces;
+}
+
+/**
+ * A recorded change as Claude Code draws one: each line's number, then its
+ * sign; a removed line on red and an added one on green across the pane, the
+ * words that changed in a replaced line on a brighter shade. Where the record
+ * gives no line numbers (a Codex patch) the column is left out. On a terminal
+ * whose background is unknown, the colour goes on the text instead.
+ */
+export function diffLines(file: PatchFile, width: number, glyph: Glyph, background?: Background): Line[] {
+  const colours = background ? DIFF_COLOURS[background.dark ? 'dark' : 'light'] : undefined;
+  const pieces = diffRows(file);
+  const numbers = pieces.flatMap(piece => 'no' in piece && piece.no !== undefined ? [piece.no] : []);
+  const digits = numbers.length ? String(Math.max(...numbers)).length : 0;
+  const gutter = 1 + (digits ? digits + 1 : 0) + 2;
+  const room = Math.max(8, width - gutter - 1);
+  const lines: Line[] = [];
+  for (const piece of pieces) {
+    if ('gap' in piece) { lines.push([{ text: ' '.repeat(gutter) + (piece.gap || glyph('…')), style: DIM }]); continue; }
+    const changed = piece.sign !== ' ';
+    const lineBg = colours && changed ? (piece.sign === '+' ? colours.add : colours.del) : undefined;
+    const wordBg = colours && changed ? (piece.sign === '+' ? colours.addWord : colours.delWord) : undefined;
+    const fg: Style = !colours && changed ? { fg: piece.sign === '+' ? 'green' : 'red' } : {};
+    const base: Style = { ...fg, ...(lineBg ? { bgRgb: lineBg } : {}) };
+    // The text in spans: the changed words on their own shade.
+    const spans: Span[] = [];
+    let at = 0;
+    for (const [from, to] of piece.words ?? []) {
+      if (from > at) spans.push({ text: piece.text.slice(at, from), style: base });
+      spans.push({ text: piece.text.slice(from, to), style: { ...base, ...(wordBg ? { bgRgb: wordBg } : { bold: true }) } });
+      at = to;
+    }
+    if (at < piece.text.length || !spans.length) spans.push({ text: piece.text.slice(at), style: base });
+    const number = digits ? (piece.no !== undefined ? String(piece.no).padStart(digits) : ' '.repeat(digits)) + ' ' : '';
+    const numberStyle: Style = { ...(lineBg ? { bgRgb: lineBg } : {}), ...(changed && lineBg ? {} : DIM) };
+    hardWrap(spans, room).forEach((part, index) => {
+      const used = gutter + textWidth(plainText(part));
+      lines.push([
+        { text: ' ' + (index ? ' '.repeat(number.length) : number), style: numberStyle },
+        { text: index ? '  ' : piece.sign + ' ', style: { ...base, ...(changed ? {} : DIM) } },
+        ...part,
+        ...(lineBg && used < width ? [{ text: ' '.repeat(width - used), style: { bgRgb: lineBg } }] : []),
+      ]);
+    });
+  }
+  return lines;
 }
 
 /** Code or output: a panel with an empty left column. */
@@ -141,9 +247,11 @@ export interface DetailInput {
   glyph: Glyph;
   /** Which change of the same file, when switched with < >; the row's own by default. */
   edit?: number;
+  /** The terminal's background, for the diff's colours. */
+  background?: Background;
 }
 
-export function detailDoc({ session, group, row, width, glyph, edit }: DetailInput): DetailDoc | undefined {
+export function detailDoc({ session, group, row, width, glyph, edit, background }: DetailInput): DetailDoc | undefined {
   const evidence = resolveOutlineEvidence(session, row.id);
   const records = evidence ? evidence.items ?? [evidence.item] : row.items;
   if (!records.length) return undefined;
@@ -181,11 +289,11 @@ export function detailDoc({ session, group, row, width, glyph, edit }: DetailInp
     const outputs = current.row.items.flatMap(item => presentEvidence(item).outputs).filter(block => block.label === '修改返回错误' || current.row.outcome);
     return {
       kind: 'diff', title: base(path), directory: dir(shown(path, session)), path: absolute(path, session),
-      meta: `${current.row.tool}${changes.length > 1 ? ` · 第 ${index + 1} 次 / 共 ${changes.length} 次` : what}${failed}`,
+      meta: `${current.row.tool === 'Write' && current.file.operation === 'update' ? 'Edit' : current.row.tool}${changes.length > 1 ? ` · 第 ${index + 1} 次 / 共 ${changes.length} 次` : what}${failed}`,
       copy: { text: absolute(path, session), what: '路径' },
       ...(changes.length > 1 ? { edits: { index, total: changes.length } } : {}),
       lines: join2([
-        ...shownFiles.map((file, n) => [...(shownFiles.length > 1 || n ? [[{ text: ' ' + shown(file.path, session), style: { bold: true } } as Span]] : []), ...diffLines(file, width, glyph)]),
+        ...shownFiles.map((file, n) => [...(shownFiles.length > 1 || n ? [[{ text: ' ' + shown(file.path, session), style: { bold: true } } as Span]] : []), ...diffLines(file, width, glyph, background)]),
         outputs.length ? [section('返回'), ...codePanel(outputs.map(block => block.text ?? '').join('\n'), undefined, width, glyph)] : [],
       ]),
     };

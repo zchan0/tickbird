@@ -7,13 +7,13 @@ import { openLiveSession, type LiveSession } from '../../core/src/live-session';
 import { readSessionStates, sessionStateDirectory, type SessionState, type SessionStateCache } from '../../core/src/session-state';
 import { liveExtras } from '../../core/src/live-extras';
 import { visibleTurnGroups } from '../../core/src/outline';
-import { turnView } from '../../core/src/turn-view';
+import type { turnView } from '../../core/src/turn-view';
 import type { Capabilities } from './caps';
 import { describe, InputParser } from './input';
 import { enterBytes, leaveBytes, row, Screen, type Line } from './screen';
 import { frame, initialState, key, update, windowTitle, type AppState, type Effect, type Model } from './app';
 import { clipboardBytes, openFile } from './effects';
-import { sessionStatus } from './views/turn-page';
+import { sessionStatus, viewOf } from './views/turn-page';
 import { prose } from './views/prose';
 
 const ESCAPE_GAP_MS = 30;
@@ -105,12 +105,22 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
   const parser = new InputParser();
 
   const stateOf = () => live && states.find(item => item.provider === live!.session.provider && item.session === live!.session.id);
+  /**
+   * The turns, worked out again only when the transcript changed: the app
+   * keeps its layout per `groups`, and a key or a pointer move must not pay
+   * for reading the whole turn again.
+   */
+  let revision = 0;
+  let turns: { live: LiveSession; revision: number; groups: ReturnType<typeof visibleTurnGroups>; latest?: ReturnType<typeof turnView> } | undefined;
   const model = (): Model | undefined => {
     if (!live) return undefined;
     const session = live.session, state = stateOf();
-    const groups = visibleTurnGroups(session);
+    if (turns?.live !== live || turns.revision !== revision) {
+      const groups = visibleTurnGroups(session);
+      turns = { live, revision, groups, ...(groups.length ? { latest: viewOf(groups[groups.length - 1], true, session.provider) } : {}) };
+    }
+    const { groups, latest } = turns;
     const extras = liveExtras(session, state);
-    const latest = groups.length ? turnView(groups[groups.length - 1], true, session.provider) : undefined;
     const status = sessionStatus(latest, extras, Date.now(), { busy: live.health.agent === 'busy', ended: state?.phase === 'ended' });
     return { session, groups, status, extras, caps, now: Date.now(), width: screen.width, height: screen.height, focusAgent: Boolean(focus) };
   };
@@ -209,7 +219,7 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
       const opened = await openLiveSession(candidate);
       if (target !== wanted || live) { void opened.close(); return; }
       live = opened;
-      live.start(() => draw());
+      live.start(change => { if (change.contentChanged) revision++; draw(); });
     } finally { opening = false; }
   };
 

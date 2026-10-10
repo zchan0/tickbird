@@ -10,7 +10,7 @@ export interface Key {
 }
 export interface Mouse {
   type: 'mouse';
-  action: 'press' | 'release' | 'wheelUp' | 'wheelDown';
+  action: 'press' | 'release' | 'move' | 'wheelUp' | 'wheelDown' | 'wheelLeft' | 'wheelRight';
   button: number;
   /** 1-based cell. */
   x: number; y: number;
@@ -46,7 +46,11 @@ function csi(params: string, final: string): InputEvent | undefined {
     if (!mouse) return undefined;
     const button = Number(mouse[1]);
     const x = Number(mouse[2]), y = Number(mouse[3]);
-    if (button & 64) return { type: 'mouse', action: button & 1 ? 'wheelDown' : 'wheelUp', button, x, y };
+    // The wheel: 64 up, 65 down, 66 left, 67 right. A trackpad swipe sends some sideways
+    // steps among the vertical ones; read as up or down, they shook the page back and forth.
+    if (button & 64) return { type: 'mouse', action: (['wheelUp', 'wheelDown', 'wheelLeft', 'wheelRight'] as const)[button & 3], button, x, y };
+    // Any-event tracking: the pointer moved, with or without a button down.
+    if (button & 32) return { type: 'mouse', action: 'move', button: button & 3, x, y };
     return { type: 'mouse', action: final === 'M' ? 'press' : 'release', button: button & 3, x, y };
   }
   const numbers = params.split(';').map(part => Number(part.split(':')[0]) || 0);
