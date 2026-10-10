@@ -1,6 +1,7 @@
 // kitty: remote control over the socket in KITTY_LISTEN_ON. Panes opened for
 // an agent carry the user variable sidecar_agent=<agent pid>.
 import { dirname, join } from 'node:path';
+import { paneColumns } from './width.mjs';
 
 export const name = 'kitty';
 // kitty sets TERM=xterm-kitty and no TERM_PROGRAM. Another terminal started
@@ -26,7 +27,13 @@ export function locate(env, { run, which }) {
     owns: agentPid => windows(`id:${window}`).some(win => win.foreground_processes?.some(proc => proc.pid === agentPid)),
     find: tag => windows(`var:sidecar_agent=${tag}`).map(win => String(win.id)),
     open({ argv, cwd, env: extra, tag }) {
-      const result = at('launch', '--type=window', '--location=vsplit', '--next-to', `id:${window}`, '--keep-focus', '--bias=35',
+      // --next-to alone is ignored when the agent's window is not in the active tab: the pane
+      // would open wherever the user is looking. --match puts it in the agent's own tab.
+      // On the agent's left (before it in the split), a share of the window that comes to about 48
+      // columns; the share also pays for the border between the two, about three columns.
+      const total = windows(`id:${window}`)[0]?.columns;
+      const bias = Number.isInteger(total) && total > 0 ? Math.max(10, Math.round(100 * (paneColumns(total) + 3) / total)) : 35;
+      const result = at('launch', '--match', `window_id:${window}`, '--type=window', '--location=before', '--next-to', `id:${window}`, '--keep-focus', `--bias=${bias}`,
         '--var', `sidecar_agent=${tag}`, '--cwd', cwd, '--title', 'Sidecar',
         ...Object.entries(extra).flatMap(([key, value]) => ['--env', `${key}=${value}`]), ...argv);
       return result.status === 0 ? { pane: result.stdout.trim() } : { error: result.stderr || `kitten 退出码 ${result.status}` };

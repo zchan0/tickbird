@@ -37,7 +37,7 @@ function fakeTools(options: { tty?: string; args?: string; kittyAgent?: number; 
       if (command === 'ps') return ok(`${options.tty ?? 'ttys005'} ${options.args ?? 'claude'}\n`);
       if (command.endsWith('kitten')) {
         const sub = args[3], match = args[5];
-        if (sub === 'ls' && match === 'id:19') return ok(JSON.stringify([{ tabs: [{ windows: [{ id: 19, foreground_processes: [{ pid: options.kittyAgent ?? AGENT }] }] }] }]));
+        if (sub === 'ls' && match === 'id:19') return ok(JSON.stringify([{ tabs: [{ windows: [{ id: 19, columns: 148, foreground_processes: [{ pid: options.kittyAgent ?? AGENT }] }] }] }]));
         if (sub === 'ls') return options.existing ? ok(JSON.stringify([{ tabs: [{ windows: [{ id: 20 }] }] }])) : { status: 1, stdout: '', stderr: 'No matching windows' };
         if (sub === 'launch') return ok('21\n');
         return ok();
@@ -46,6 +46,7 @@ function fakeTools(options: { tty?: string; args?: string; kittyAgent?: number; 
         const sub = args[2];
         if (sub === 'list-panes') return ok(`%3\t/dev/${options.tmuxTty ?? 'ttys005'}\t\n%4\t/dev/ttys009\t${options.existing ? AGENT : ''}\n`);
         if (sub === 'split-window') return ok('%7\n');
+        if (sub === 'display-message') return ok('150\n');
         return ok();
       }
       return { status: 127, stdout: '', stderr: 'unknown' };
@@ -68,26 +69,30 @@ test('adapters are tried innermost first; unknown terminals get none', () => {
   assert.deepEqual(names({ ...KITTY, TERM: 'xterm-256color' }), ['kitty']);
 });
 
-test('kitty: a pane beside the agent, focus kept, tagged with the agent and told how to focus it', () => {
+test('kitty: a pane on the agent’s left, about 48 columns, focus kept, tagged with the agent and told how to focus it', () => {
   const { tools, find } = fakeTools();
   const outcome = split.handle('claude', AGENT, START, { ...KITTY, ...CLI }, tools);
   assert.match(outcome!, /kitty：在 19 旁开栏 21/);
   const launch = find('launch')!;
   assert.deepEqual(launch.slice(1, 4), ['@', '--to', 'unix:/tmp/kitty-1']);
-  for (const arg of ['--keep-focus', '--location=vsplit', `sidecar_agent=${AGENT}`, '/work/project', 'PATH=/usr/bin', 'XDG_STATE_HOME=/state']) assert.ok(launch.includes(arg), arg);
+  for (const arg of ['--keep-focus', '--location=before', '--bias=34', `sidecar_agent=${AGENT}`, '/work/project', 'PATH=/usr/bin', 'XDG_STATE_HOME=/state']) assert.ok(launch.includes(arg), arg);
   assert.equal(launch[launch.indexOf('--next-to') + 1], 'id:19');
+  // Over remote control --next-to only works in the target tab; without --match that is whichever tab is active.
+  assert.equal(launch[launch.indexOf('--match') + 1], 'window_id:19');
   const command = launch.slice(launch.indexOf(process.execPath));
   assert.deepEqual(command, [process.execPath, CLI.AGENT_SIDECAR_CLI, 'watch', '--agent', String(AGENT), '--focus',
     JSON.stringify(['/bin/kitten', '@', '--to', 'unix:/tmp/kitty-1', 'focus-window', '--match', 'id:19'])]);
 });
 
-test('tmux: a detached split of the agent’s pane, tagged afterwards', () => {
+test('tmux: a detached split on the agent’s left, 48 columns, tagged afterwards', () => {
   const { tools, calls, find } = fakeTools();
   const outcome = split.handle('codex', AGENT, START, { ...TMUX, ...CLI }, tools);
   assert.match(outcome!, /tmux：在 %3 旁开栏 %7/);
   const splitWindow = find('split-window')!;
   assert.deepEqual(splitWindow.slice(0, 3), ['/bin/tmux', '-S', '/tmp/tmux-501/default']);
-  for (const arg of ['-h', '-d', '-P']) assert.ok(splitWindow.includes(arg), arg);
+  // On the agent's left, 48 columns of its 150.
+  for (const arg of ['-h', '-b', '-d', '-P']) assert.ok(splitWindow.includes(arg), arg);
+  assert.equal(splitWindow[splitWindow.indexOf('-l') + 1], '48');
   assert.equal(splitWindow[splitWindow.indexOf('-t') + 1], '%3');
   assert.equal(splitWindow[splitWindow.indexOf('-c') + 1], '/work/project');
   assert.deepEqual(calls.at(-1), ['/bin/tmux', '-S', '/tmp/tmux-501/default', 'set-option', '-p', '-t', '%7', '@sidecar_agent', String(AGENT)]);

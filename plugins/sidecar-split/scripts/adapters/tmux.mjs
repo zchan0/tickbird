@@ -1,5 +1,7 @@
 // tmux: the server in TMUX, the agent's pane in TMUX_PANE. Panes opened for an
 // agent carry the pane option @sidecar_agent=<agent pid>.
+import { paneColumns } from './width.mjs';
+
 export const name = 'tmux';
 export const matches = env => Boolean(env.TMUX);
 
@@ -22,7 +24,10 @@ export function locate(env, { run, which }) {
     owns: (_agentPid, info) => Boolean(info?.tty) && panes().some(item => item.id === pane && item.tty === info.tty),
     find: tag => panes().filter(item => item.tag === String(tag)).map(item => item.id),
     open({ argv, cwd, env: extra, tag }) {
-      const result = t('split-window', '-h', '-d', '-l', '35%', '-t', pane, '-c', cwd, '-P', '-F', '#{pane_id}',
+      // On the agent's left (-b), a fixed number of columns.
+      const total = Number(t('display-message', '-p', '-t', pane, '#{pane_width}').stdout?.trim());
+      const size = Number.isInteger(total) && total > 0 ? String(paneColumns(total)) : '35%';
+      const result = t('split-window', '-h', '-b', '-d', '-l', size, '-t', pane, '-c', cwd, '-P', '-F', '#{pane_id}',
         ...Object.entries(extra).flatMap(([key, value]) => ['-e', `${key}=${value}`]), ...argv);
       if (result.status !== 0) return { error: result.stderr || `tmux 退出码 ${result.status}` };
       const id = result.stdout.trim();
