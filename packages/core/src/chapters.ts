@@ -123,8 +123,10 @@ function changedFiles(nodes: OutlineNode[]): ChangedFile[] {
         const existing = byPath.get(file.path);
         // The latest record opens: that is the state the turn left the file in.
         if (existing) { existing.count++; existing.id = fileEvidenceId(row.id, index, file.path); if (file.operation === 'delete') existing.mark = 'D'; return; }
+        // A file the turn made is new however often it is written after.
+        const made = file.operation === 'add' || row.items.some(item => item.fileOperation === 'create');
         byPath.set(file.path, { id: fileEvidenceId(row.id, index, file.path), path: file.path, count: 1,
-          mark: file.operation === 'add' ? 'A' : file.operation === 'delete' ? 'D' : 'M' });
+          mark: made ? 'A' : file.operation === 'delete' ? 'D' : 'M' });
       });
     }
   }

@@ -49,13 +49,13 @@
 - 修法：Claude Code 订阅 `PreToolUse`（`async: true`，不拖慢 Agent），把将要运行的调用写进会话状态；会话记录出现同一个调用后丢弃，和 `MessageDisplay` 的提前文字一样处理。用户确认后已实现（02a6ccb）：SESSION_STATE.md 改为四种 hook，`call` 只记几个短字段。复测：调用比 Agent 屏幕晚 0.1–0.2s 出现在窗格，比会话记录早约 0.4s。
 - Codex 不用改。
 
-### 3. 去掉打开链接后的绿色提示条
+### 3. 去掉打开链接后的绿色提示条（已完成）
 
 `packages/terminal/src/watch.ts` 的 `say()`：打开图片、链接、文件成功后显示 4 秒。成功时不再显示，「已复制」也去掉（已确认）。打开失败、不能复制时仍然显示，否则看不出失败。
 
-### 4. 新建的文件标成了 M（core）
+### 4. 新建的文件标成了 M（core，已完成）
 
-本轮用 Write 新建了 `docs/TODO.md`，「改动」里显示 `M TODO.md`，应为 `A`。`packages/core/src/chapters.ts` 的 `changedFiles()` 只认补丁里的 `operation === 'add'`；Claude 的 Write 要看 `toolUseResult.type`（`create` / `update`）。
+本轮用 Write 新建了 `docs/TODO.md`，「改动」里显示 `M TODO.md`，应为 `A`。`packages/core/src/chapters.ts` 的 `changedFiles()` 只认补丁里的 `operation === 'add'`；Claude 的 Write 要看 `toolUseResult.type`（`create` / `update`）。已改：解析时记下 `fileOperation`，新建的标 A。
 
 另外，用 Bash 改的文件（例如本轮用 python 改的 `STATUS.md`）不在「改动」里。这是已知限制，不在这一项里解决。
 

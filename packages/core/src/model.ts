@@ -24,6 +24,8 @@ export interface TimelineItem {
   patchInput?: { itemId: string; callIndex: number };
   /** Native shell execution matched to one exact, pending public invocation. */
   commandInput?: { itemId: string; callIndex: number };
+  /** What the harness says a file write did: made the file, or replaced one that was there. */
+  fileOperation?: 'create' | 'update';
   title: string;
   summary: string;
   status: ItemStatus;

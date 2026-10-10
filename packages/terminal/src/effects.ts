@@ -67,7 +67,7 @@ export function viewImage(image: { name: string; data?: string; mime?: string; p
   if (!path || !existsSync(path)) return `图片已不存在：${image.path ?? image.name}`;
   try {
     spawn(platform === 'darwin' ? 'open' : 'xdg-open', [path], { stdio: 'ignore', detached: true }).on('error', () => undefined).unref();
-    return `已用默认程序打开 ${image.name}${image.data ? '（当时读到的那张）' : ''}`;
+    return '';
   } catch {
     return `无法打开图片：${image.name}`;
   }
@@ -79,7 +79,7 @@ export function openLink(link: { target: string; name: string }, platform = proc
   if (!web && !existsSync(link.target)) return `文件已不存在：${link.target}`;
   try {
     spawn(platform === 'darwin' ? 'open' : 'xdg-open', [link.target], { stdio: 'ignore', detached: true }).on('error', () => undefined).unref();
-    return web ? `已在浏览器打开 ${link.name}` : `已用默认程序打开 ${link.name}`;
+    return '';
   } catch {
     return `无法打开：${link.target}`;
   }
@@ -88,7 +88,7 @@ export function openLink(link: { target: string; name: string }, platform = proc
 /**
  * Opens a file. A terminal editor takes over the pane until it exits (the
  * caller leaves and re-enters its screen around it); others start detached.
- * Returns what to tell the reader.
+ * Returns what went wrong, or nothing: what opened says so itself.
  */
 export function openFile(path: string, line: number | undefined, around: { suspend(): void; resume(): void }): string {
   if (!existsSync(path)) return `文件已不存在：${path}`;
@@ -100,7 +100,7 @@ export function openFile(path: string, line: number | undefined, around: { suspe
       return '';
     }
     spawn(editor.command, editor.args, { stdio: 'ignore', detached: true }).on('error', () => undefined).unref();
-    return `已在 ${editor.name} 打开 ${basename(path)}${line ? ` 第 ${line} 行` : ''}`;
+    return '';
   } catch {
     return `无法打开：${editor.command}`;
   }

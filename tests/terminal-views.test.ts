@@ -247,6 +247,18 @@ test('waiting for an approval replaces the status line, marks the call and chang
   assert.equal(windowTitle(model), '⏸ 等你批准 — Sidecar · Claude Code');
 });
 
+test('a file the turn made is marked A, one it replaced M', () => {
+  const written = (id: string, type: string, second: number, patch: unknown[] = []) => rec('user', [{ type: 'tool_result', tool_use_id: id, content: 'ok' }], second,
+    { toolUseResult: { type, filePath: `/fixture/${id}.md`, content: 'a\nb', structuredPatch: patch, originalFile: type === 'create' ? null : 'a' } });
+  const session = parse([
+    rec('user', '写两个文件', 0),
+    call('w1', 'Write', { file_path: '/fixture/w1.md', content: 'a\nb' }, 1), written('w1', 'create', 2),
+    call('w2', 'Write', { file_path: '/fixture/w2.md', content: 'a\nb' }, 3), written('w2', 'update', 4, [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 2, lines: [' a', '+b'] }]),
+    said('写好了。', 5, true), done(6, 6000),
+  ]);
+  assert.deepEqual(turnView(visibleTurnGroups(session)[0], false, 'claude').turn.files.map(file => `${file.mark} ${file.path}`), ['A /fixture/w1.md', 'M /fixture/w2.md']);
+});
+
 test('a call on screen but not yet in the transcript shows as it will, once', () => {
   const session = parse([...FIRST, ...SECOND]);
   const state: SessionState = { provider: 'claude', session: 'cl', cwd: '/fixture', agentPid: process.pid, hostPid: 1, startedAt: 0, activeAt: 0, phase: 'idle',

@@ -385,6 +385,8 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
         };
         for (const key of metadataFields[item.title] ?? []) known.add(key);
         if (patch) known.add('structuredPatch');
+        // Claude Code says whether a Write made the file or replaced it; a new file has no patch to tell.
+        if (item.title === 'Write' && (structured.type === 'create' || structured.type === 'update')) { item.fileOperation = structured.type; known.add('type'); }
         const file = object(structured.file);
         if (item.title === 'Read' && typeof file.base64 === 'string' && Object.keys(file).every(key => ['base64', 'type', 'originalSize', 'dimensions'].includes(key)) && returned.some(b => b.kind === 'image' && b.data === file.base64.replace(/\s/g, ''))) known.add('file');
         if (item.title === 'ToolSearch' && Array.isArray(structured.matches)) {
