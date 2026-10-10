@@ -226,6 +226,8 @@ export function commandText(command: string, project = '', home = process.env.HO
   let last = 0;
   while (last < kept.length - 1 && kept[last].sep === '|') last++;
   let text = kept.length ? line.slice(kept[0].at, kept[last].at + kept[last].text.length).trim() : line.trim();
+  // The first line of a command whose quote goes on to the next lines: what it runs, then … for the rest.
+  if (command.trim().includes('\n') && ((text.match(/"/g)?.length ?? 0) % 2 || (text.match(/'/g)?.length ?? 0) % 2)) text = text.replace(/\s*["'][^"']*$/, '') + ' …';
   const more = kept.slice(last + 1).filter((piece, index, rest) => (index === 0 || rest[index - 1].sep !== '|') && !FILLER.test(piece.text.trim())).length;
   const script = text.match(/^(python3?|node|ruby|bash|sh|zsh)\s+(-\S*\s+)*-?\s*<<-?\s*['"]?\w+['"]?\s*$/);
   if (script) text = `${script[1]} script`;
@@ -301,7 +303,7 @@ function changeSize(chapterRow: ChapterRow, ctx: PageContext): { added: number; 
   return size;
 }
 function measureChange(chapterRow: ChapterRow, ctx: PageContext): { added: number; removed: number; edited: boolean } | undefined {
-  const all = recordedFiles(chapterRow.items, resolveOutlineEvidence(ctx.session, chapterRow.id)?.entry);
+  const all = recordedFiles(chapterRow.items, resolveOutlineEvidence(ctx.session, chapterRow.id, chapterRow.items[0])?.entry);
   const files = all.length > 1 ? all.filter(file => base(file.path) === base(chapterRow.label)) : all;
   if (!files.length) return undefined;
   let added = 0, removed = 0;
@@ -361,12 +363,8 @@ function callEnd(chapterRow: ChapterRow, ctx: PageContext, live: boolean, asking
   return call.note ? [{ text: call.note, style: DIM }] : [];
 }
 
-/** A call that only read a file: its name reads in grey, as a command does. */
-const isRead = (chapterRow: ChapterRow): boolean => !chapterRow.output
-  && (/^(Read|view|view_image|NotebookRead)$/i.test(chapterRow.tool) || (SHELL.test(chapterRow.tool) && SHELL_READ.test(chapterRow.label)));
-
 /** A run's tool name, on a line of its own above its calls. */
-const TOOL: Style = { dim: true, bold: true };
+const TOOL: Style = { bold: true };
 
 /** `line` cut to `room` cells with `tail` after it; the text gives way, the tail stays whole. */
 function withTail(line: Span[], tail: Span[], room: number): Span[] {
@@ -379,9 +377,10 @@ function withTail(line: Span[], tail: Span[], room: number): Span[] {
  * tool's name on a line of its own, once for a run of one tool, and each call
  * of the run hung from it on ├, the last on └. A call's second line goes on
  * under │, so it never reads as the next call. Every call is shown: the reader
- * is here for the process. The agent's own description reads in the body
- * colour; a command, a file or a query in grey, on one line, what it runs
- * after counted. A failure, a call still out or a change's size follows it.
+ * is here for the process. The tool's name is bold in the body colour, to see
+ * at a glance what the agent used; what each call worked on reads in grey,
+ * all alike. A command keeps to one line, what it runs after counted. Colour
+ * marks what needs it: a failure, a call still out, a change's size.
  */
 function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean): Line[] {
   const rows = steps(all);
@@ -407,7 +406,8 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
       const branch: Span = { text: lead + symbol(ctx.caps, end ? '└' : '├') + ' ', style: DIM };
       const through: Span = { text: lead + (end ? ' ' : symbol(ctx.caps, '│')) + ' ', style: DIM };
       const shown = callText(chapterRow, ctx);
-      const style = owned(shown.command || isRead(chapterRow) ? DIM : {}, chapterRow.id);
+      // The tool's name stands out; what the call worked on reads a step back, in grey.
+      const style = owned(DIM, chapterRow.id);
       const label = shown.text + (chapterRow.count > 1 ? ` · ${chapterRow.count} 次` : '');
       const outcome = callEnd(chapterRow, ctx, live, waitingOn && chapterRow === rows.at(-1));
       const tail: Span[] = [...(shown.more ? [{ text: ` +${shown.more}`, style: owned({ dim: true, bold: true }, chapterRow.id) }] : []), ...(outcome.length ? [{ text: ' ' }, ...outcome] : [])];

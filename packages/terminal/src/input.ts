@@ -72,6 +72,12 @@ function csi(params: string, final: string): InputEvent | undefined {
   return key(name, final === 'Z' ? { ...mods, shift: true } : mods);
 }
 
+/**
+ * A Chinese input method in its punctuation mode types these for the keys
+ * the pane listens to: 】 for ], ？ for ?. They mean the same key.
+ */
+const FULL_WIDTH: Record<string, string> = { '【': '[', '】': ']', '？': '?', '《': '<', '》': '>', '：': ':', '／': '/', '、': '\\' };
+
 export class InputParser {
   private buffer = '';
 
@@ -105,7 +111,7 @@ export class InputParser {
     if (text[0] !== '\x1b') {
       const char = String.fromCodePoint(text.codePointAt(0)!);
       const code = char.codePointAt(0)!;
-      events.push(code < 32 || code === 127 ? controlKey(code) : key(char === ' ' ? 'space' : char));
+      events.push(code < 32 || code === 127 ? controlKey(code) : key(char === ' ' ? 'space' : FULL_WIDTH[char] ?? char));
       return char.length;
     }
     if (text.length === 1) {

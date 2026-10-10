@@ -11,7 +11,7 @@ import type { turnView } from '../../core/src/turn-view';
 import type { Capabilities } from './caps';
 import { describe, InputParser } from './input';
 import { enterBytes, leaveBytes, row, Screen, type Line } from './screen';
-import { frame, initialState, key, update, windowTitle, type AppState, type Effect, type Model } from './app';
+import { frame, initialState, key, pointerGone, pointerRest, update, windowTitle, type AppState, type Effect, type Model } from './app';
 import { clipboardBytes, openFile } from './effects';
 import { sessionStatus, viewOf } from './views/turn-page';
 import { prose } from './views/prose';
@@ -164,6 +164,15 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
       resume: () => { input.setRawMode(true); out.write(enterBytes(caps.kittyKeyboard)); screen.resize(out.columns, out.rows); },
     }), 4000);
   };
+  // The pointer's call goes dark once the pointer has rested or reached the edge on its way out.
+  let resting: NodeJS.Timeout | undefined;
+  const watchPointer = (current: Model) => {
+    if (resting) clearTimeout(resting);
+    const wait = pointerRest(app, current);
+    if (wait === undefined) return;
+    const at = app.pointer;
+    resting = setTimeout(() => { if (app.pointer === at) { app = pointerGone(app); draw(); } }, wait);
+  };
   const handle = (events: ReturnType<InputParser['feed']>) => {
     const current = model();
     // SIDECAR_DEBUG_KEYS=<file>: every parsed key and the raw input, for tracking down terminal quirks.
@@ -178,6 +187,7 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
       if (app.quit) finish();
       if (app.effect) { const effect = app.effect; delete app.effect; perform(effect); }
     }
+    if (current && events.some(event => event.type === 'mouse')) watchPointer(current);
     draw();
   };
 

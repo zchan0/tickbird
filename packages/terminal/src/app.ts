@@ -8,7 +8,7 @@ import { contentsEntries, contentsLines, contentsOffset, ENTRY_LINES } from './v
 import { detailDoc, type DetailDoc } from './views/detail';
 import { wrapSpans } from './views/prose';
 import { textWidth } from './width';
-import { headerLines, markSelected, viewOf, providerName, turnLayout, type CallTarget, type PageContext, type SessionStatus } from './views/turn-page';
+import { chip, headerLines, markSelected, viewOf, providerName, turnLayout, type CallTarget, type PageContext, type SessionStatus } from './views/turn-page';
 
 /**
  * The watch pane's state and what each key does to it. No I/O here: the
@@ -113,12 +113,22 @@ function entriesOf(model: Model): ReturnType<typeof contentsEntries> {
 export const body = (state: AppState, model: Model): Line[] => layout(state, model).lines;
 const bottom = (state: AppState, model: Model) => Math.max(0, body(state, model).length - bodyHeight(state, model));
 
-/** The open call's detail, laid out for the pane. */
+const DETAILS = new WeakMap<TurnGroup[], { key: string; value: DetailDoc | undefined }>();
+/**
+ * The open call's detail, laid out for the pane. Kept like the page: every
+ * wheel step asks for it to know where the end is, and scrolling only changes
+ * which of its lines are on screen.
+ */
 export function openDetail(state: AppState, model: Model): DetailDoc | undefined {
   const target = state.call !== undefined ? layout(state, model).targets[state.call] : undefined;
   const group = model.groups[state.index];
   if (!target?.row || !group) return undefined;
-  return detailDoc({ session: model.session, group, row: target.row, width: model.width, glyph: ch => symbol(model.caps, ch), edit: state.detail?.edit, background: model.caps.background });
+  const key = JSON.stringify([state.index, target.row.id, state.detail?.edit ?? null, model.width, model.caps.background ?? null, model.caps.symbols]);
+  const kept = DETAILS.get(model.groups);
+  if (kept?.key === key) return kept.value;
+  const value = detailDoc({ session: model.session, group, row: target.row, width: model.width, glyph: ch => symbol(model.caps, ch), edit: state.detail?.edit, background: model.caps.background });
+  DETAILS.set(model.groups, { key, value });
+  return value;
 }
 
 const latestLive = (model: Model): boolean => {
@@ -146,11 +156,33 @@ export function update(state: AppState, model: Model): AppState {
     next.scroll = live ? end : arrived || state.wasLive ? 0 : Math.min(state.scroll, end);
     return settle(next, state);
   }
+  // A new turn while the reader is on the newest one, scrolled back in it: they sent it, so it is
+  // what they want to see next. Only someone reading an older turn is left there, with a notice.
+  if (total > state.seen && state.seen > 0 && state.index === state.seen - 1) return update({ ...state, follow: true }, model);
   next.index = Math.min(state.index, last);
   if (total > state.seen && state.seen > 0 && next.index < last) next.notice = last;
   if (next.index === last) delete next.notice;
   next.scroll = Math.min(next.scroll, bottom(next, model));
   return settle(next, state);
+}
+
+/**
+ * The pointer has left, as far as the pane can tell: a terminal reports no
+ * leaving, so the controller calls this when the pointer rests at the pane's
+ * edge or has not moved for a while. Its call goes dark until it moves again.
+ */
+export function pointerGone(state: AppState): AppState {
+  if (!state.pointer) return state;
+  const { pointer, ...rest } = state;
+  return { ...rest, scrolledAt: pointer };
+}
+
+/** How long the pointer may rest before its call goes dark: at the pane's edge it is on its way out. */
+export function pointerRest(state: AppState, model: Pick<Model, 'width' | 'height'>): number | undefined {
+  const at = state.pointer;
+  if (!at) return undefined;
+  const edge = at.x <= 1 || at.x >= model.width - 1 || at.y <= 1 || at.y >= model.height;
+  return edge ? 150 : 3000;
 }
 
 /** When the page moved under a pointer that stayed put, the pointer's call goes dark until the pointer moves. */
@@ -271,6 +303,8 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
     if (event.action !== 'press') return state;
     if (state.mode === 'detail') return event.y === 1 && event.x <= 8 ? detailKey(state, 'escape', model) : state;
     if (state.mode === 'turn' && event.y === 1) return { ...state, mode: 'contents', selected: state.index };
+    // The line saying a new turn started takes you there: a click works whatever the input method.
+    if (state.mode === 'turn' && state.notice !== undefined && event.y === HEADER + bodyHeight(state, model) + 1) return showTurn(state, model, state.notice);
     if (state.mode === 'turn' && event.y > HEADER) {
       // The pointer already shows what a click opens: one click opens a call, or opens and folds the answer.
       const targets = layout(state, model).targets;
@@ -445,8 +479,8 @@ export function frame(state: AppState, model: Model): Line[] {
   if (state.notice !== undefined) {
     const group = model.groups[state.notice];
     const request = (group?.request ?? '').replace(/\s+/g, ' ');
-    lines.push(row([{ text: ' ' }, { text: `第 ${group?.ordinal ?? state.notice + 1} 轮开始了`, style: { fg: 'yellow', bold: true } }, { text: request ? '：' + request : '' }],
-      [{ text: ']', style: { bold: true } }, dim(' 跳到最新 ')], width));
+    // Set as the answer is, a label in a block of colour: 新一轮, then what was asked. A click or ] goes there.
+    lines.push(cutLine([{ text: ' ' }, chip('新一轮', 'yellow'), dim(request ? ' ' + request : '')], width));
   }
   return withMessage(lines.slice(0, height), state, model);
 }

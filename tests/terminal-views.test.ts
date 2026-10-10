@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseClaude } from '../packages/core/src/claude';
 import { parseCodex } from '../packages/core/src/codex';
-import { visibleTurnGroups } from '../packages/core/src/outline';
+import { resolveOutlineEvidence, visibleTurnGroups } from '../packages/core/src/outline';
 import { turnView } from '../packages/core/src/turn-view';
 import type { SessionData } from '../packages/core/src/model';
 import type { LiveExtras } from '../packages/core/src/live-extras';
 import { SYMBOLS } from '../packages/terminal/src/caps';
-import { fitKeys, frame, initialState, key, openDetail, update, windowTitle, type AppState, type Model } from '../packages/terminal/src/app';
+import { fitKeys, frame, initialState, key, openDetail, pointerGone, pointerRest, update, windowTitle, type AppState, type Model } from '../packages/terminal/src/app';
 import { changedWords, diffLines, fileLines } from '../packages/terminal/src/views/detail';
 import { InputParser, type InputEvent } from '../packages/terminal/src/input';
 import { plainText, spans, type Line } from '../packages/terminal/src/screen';
@@ -97,15 +97,16 @@ test('a finished turn: the request as title, its changes, each step\'s words, it
     '',
     '  答复  修好了：assert.equal 的两个参数写反了。',
   ]);
-  // The request bold; the words and the agent's descriptions in the body colour; a read, the tool names and the tree grey.
+  // The request bold; the words in the body colour; the tool names bold in the body colour, to see what was used;
+  // what each call worked on grey, all alike, and the tree grey.
   assert.ok(spans(body[0]).filter(span => span.text.trim()).every(span => span.style?.bold));
   assert.ok(spans(body[3]).filter(span => span.text.includes('先跑')).every(span => !span.style?.dim));
-  assert.ok(spans(body[5]).some(span => span.text === 'Bash' && span.style?.dim && span.style?.bold));
+  assert.ok(spans(body[5]).some(span => span.text === 'Bash' && !span.style?.dim && span.style?.bold));
   assert.ok(spans(body[6]).some(span => span.text.includes('├') && span.style?.dim));
-  assert.ok(spans(body[7]).some(span => span.text === 'Run only the width tests' && !span.style?.dim));
+  assert.ok(spans(body[7]).some(span => span.text === 'Run only the width tests' && span.style?.dim));
   assert.ok(spans(body[9]).filter(span => span.text.trim()).every(span => span.style?.dim));
   assert.ok(spans(body[6]).some(span => span.text === 'exit 1' && span.style?.fg === 'red'));
-  assert.ok(spans(body[14]).some(span => span.text === 'width.test.ts' && !span.style?.dim));
+  assert.ok(spans(body[14]).some(span => span.text === 'width.test.ts' && span.style?.dim));
   assert.ok(spans(body[14]).some(span => span.text === '+1' && span.style?.fg === 'green'));
   // The answer's label is a block of colour, not a glyph.
   assert.deepEqual(spans(body[16]).find(span => span.text.includes('答复'))?.style, { fg: 'green', inverse: true, bold: true });
@@ -140,6 +141,9 @@ test('a command reads as what it runs: set-up dropped, paths shortened, one line
   assert.deepEqual(commandText('T() { tmux -L t "$@"; }; T send-keys Enter'), { text: 'T send-keys Enter', more: 0 });
   assert.deepEqual(commandText("cd /p && python3 - <<'EOF'\nprint(1)\nEOF"), { text: 'python3 script', more: 0 });
   assert.deepEqual(commandText('sed -n 1,9p /h/a/b.ts', '', '/h'), { text: 'sed -n 1,9p ~/a/b.ts', more: 0 });
+  // A quote that goes on to the next lines: what runs, then … for the rest; one line keeps its quotes.
+  assert.deepEqual(commandText('node -e "\nconsole.log(1)\n"'), { text: 'node -e …', more: 0 });
+  assert.deepEqual(commandText('echo "it\'s"'), { text: 'echo "it\'s"', more: 0 });
 });
 
 test('a long call label wraps to two lines at most, the second under the tree', () => {
@@ -229,7 +233,14 @@ test('following shows the newest turn and jumps to a new one; an older turn on s
   state = update(state, third);
   assert.equal(state.index, 0);
   assert.equal(state.notice, 2);
-  assert.match(text(frame(state, third)).at(-1)!, /^ 第 3 轮开始了：提交吧 +\] 跳到最新 $/);
+  // A label in a block of colour, as 答复 is, then what was asked.
+  const notice = frame(state, third).at(-1)!;
+  assert.equal(plainText(notice).trimEnd(), '  新一轮  提交吧');
+  assert.deepEqual(spans(notice).find(span => span.text.includes('新一轮'))?.style, { fg: 'yellow', inverse: true, bold: true });
+  // A click on the notice, or 】 from a Chinese input method, does what ] does.
+  const noticeY = text(frame(state, third)).length;
+  assert.deepEqual([key(state, { type: 'mouse', action: 'press', button: 0, x: 3, y: noticeY }, third).index, key(state, { type: 'mouse', action: 'press', button: 0, x: 3, y: noticeY - 1 }, third).index], [2, 0]);
+  assert.equal(key(state, new InputParser().feed('】')[0], third).index, 2);
   // ] jumps straight to the newest turn and follows again.
   state = key(state, keyOf(']'), third);
   assert.deepEqual([state.index, state.follow, state.notice], [2, true, undefined]);
@@ -643,4 +654,52 @@ test('a trackpad swipe with sideways steps among the downward ones only goes dow
   assert.ok(end > 0);
   state = key(state, new InputParser().feed('\x1b[<66;1;1M')[0], model);
   assert.equal(state.scroll, end, 'At the end a sideways step moves nothing');
+});
+
+test('looking up a row\'s records in its own turn finds what a search of the whole session finds', () => {
+  const session = parse([...FIRST, ...SECOND]);
+  const rows = visibleTurnGroups(session).flatMap(group => turnView(group, false, 'claude').turn.segments.flatMap(segment => segment.kind === 'chapter' ? segment.chapter.rows : []));
+  assert.ok(rows.length >= 5);
+  for (const row of rows) assert.deepEqual(resolveOutlineEvidence(session, row.id, row.items[0]), resolveOutlineEvidence(session, row.id), row.label);
+  // A hint from elsewhere still finds it.
+  assert.deepEqual(resolveOutlineEvidence(session, rows[0].id, rows.at(-1)!.items[0]), resolveOutlineEvidence(session, rows[0].id));
+});
+
+test('a pointer that rests, or reaches the pane\'s edge on its way out, lets its call go dark', () => {
+  const model = modelOf(parse([...FIRST, ...SECOND]), { width: 48, height: 30 });
+  const at = (x: number, y: number) => key(update(initialState(), model), { type: 'mouse', action: 'move', button: 35, x, y }, model);
+  // Resting inside: a while; at an edge, at once.
+  assert.equal(pointerRest(at(10, 10), model), 3000);
+  assert.equal(pointerRest(at(48, 10), model), 150);
+  assert.equal(pointerRest(at(10, 30), model), 150);
+  assert.equal(pointerRest(update(initialState(), model), model), undefined);
+  // Gone: no pointer, and a report of the same cell does not bring it back; a move does.
+  const gone = pointerGone(at(10, 10));
+  assert.equal(gone.pointer, undefined);
+  assert.equal(key(gone, { type: 'mouse', action: 'move', button: 35, x: 10, y: 10 }, model).pointer, undefined);
+  assert.deepEqual(key(gone, { type: 'mouse', action: 'move', button: 35, x: 11, y: 10 }, model).pointer, { x: 11, y: 10 });
+});
+
+test('a new turn while the reader is scrolled back in the newest one takes them there; on an older turn, a notice', () => {
+  const two = modelOf(parse([...FIRST, ...SECOND, result('t5', 23), said('没有别的了。', 24, true), done(25, 5000)]), { now: Date.parse(at(30)) });
+  const three = modelOf(parse([...FIRST, ...SECOND, result('t5', 23), said('没有别的了。', 24, true), done(25, 5000), rec('user', '提交吧', 40), said('好。', 41)]), { now: Date.parse(at(45)) });
+  // On the newest turn, following paused by a scroll back.
+  let state = update(initialState(), two);
+  state = { ...state, follow: false };
+  state = update(state, three);
+  assert.deepEqual([state.index, state.follow, state.notice], [2, true, undefined]);
+  // On an older turn: stays, with the notice.
+  state = update({ ...update(initialState(), two), index: 0, follow: false }, three);
+  assert.deepEqual([state.index, state.follow, state.notice], [0, false, 2]);
+});
+
+test('every call reads in grey under its tool\'s name; colour marks only a failure, a change\'s size, a call still out', () => {
+  const commands = ['grep -rn "x" src | head -5', 'cat > notes.txt <<EOF\nhi\nEOF', 'npm test'];
+  const session = parse([rec('user', '看看', 0), ...commands.flatMap((command, i) => [call(`c${i}`, 'Bash', { command, description: i === 2 ? 'Run the tests' : undefined }, 1 + i), result(`c${i}`, 1 + i, i === 2)]), said('好。', 20, true), done(21, 21_000)]);
+  const body = turnBody(ctxOf(modelOf(session, { width: 80 }), 0));
+  assert.ok(spans(body.find(line => plainText(line).trim() === 'Bash')!).some(span => span.text === 'Bash' && span.style?.bold && !span.style?.dim));
+  const calls = body.filter(line => /^ [├└] /.test(plainText(line)));
+  assert.equal(calls.length, 3);
+  for (const line of calls) assert.ok(spans(line)[1].style?.dim, plainText(line));
+  assert.ok(spans(calls[2]).some(span => span.style?.fg === 'red'), 'The failure is marked in red');
 });
