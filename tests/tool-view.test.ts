@@ -68,8 +68,22 @@ test('unknown tools have one formatted identity with input hints, not name repea
   assert.deepEqual(['mcp__claude-in-chrome__computer', 'mcp__Claude_Browser__navigate', 'mcp__claude_ai_Notion__notion-create-pages', 'mcp__computer-use__screenshot']
     .map(name => [toolView(name, { action: 'screenshot' }).name, toolView(name, {}).label]),
     [['Chrome', 'computer'], ['Browser', 'navigate'], ['Notion', 'create pages'], ['Computer', 'screenshot']]);
-  assert.equal(toolView('new_tool', { mode: 'x', count: 2 }).label, '参数 · mode、count');
+  // Never the input's keys alone: what it was asked to do, what it worked on, else a value with its key.
+  assert.equal(toolView('Artifact', { action: 'quickstart', intent: 'other', design_systems: false }).label, 'quickstart · other');
+  assert.equal(toolView('Artifact', { file_path: '/tmp/x/design/v4.html', description: 'A long sentence' }).label, 'v4.html · A long sentence');
+  assert.equal(toolView('web.run', { open: [{ ref_id: 'https://a.com/x' }], find: [{ ref_id: 'https://a.com/x', pattern: 'effort' }] }).label, 'Open a.com/x；Find effort');
+  assert.equal(toolView('new_tool', { count: 2 }).label, 'count 2');
   assert.equal(toolView('new_tool', {}).label, '');
+  assert.equal(toolView('ToolSearch', { query: 'select:WebSearch,WebFetch' }).label, 'WebSearch, WebFetch');
+  assert.equal(toolView('WebFetch', { url: 'https://www.example.com/docs/' }).label, 'example.com/docs');
+  assert.equal(toolView('write_stdin', { chars: '\u0003' }).label, '输入 · Ctrl-C');
+  assert.equal(toolView('SendMessage', { to: 'reviewer', message: 'Check the diff' }).label, 'reviewer · Check the diff');
+  // Codex reaches its connected apps through one server: the app goes by its own name.
+  assert.deepEqual([toolView('mcp__codex_apps__notion.fetch', { id: 'p1' }).name, toolView('mcp__codex_apps__notion.notion-get-tool-access', {}).label], ['Notion', 'get tool access']);
+  // A read with its lines, where the call says.
+  assert.equal(toolView('Bash', { command: 'sed -n 85,135p packages/core/src/outline.ts' }).label, 'outline.ts:85-135');
+  assert.equal(toolView('Read', { file_path: '/p/a.ts', offset: 10, limit: 20 }).label, 'a.ts:10-29');
+  assert.equal(toolView('Read', { file_path: '/p/a.ts' }).label, 'a.ts');
 });
 
 test('mixed wrapper input semantics never allocate its shared result to individual operations', () => {

@@ -13,6 +13,7 @@ import { InputParser, type InputEvent } from '../packages/terminal/src/input';
 import { plainText, spans, type Line } from '../packages/terminal/src/screen';
 import { contentsEntries, contentsLines } from '../packages/terminal/src/views/contents';
 import { columnWidths, inlineSpans, prose, wrapSpans } from '../packages/terminal/src/views/prose';
+import { exploreText } from '../packages/core/src/command-line';
 import { commandText, headerLines, runningClock, sessionStatus, turnBody, type PageContext } from '../packages/terminal/src/views/turn-page';
 import { textWidth } from '../packages/terminal/src/width';
 
@@ -140,13 +141,56 @@ test('reads in a row hang from one Read, one per line; each is its own call to s
 });
 
 test('a command reads as what it runs: set-up dropped, paths shortened, one line, the rest counted', () => {
-  assert.deepEqual(commandText('cd /p/x && S=unix:/tmp/k; kitten @ --to $S ls | head; echo ---; tmux kill-server', '/p'), { text: 'kitten @ --to $S ls | head', more: 1 });
+  assert.deepEqual(commandText('cd /p/x && S=unix:/tmp/k; kitten @ --to $S ls | head; echo ---; tmux kill-server', '/p'), { text: 'kitten @ --to $S ls', more: 1 });
   assert.deepEqual(commandText('T() { tmux -L t "$@"; }; T send-keys Enter'), { text: 'T send-keys Enter', more: 0 });
-  assert.deepEqual(commandText("cd /p && python3 - <<'EOF'\nprint(1)\nEOF"), { text: 'python3 script', more: 0 });
-  assert.deepEqual(commandText('sed -n 1,9p /h/a/b.ts', '', '/h'), { text: 'sed -n 1,9p ~/a/b.ts', more: 0 });
-  // A quote that goes on to the next lines: what runs, then … for the rest; one line keeps its quotes.
-  assert.deepEqual(commandText('node -e "\nconsole.log(1)\n"'), { text: 'node -e …', more: 0 });
   assert.deepEqual(commandText('echo "it\'s"'), { text: 'echo "it\'s"', more: 0 });
+  // Printing, waiting and loop words around the work are not the work.
+  assert.deepEqual(commandText('pwd; git status --short; git log --oneline -8'), { text: 'git status --short', more: 1 });
+  assert.deepEqual(commandText('for i in 1 2 3; do\n  kitten @ get-text --match id:$i\ndone'), { text: 'kitten @ get-text --match id:$i', more: 0 });
+  // A value got by running a command: that command is the work. Variables set for one command are not.
+  assert.deepEqual(commandText('S=x; p=$(kitten @ launch --type=window cat); echo probe=$p'), { text: 'kitten @ launch --type=window cat', more: 0 });
+  assert.deepEqual(commandText('PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v'), { text: 'python3 -m unittest -v', more: 0 });
+  assert.deepEqual(commandText('command -v codex; which -a codex'), { text: 'command -v codex', more: 1 });
+  // What only cuts the output down, and where errors go, are left off.
+  assert.deepEqual(commandText('node --test dist/a.test.js 2>&1 | grep -E "fail" | head -20'), { text: 'node --test dist/a.test.js | grep -E "fail"', more: 0 });
+});
+
+test('a file shown again after it changed outside the agent\'s edits is no call in the tree', () => {
+  const fragment = { type: 'attachment', uuid: `u${++uuid}`, timestamp: at(3), sessionId: 'cl', cwd: '/fixture', attachment: { type: 'edited_text_file', filename: '/fixture/src/width.ts', snippet: '1\tconst a = 2;' } };
+  const session = parse([rec('user', '改一下', 0), call('f1', 'Bash', { command: "python3 - <<'EOF'\np='src/width.ts'\nEOF" }, 1), result('f1', 2), fragment, said('改好了。', 4, true), done(5, 5000)]);
+  const lines = text(turnBody(ctxOf(modelOf(session, { width: 62 }), 0)));
+  assert.ok(lines.some(line => line.includes('python3 · width.ts')));
+  assert.ok(!lines.some(line => /^\s*Write\s*$/.test(line)));
+});
+
+test('a command that only looks at files goes by Read, Search or List; one that does more stays Bash', () => {
+  assert.deepEqual(exploreText(`rg -n 'Claude.*实战|agent-session-handoff' -g '*.md' -g '!runs/**' .`), { tool: 'Search', text: 'Claude.*实战|agent-session-handoff', more: 0 });
+  assert.deepEqual(exploreText('grep -rn -e "131072" -e "128 \\* 1024" packages | grep -v node_modules'), { tool: 'Search', text: '131072|128 * 1024 in packages', more: 0 });
+  assert.deepEqual(exploreText('rg --files -g AGENTS.md -g README.md /x/ios-agent-build'), { tool: 'List', text: 'AGENTS.md, README.md in ios-agent-build', more: 0 });
+  assert.deepEqual(exploreText('find src -name "*.ts" -type f | head'), { tool: 'List', text: '*.ts in src', more: 0 });
+  assert.deepEqual(exploreText('ls -la plugins/sidecar-split/'), { tool: 'List', text: 'sidecar-split', more: 0 });
+  // Looks of one kind together, then the rest counted.
+  assert.deepEqual(exploreText('sed -n 110,150p /m/MEMORY.md; cat a/b.md; rg -n x src'), { tool: 'Read', text: 'MEMORY.md:110-150, b.md', more: 1 });
+  // Anything that writes, runs, counts or expands is not a look.
+  for (const command of ['cat a.md; npm test', 'grep -n x a.ts | wc -l', 'ls -la $(which claude)', 'cat a.md > b.md', 'sed -i 1d a.md', 'cat --unknown a.md', 'find . -name "*.tmp" -delete', 'git status --short'])
+    assert.equal(exploreText(command), undefined, command);
+});
+
+test('a script reads by what it works on; reads by their files and lines', () => {
+  // Whether it changes the files it names, or only reads them.
+  assert.deepEqual(commandText("cd /p && python3 - <<'EOF'\nimport re\np='packages/x/turn-page.ts'; s=open(p).read()\nopen(p,'w').write(s)\nEOF"), { text: 'python3 · edits turn-page.ts', more: 0 });
+  assert.deepEqual(commandText("python3 - \"$SP/page.html\" <<'EOF'\nimport sys\np=sys.argv[1]\nEOF"), { text: 'python3 · page.html', more: 0 });
+  assert.deepEqual(commandText(`python3 -B -c 'import json; from pathlib import Path; s=json.loads(Path("runs/state.json").read_text()); print(s["status"])'`), { text: 'python3 -c · state.json', more: 0 });
+  assert.deepEqual(commandText("python3 - <<'PY'\nimport urllib.request\nurllib.request.urlopen('https://api.github.com/x')\nPY\nls"), { text: 'python3 · api.github.com', more: 1 });
+  assert.deepEqual(commandText("python3 - <<'EOF'\nimport json\nprint(1)\nEOF"), { text: 'python3 · print(1)', more: 0 });
+  assert.deepEqual(commandText("git commit -q -F - <<'EOF'\nTerminal: one column\n\nBody\nEOF"), { text: 'git commit · Terminal: one column', more: 0 });
+  assert.deepEqual(commandText('node -e "\nconst fs = require(\'fs\');\nfs.readFileSync(\'a/b.json\')\n"'), { text: 'node -e · b.json', more: 0 });
+  // A read keeps its command: what it did, then the files and lines.
+  assert.deepEqual(commandText('sed -n 1,9p /h/a/b.ts', '', '/h'), { text: 'sed b.ts:1-9', more: 0 });
+  assert.deepEqual(commandText('head -12 a/x.ts; cat a/y.md | head -5; cat a/z.md; npm test'), { text: 'head x.ts:1-12; cat y.md, z.md', more: 1 });
+  assert.deepEqual(commandText('tail -40 ~/log/split.log'), { text: 'tail split.log', more: 0 });
+  // A long quoted program or pattern is cut short, so what it runs on still reads.
+  assert.deepEqual(commandText(`jq -c '{type, timestamp, p: (.payload | del(.encrypted_content) | tostring)}' f.jsonl`), { text: `jq -c '{type, timestamp, p: (.payload |…' f.jsonl`, more: 0 });
 });
 
 test('a long call label wraps to two lines at most, the second under the tree', () => {
@@ -167,7 +211,7 @@ test('the running turn shows no agent word or clock and no end; a call still out
   assert.equal(model.status.kind, 'running');
   const body = turnBody(ctxOf(model, 1));
   const lines = text(body);
-  assert.equal(lines.at(-2)!.trimEnd(), '  Bash');
+  assert.equal(lines.at(-2)!.trimEnd(), '  Search');
   assert.match(lines.at(-1)!, /^  └ Search for reversed assertions … *$/);
   assert.equal(spans(body.at(-1)!).find(span => span.text === '…')?.style?.fg, 'yellow');
   assert.ok(!lines.some(line => line.includes('答复')));
@@ -613,9 +657,9 @@ test('a Codex script reads as its steps: the command, the first query, the quest
   const model = { ...modelOf(session, { width: 48 }), status: { kind: 'idle' as const } };
   const page = text(turnBody(ctxOf(model, 0)));
   const joined = page.join('\n');
-  // A summary that names nothing gives way to the command; the queries after the first are counted.
+  // A command that only searches goes by Search, with what it looked for and where; the queries after the first are counted.
   const at = (text: string) => page.findIndex(line => line.includes(text));
-  assert.ok(at('rg -n Trip') > 0 && page[at('rg -n Trip') - 1].trim() === 'Bash', joined);
+  assert.ok(at('Trip in MEMORY.md') > 0 && page[at('Trip in MEMORY.md') - 1].trim() === 'Search', joined);
   assert.ok(at('古城 酒店 +1') > 0 && page[at('古城 酒店 +1') - 1].trim() === 'WebSearch', joined);
   // The script's shared output and the search's sources are records of those steps, not steps.
   assert.ok(!/Output|来源结果/.test(joined), joined);

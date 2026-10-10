@@ -10,6 +10,9 @@ import { textWidth } from '../width';
 import { inlineSpans, prose, wrapSpans } from './prose';
 import { recordedFiles } from '../../../core/src/presentation';
 import { resolveOutlineEvidence } from '../../../core/src/outline';
+import { commandText, exploreText } from '../../../core/src/command-line';
+
+export { commandText };
 
 /**
  * One turn per screen, to read beside the agent: the request as the page's
@@ -198,9 +201,6 @@ function changedLine(view: TurnView, ctx: PageContext): Line[] {
   return [cutLine(spans, ctx.width)];
 }
 
-/** Commands the summaries name as a read or a search in their first words, and the words to drop. */
-const SHELL_READ = /^读取 /;
-const SHELL_SEARCH = /^(搜索代码|查找文件|查看目录) · /;
 const SHELL = /^(Bash|exec_command|shell|local_shell|BashOutput|KillShell|Terminal|Script)$/i;
 
 /**
@@ -219,92 +219,30 @@ function toolName(chapterRow: ChapterRow, ctx: PageContext): string {
 const isChange = (chapterRow: ChapterRow): boolean => !chapterRow.output
   && (/^(Write|Edit|MultiEdit|apply_patch|NotebookEdit)$/i.test(chapterRow.tool) || (chapterRow.items.length > 0 && chapterRow.items.every(item => item.kind === 'file-change')));
 
-/** Top-level pieces of a shell line and the separator after each: quotes, $( ), ( ) and { } are not split. */
-function shellPieces(line: string): Array<{ text: string; at: number; sep: string }> {
-  const pieces: Array<{ text: string; at: number; sep: string }> = [];
-  let quote = '', depth = 0, start = 0;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (quote) { if (ch === quote) quote = ''; else if (ch === '\\' && quote === '"') i++; continue; }
-    if (ch === "'" || ch === '"') { quote = ch; continue; }
-    if (ch === '\\') { i++; continue; }
-    if (ch === '(' || ch === '{') { depth++; continue; }
-    if ((ch === ')' || ch === '}') && depth) { depth--; continue; }
-    if (depth) continue;
-    const two = line.slice(i, i + 2);
-    const sep = two === '&&' || two === '||' ? two : ch === ';' || ch === '|' ? ch : '';
-    if (!sep) continue;
-    pieces.push({ text: line.slice(start, i), at: start, sep });
-    i += sep.length - 1; start = i + 1;
-  }
-  pieces.push({ text: line.slice(start), at: start, sep: '' });
-  return pieces.filter(piece => piece.text.trim());
-}
-
-/** Set-up a command line starts with: moving into a directory, setting a variable, defining a function. */
-const SETUP = [/^cd\s/, /^(export\s+)?([A-Za-z_]\w*=("[^"]*"|'[^']*'|\$\([^)]*\)|\S)*\s*)+$/, /^[A-Za-z_][\w-]*\s*\(\)\s*\{/, /^set\s+-/, /^(source|\.)\s/];
-/** Commands that only print or wait between the ones that do the work. */
-const FILLER = /^(echo|printf|sleep|true|:)(\s|$)/;
-
 /**
- * A command as it reads best: the first one its first line runs (a heredoc's
- * body is not the command), without the set-up before it, with the project's
- * and the home directory's paths shortened; and how many more it runs after.
- */
-export function commandText(command: string, project = '', home = process.env.HOME ?? ''): { text: string; more: number } {
-  const line = command.split('\n').find(part => part.trim()) ?? '';
-  const pieces = shellPieces(line);
-  const firstAt = pieces.findIndex(piece => !SETUP.some(pattern => pattern.test(piece.text.trim())));
-  const kept = firstAt < 0 ? pieces : pieces.slice(firstAt);
-  // The first command runs up to the first ; && or ||; a pipe stays part of it.
-  let last = 0;
-  while (last < kept.length - 1 && kept[last].sep === '|') last++;
-  let text = kept.length ? line.slice(kept[0].at, kept[last].at + kept[last].text.length).trim() : line.trim();
-  // The first line of a command whose quote goes on to the next lines: what it runs, then … for the rest.
-  if (command.trim().includes('\n') && ((text.match(/"/g)?.length ?? 0) % 2 || (text.match(/'/g)?.length ?? 0) % 2)) text = text.replace(/\s*["'][^"']*$/, '') + ' …';
-  const more = kept.slice(last + 1).filter((piece, index, rest) => (index === 0 || rest[index - 1].sep !== '|') && !FILLER.test(piece.text.trim())).length;
-  const script = text.match(/^(python3?|node|ruby|bash|sh|zsh)\s+(-\S*\s+)*-?\s*<<-?\s*['"]?\w+['"]?\s*$/);
-  if (script) text = `${script[1]} script`;
-  text = text.replace(/\s*<<-?\s*['"]?\w+['"]?\s*$/, '');
-  if (project) text = text.split(project.replace(/\/$/, '') + '/').join('');
-  if (home) text = text.split(home + '/').join('~/');
-  return { text: text.replace(/\s+/g, ' '), more };
-}
-
-/**
- * The words of a call's line: the agent's own description, the summary's
- * first part, or the command itself where the summary only repeats it; and
- * how many more parts it has.
+ * The words of a call's line: the agent's own description of a command, or
+ * the command itself as it reads best, and how many more commands it runs;
+ * for other calls, their summary, its first part where it has several.
  */
 function callText(chapterRow: ChapterRow, ctx: PageContext): { text: string; more: number; command?: boolean } {
-  let label = chapterRow.label.replace(/^调用 Bash · /, '').replace(/（(动态参数|含管道|复合命令)）/g, '');
   const command = chapterRow.command;
-  const shell = SHELL.test(chapterRow.tool);
-  const squash = (text: string) => text.replace(/\s+/g, '');
-  if (shell && command !== undefined && squash(label).slice(0, 12) === squash(command).slice(0, 12)) {
+  if (command !== undefined && (SHELL.test(chapterRow.tool) || EXPLORE.test(chapterRow.tool))) {
+    if (chapterRow.description) return { text: chapterRow.description, more: 0 };
+    const explored = exploreText(command, ctx.session.projectPath);
+    if (explored) return { text: explored.text, more: explored.more, command: true };
     const shown = commandText(command, ctx.session.projectPath);
     return { text: shown.text || chapterRow.tool, more: shown.more, command: true };
   }
-  // A command's parts and a search's queries are joined by ；: the first one reads, the rest are counted.
-  const parts = shell || WEB.test(chapterRow.tool) ? label.split('；') : [label];
-  label = parts[0];
-  if (shell) {
-    const named = label.replace(SHELL_READ, '').replace(SHELL_SEARCH, '');
-    // A summary that names no file or pattern ("检索项目记忆") says less than the command it stands for.
-    if (named === label && command !== undefined && /[\u3400-\u9fff]/.test(label) && !/^运行 \S+ 脚本$/.test(label)) {
-      const shown = commandText(command, ctx.session.projectPath);
-      if (shown.text) return { text: shown.text, more: shown.more, command: true };
-    }
-    // "运行 python3 脚本" is the command, said in other words: it reads as a command does.
-    if (/^运行 /.test(named)) return { text: named.replace(/^运行 (\S+) 脚本$/, '$1 script').replace(/^运行 /, ''), more: parts.length - 1, command: true };
-    label = named;
-  }
-  label = label.replace(/^文件变化 · /, '');
+  // A search's queries are joined by ；: the first one reads, the rest are counted.
+  const parts = WEB.test(chapterRow.tool) ? chapterRow.label.split('；') : [chapterRow.label];
+  const label = parts[0].replace(/^文件变化 · /, '');
   // What was searched or fetched reads like a command: as it was given, on one line.
   return { text: label.replace(/\s+/g, ' ').trim() || chapterRow.tool, more: parts.length - 1, ...(WEB.test(chapterRow.tool) ? { command: true } : {}) };
 }
 
 const WEB = /^(WebSearch|WebFetch|WEB|Web)$/;
+/** A command that only looked at files, named for the look: its words are worked out from the command. */
+const EXPLORE = /^(Read|Search|List)$/;
 /** The sources a web search returned, recorded apart from the call. */
 const isSources = (chapterRow: ChapterRow): boolean => chapterRow.items.length > 0 && chapterRow.items.every(item => item.title === 'Web 来源');
 
@@ -312,12 +250,12 @@ const isSources = (chapterRow: ChapterRow): boolean => chapterRow.items.length >
  * The calls as steps. A shared output and the sources of a search the row
  * before already made are records of a step, not steps: they open from the
  * call, and take no line of their own. Sources with no call before them are
- * the search itself.
+ * the search itself. A file shown again after it changed is no step at all.
  */
 function steps(rows: ChapterRow[]): ChapterRow[] {
   const kept: ChapterRow[] = [];
   for (const chapterRow of rows) {
-    if (chapterRow.output) continue;
+    if (chapterRow.output || isFragment(chapterRow)) continue;
     if (isSources(chapterRow)) {
       if (kept.length && WEB.test(kept.at(-1)!.tool)) continue;
       kept.push({ ...chapterRow, tool: 'WebSearch', label: chapterRow.items[0].summary.replace(/\s*\.\.\.$/, '') });
@@ -327,6 +265,12 @@ function steps(rows: ChapterRow[]): ChapterRow[] {
   }
   return kept;
 }
+
+/**
+ * A file the agent was shown again because it changed outside its own edits
+ * (by a script it ran, or by someone else): a record of the file, not a call.
+ */
+const isFragment = (chapterRow: ChapterRow): boolean => chapterRow.items.length > 0 && chapterRow.items.every(item => item.title === '记录中的文件片段');
 
 /** Lines added and removed by a recorded change, and whether it wrote a new file. */
 const SIZES = new WeakMap<ChapterRow, { added: number; removed: number; edited: boolean } | undefined>();

@@ -27,6 +27,8 @@ export interface ChapterRow {
   output: boolean;
   openable: boolean;
   command?: string;
+  /** The agent's own words for what a command does (Claude's Bash description). */
+  description?: string;
   /** A quiet word after the label, for a row whose state is not a failure. */
   note?: string;
   /** A question to the user: its options, and what was chosen as the source recorded it. */
@@ -91,6 +93,7 @@ function chapterRows(node: Extract<OutlineNode, { kind: 'actions' }>): ChapterRo
   return actionRowSections(node).flatMap(section => section.rows).flatMap(row => {
     const args = invocationArgs(row);
     const command = typeof args.cmd === 'string' ? args.cmd : typeof args.command === 'string' ? args.command : undefined;
+    const description = command !== undefined && typeof args.description === 'string' ? args.description.replace(/\s+/g, ' ').trim() : '';
     // Same naming as the product's action rows: a Web source result is WEB, not a tool call.
     const presentation = actionPresentation(row.description);
     const source = row.description.toolName === 'Web 来源';
@@ -103,7 +106,7 @@ function chapterRows(node: Extract<OutlineNode, { kind: 'actions' }>): ChapterRo
       running: row.items.some(item => item.status === 'running'),
       pending: row.role !== 'output' && !outcome && row.items.every(item => item.result === 'not-observed' && !['failed', 'completed'].includes(item.status)),
       openable: row.items.some(hasReadableEvidence),
-      ...(outcome ? { outcome } : {}), ...(command !== undefined ? { command } : {}),
+      ...(outcome ? { outcome } : {}), ...(command !== undefined ? { command } : {}), ...(description ? { description } : {}),
     }, row);
   });
 }

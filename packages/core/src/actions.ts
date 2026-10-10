@@ -229,15 +229,20 @@ export function shellReadTargets(command: string): string[] | undefined {
   return paths.length && paths.every(path => path !== '-' && !/[?*\[\]]/.test(path)) ? paths.map(path => inDirectory(dir, path)) : undefined;
 }
 
-/** One file read by a shell command, and the line it starts at when its own arguments say so. */
-export function shellReadRange(command: string): { path: string; start?: number } | undefined {
+/** One file read by a shell command, and the lines it reads when its own arguments say so. */
+export function shellReadRange(command: string): { path: string; start?: number; end?: number } | undefined {
   const paths = shellReadTargets(command);
   if (paths?.length !== 1) return undefined;
   const tokens = withoutCd(shellTokens(command)!).tokens, name = basename(tokens[0].text);
-  if (name === 'cat' || name === 'head') return { path: paths[0], start: 1 };
-  const range = name === 'sed' ? tokens.slice(1).map(token => /^(\d+)(?:,\d+)?p$/.exec(token.text)).find(Boolean) : undefined;
+  if (name === 'cat') return { path: paths[0], start: 1 };
+  if (name === 'head') {
+    const words = tokens.slice(1).map(token => token.text);
+    const count = words.map((word, index) => /^-(\d+)$/.exec(word)?.[1] ?? (['-n', '--lines'].includes(word) && /^\d+$/.test(words[index + 1] ?? '') ? words[index + 1] : undefined)).find(Boolean);
+    return { path: paths[0], start: 1, ...(words.includes('-c') ? {} : { end: count ? Number(count) : 10 }) };
+  }
+  const range = name === 'sed' ? tokens.slice(1).map(token => /^(\d+)(?:,(\d+))?p$/.exec(token.text)).find(Boolean) : undefined;
   // tail, or a sed script that is not one plain range: where it starts is unknown.
-  return { path: paths[0], ...(range ? { start: Number(range[1]) } : {}) };
+  return { path: paths[0], ...(range ? { start: Number(range[1]), end: Number(range[2] ?? range[1]) } : {}) };
 }
 function positional(args: ShellToken[], consumes: Set<string>): string[] {
   const result: string[] = []; let options = true;

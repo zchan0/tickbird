@@ -17,7 +17,10 @@ const envelope = (output: string) => JSON.stringify({ chunk_id: 'one', wall_time
 
 test('display names preserve concrete operations and promote proven reads without relabeling other shell commands', () => {
   assert.equal(describeDisplayAction(call('exec_command', { cmd: 'cat src/a.ts' })).entries[0].toolName, 'Read');
-  for (const cmd of ['rg -n output src', 'npm test', 'git diff --stat', 'printf "hello" | sed -n 1p']) {
+  // A command that only searches or lists goes by that tool's name, as Codex names it.
+  assert.equal(describeDisplayAction(call('exec_command', { cmd: 'rg -n output src' })).entries[0].toolName, 'Search');
+  assert.equal(describeDisplayAction(call('exec_command', { cmd: 'rg --files -g AGENTS.md src' })).entries[0].toolName, 'List');
+  for (const cmd of ['npm test', 'git diff --stat', 'printf "hello" | sed -n 1p', 'rg -n output src | wc -l', 'cat a.ts && npm test']) {
     const entry = describeDisplayAction(call('exec_command', { cmd })).entries[0];
     assert.equal(entry.toolName, 'Bash'); assert.ok(entry.label.length > 0);
     assert.equal(recordedToolInputs(call('exec_command', { cmd }))[0].input && (recordedToolInputs(call('exec_command', { cmd }))[0].input as { cmd: string }).cmd, cmd);
