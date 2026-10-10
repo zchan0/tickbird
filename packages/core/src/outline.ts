@@ -170,10 +170,23 @@ export function hasReadableEvidence(item: TimelineItem): boolean {
 }
 
 /** Resolve presentation IDs without replacing or rewriting any source observation. */
-export function resolveOutlineEvidence(session: SessionData, id: string): OutlineEvidence | undefined {
+/**
+ * The evidence behind a displayed id. `near`, one of the row's own records,
+ * says which turn to look in: describing every turn of a long session for one
+ * row took most of a second.
+ */
+export function resolveOutlineEvidence(session: SessionData, id: string, near?: TimelineItem): OutlineEvidence | undefined {
+  // A hint that names no turn of this session finds nothing: look everywhere then.
+  const found = findEvidence(session, id, near);
+  return (found === undefined && near ? findEvidence(session, id) : found) ?? undefined;
+}
+
+/** The evidence; null when the id was found but shows nothing; undefined when it was not found. */
+function findEvidence(session: SessionData, id: string, near?: TimelineItem): OutlineEvidence | null | undefined {
   const original = session.items.find(item => item.id === id);
-  if (original) return original.sessionId === session.id ? { item: original } : undefined;
+  if (original) return original.sessionId === session.id ? { item: original } : null;
   for (const turn of groupSessionTurns(session)) {
+    if (near && !turn.items.some(item => item.id === near.id)) continue;
     for (const node of outlineTurn(turn).nodes) {
       if (node.kind !== 'actions') continue;
       if (id.startsWith('write-file:')) {
@@ -195,7 +208,7 @@ export function resolveOutlineEvidence(session: SessionData, id: string): Outlin
         // Legacy row IDs remain resolvable across a live result/status change.
         ?? actionRows(node).find(candidate => candidate.id === id);
       if (!row) continue;
-      if (!row.items.some(hasReadableEvidence)) return undefined;
+      if (!row.items.some(hasReadableEvidence)) return null;
       const statuses = new Set(row.items.map(item => item.status));
       const status = statuses.has('failed') ? 'failed' : statuses.has('running') ? 'running' : statuses.has('unknown') ? 'unknown'
         : statuses.size === 1 && statuses.has('completed') ? 'completed' : 'info';

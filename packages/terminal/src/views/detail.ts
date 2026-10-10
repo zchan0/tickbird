@@ -234,9 +234,14 @@ const outputLines = (contents: InputContent[], width: number, glyph: Glyph): Lin
 const section = (title: string): Line => [{ text: ' ' + title, style: { ...DIM, bold: true } }];
 const join2 = (blocks: Line[][]): Line[] => blocks.filter(block => block.length).flatMap((block, index) => index ? [[], ...block] : block);
 
+/** A call that may have changed a file: only these are looked up for the other changes to it. */
+const CHANGES = /^(Write|Edit|MultiEdit|NotebookEdit|apply_patch|edit_file|write_file)$/i;
+const mayChange = (row: ChapterRow): boolean => !row.output
+  && (CHANGES.test(row.tool) || row.items.some(item => item.kind === 'file-change'));
+
 /** Every change to `path` in the turn, in order, as (row, file) pairs. */
 function changesOf(path: string, rows: ChapterRow[], session: SessionData): Array<{ row: ChapterRow; file: PatchFile }> {
-  return rows.flatMap(row => recordedFiles(row.items, resolveOutlineEvidence(session, row.id)?.entry).filter(file => file.path === path).map(file => ({ row, file })));
+  return rows.filter(mayChange).flatMap(row => recordedFiles(row.items, resolveOutlineEvidence(session, row.id, row.items[0])?.entry).filter(file => file.path === path).map(file => ({ row, file })));
 }
 
 export interface DetailInput {
@@ -252,7 +257,7 @@ export interface DetailInput {
 }
 
 export function detailDoc({ session, group, row, width, glyph, edit, background }: DetailInput): DetailDoc | undefined {
-  const evidence = resolveOutlineEvidence(session, row.id);
+  const evidence = resolveOutlineEvidence(session, row.id, row.items[0]);
   const records = evidence ? evidence.items ?? [evidence.item] : row.items;
   if (!records.length) return undefined;
   const calls = records.flatMap(record => recordedToolInputs(record));
