@@ -5,7 +5,8 @@
 // Appends one line per event to the session's state file; see SESSION_STATE.md.
 // Only what the transcript lacks or has too late: which window the session is
 // in (SessionStart), that the agent waits for an approval (PermissionRequest),
-// and text on screen before the transcript has it (MessageDisplay, Claude).
+// and what is on screen before the transcript has it: text (MessageDisplay)
+// and the call about to run (PreToolUse), both Claude's.
 // When a turn starts or ends, and when the session ends, come from the
 // transcript and from the agent's process instead.
 // It prints nothing, because a SessionStart hook's stdout becomes the model's
@@ -43,6 +44,15 @@ function summary(input) {
   return '';
 }
 
+/** The short fields a call's line is drawn from, each cut to one line: never the whole input. */
+const CALL_FIELDS = ['command', 'description', 'file_path', 'path', 'pattern', 'glob', 'url', 'query', 'skill', 'notebook_path', 'subagent_type', 'action', 'to'];
+function brief(input) {
+  if (!input || typeof input !== 'object') return {};
+  const kept = {};
+  for (const key of CALL_FIELDS) if (typeof input[key] === 'string' && input[key].trim()) kept[key] = oneLine(input[key], 200);
+  return kept;
+}
+
 /**
  * Turns one hook input into the record to append, or nothing. `front` is
  * the session's front when it is not the hook's agent (see front.mjs): its
@@ -59,6 +69,8 @@ export function record(provider, agentPid, input, now = Date.now(), env = proces
         source: input.source ?? '', ...(kitty ? { kitty } : {}) };
     }
     case 'PermissionRequest': return { ...base, e: 'approval', tool: oneLine(input.tool_name ?? '', 80), summary: summary(input.tool_input) };
+    // Claude Code can write a call to its transcript seconds after it shows it; the hook comes as it shows.
+    case 'PreToolUse': return provider === 'claude' ? { ...base, e: 'call', tool: oneLine(input.tool_name ?? '', 80), input: brief(input.tool_input) } : undefined;
     case 'MessageDisplay': return { ...base, e: 'display', message: String(input.message_id ?? ''), index: Number(input.index) || 0,
       final: Boolean(input.final), text: String(input.delta ?? '').slice(0, TEXT_LIMIT) };
     default: return undefined;

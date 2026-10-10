@@ -14,6 +14,8 @@ import { plainText, spans, type Line } from '../packages/terminal/src/screen';
 import { contentsEntries, contentsLines } from '../packages/terminal/src/views/contents';
 import { columnWidths, inlineSpans, prose, wrapSpans } from '../packages/terminal/src/views/prose';
 import { exploreText } from '../packages/core/src/command-line';
+import { liveExtras } from '../packages/core/src/live-extras';
+import type { SessionState } from '../packages/core/src/session-state';
 import { commandText, headerLines, runningClock, sessionStatus, turnBody, type PageContext } from '../packages/terminal/src/views/turn-page';
 import { textWidth } from '../packages/terminal/src/width';
 
@@ -243,6 +245,21 @@ test('waiting for an approval replaces the status line, marks the call and chang
   assert.equal(sessionStatus(latest, model.extras, model.now, { busy: true, state: 'busy' }).kind, 'running');
   assert.equal(sessionStatus(latest, model.extras, model.now, { busy: true, state: 'waiting' }).kind, 'waiting');
   assert.equal(windowTitle(model), '⏸ 等你批准 — Sidecar · Claude Code');
+});
+
+test('a call on screen but not yet in the transcript shows as it will, once', () => {
+  const session = parse([...FIRST, ...SECOND]);
+  const state: SessionState = { provider: 'claude', session: 'cl', cwd: '/fixture', agentPid: process.pid, hostPid: 1, startedAt: 0, activeAt: 0, phase: 'idle',
+    calls: [
+      { tool: 'Bash', input: { command: 'grep -rn "assert.equal(expected" tests', description: 'Search for reversed assertions' }, at: Date.parse(at(22)) },
+      { tool: 'Bash', input: { command: 'npm test -- --grep regression', description: 'Run the regression test' }, at: Date.parse(at(23)) },
+    ] };
+  // The first call is in the transcript already: only the second is still out.
+  const extras = liveExtras(session, state, Date.parse(at(24)));
+  assert.deepEqual(extras.calls?.map(call => call.input.description), ['Run the regression test']);
+  const lines = text(turnBody(ctxOf(modelOf(session, { extras, now: Date.parse(at(24)) }), 1)));
+  assert.equal(lines.filter(line => line.includes('Search for reversed assertions')).length, 1, lines.join('\n'));
+  assert.match(lines.find(line => line.includes('Run the regression test'))!, /^  └ Run the regression test … *$/);
 });
 
 test('text on screen but not yet in the transcript shows as the words will, so nothing changes when the record arrives', () => {

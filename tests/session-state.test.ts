@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { awaitingApproval, currentSession, DRAFT_SUPERSEDED_MS, foldSessionState, pendingDraft, readSessionStates, sessionStateDirectory, type SessionStateCache } from '../packages/core/src/session-state';
+import { awaitingApproval, CALL_PENDING_MS, currentSession, DRAFT_SUPERSEDED_MS, foldSessionState, pendingCalls, pendingDraft, readSessionStates, sessionStateDirectory, type SessionStateCache } from '../packages/core/src/session-state';
 
 const live = () => true;
 const lines = (...records: object[]) => records.map(record => JSON.stringify({ v: 1, ...record })).join('\n') + '\n';
@@ -102,6 +102,7 @@ test('the hook appends one silent line per event it records, and records the age
     { hook_event_name: 'UserPromptSubmit', session_id: 'abc-1', prompt: 'secret prompt text' },
     { hook_event_name: 'PermissionRequest', session_id: 'abc-1', tool_name: 'Bash', tool_input: { command: 'rm -rf build\n' + 'x'.repeat(500), description: 'clean' } },
     { hook_event_name: 'MessageDisplay', session_id: 'abc-1', message_id: 'm1', index: 0, final: true, delta: 'ok' },
+    { hook_event_name: 'PreToolUse', session_id: 'abc-1', tool_name: 'Bash', tool_use_id: 't1', tool_input: { command: 'npm test\n' + 'y'.repeat(500), description: 'Run tests', timeout: 5000, extra: { secret: 'nested' } } },
     { hook_event_name: 'Stop', session_id: 'abc-1', last_assistant_message: 'ok' },
     { hook_event_name: 'SessionEnd', session_id: 'abc-1', reason: 'prompt_input_exit' },
   ];
@@ -113,7 +114,11 @@ test('the hook appends one silent line per event it records, and records the age
   const file = join(sessionStateDirectory({ XDG_STATE_HOME: home }), 'claude-abc-1.jsonl');
   const written = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   // Turns and the session's end come from the transcript and the agent's process: those events write nothing.
-  assert.deepEqual(written.map(line => line.e), ['start', 'approval', 'display']);
+  assert.deepEqual(written.map(line => line.e), ['start', 'approval', 'display', 'call']);
+  // A call keeps only its short fields, each on one line and cut short.
+  assert.deepEqual(Object.keys(written[3].input), ['command', 'description']);
+  assert.equal(written[3].input.command.length, 200);
+  assert.equal(written[3].tool, 'Bash');
   assert.equal(written[0].agentPid, process.pid);
   assert.equal(written[0].hostPid, process.ppid, 'The agent’s parent is its host');
   assert.deepEqual(written[0].kitty, { window: '19', socket: 'unix:/tmp/kitty-1' });
@@ -124,12 +129,27 @@ test('the hook appends one silent line per event it records, and records the age
   assert.equal(foldSessionState(readFileSync(file, 'utf8'), live)!.phase, 'waiting');
 });
 
+test('a call the agent showed waits for its record, then goes; one never recorded goes after a while', () => {
+  const start = JSON.stringify({ v: 1, t: 1000, e: 'start', provider: 'claude', session: 's', cwd: '/p', agentPid: process.pid, hostPid: 1 });
+  const call = (t: number, command: string) => JSON.stringify({ v: 1, t, e: 'call', tool: 'Bash', input: { command, description: 'd' } });
+  const state = foldSessionState([start, call(2000, 'npm test'), call(3000, 'npm  test'), call(4000, 'ls')].join('\n') + '\n', live)!;
+  assert.equal(state.calls!.length, 3);
+  // Nothing recorded yet: all three are out.
+  assert.equal(pendingCalls(state, [], 5000).length, 3);
+  // One npm test recorded: the older announcement is used up; the second run of it is still out.
+  assert.deepEqual(pendingCalls(state, [{ name: 'Bash', input: { command: 'npm test' } }], 5000).map(call => call.at), [3000, 4000]);
+  // Another tool on the same command is not the same call.
+  assert.equal(pendingCalls(state, [{ name: 'Read', input: { command: 'ls' } }], 5000).length, 3);
+  // Never recorded: let go after a while.
+  assert.deepEqual(pendingCalls(state, [], 4000 + CALL_PENDING_MS).map(call => call.at), []);
+});
+
 test('the plugins hook only what the transcript lacks or has too late', () => {
   const events = (file: string) => {
     const manifest = JSON.parse(readFileSync(resolve(__dirname, '../..', file), 'utf8'));
     return Object.keys(manifest.hooks.hooks ?? manifest.hooks).sort();
   };
-  assert.deepEqual(events('plugins/sidecar-state/.claude-plugin/plugin.json'), ['MessageDisplay', 'PermissionRequest', 'SessionStart']);
+  assert.deepEqual(events('plugins/sidecar-state/.claude-plugin/plugin.json'), ['MessageDisplay', 'PermissionRequest', 'PreToolUse', 'SessionStart']);
   assert.deepEqual(events('plugins/sidecar-state/.codex-plugin/plugin.json'), ['PermissionRequest', 'SessionStart']);
   assert.deepEqual(events('plugins/sidecar-split/.claude-plugin/plugin.json'), ['SessionStart']);
   assert.deepEqual(events('plugins/sidecar-split/.codex-plugin/plugin.json'), ['SessionStart']);

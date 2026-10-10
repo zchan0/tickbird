@@ -11,6 +11,8 @@ import { inlineSpans, prose, wrapSpans } from './prose';
 import { recordedFiles } from '../../../core/src/presentation';
 import { resolveOutlineEvidence } from '../../../core/src/outline';
 import { commandText, exploreText } from '../../../core/src/command-line';
+import { toolView } from '../../../core/src/tool-view';
+import type { SessionCall } from '../../../core/src/session-state';
 
 export { commandText };
 
@@ -259,6 +261,17 @@ function steps(rows: ChapterRow[]): ChapterRow[] {
 }
 
 /**
+ * A call the agent shows as running, from its hook, before the transcript has
+ * it: drawn as its record will be, so nothing moves when the record comes.
+ */
+function announcedRow(call: SessionCall, index: number): ChapterRow {
+  const view = toolView(call.tool, call.input);
+  const command = call.input.command;
+  return { id: `announced:${index}:${call.at}`, tool: view.name, label: view.label, count: 1, items: [], running: true, pending: true, output: false, openable: false,
+    ...(command !== undefined ? { command } : {}), ...(call.input.description ? { description: call.input.description } : {}) };
+}
+
+/**
  * A file the agent was shown again because it changed outside its own edits
  * (by a script it ran, or by someone else): a record of the file, not a call.
  */
@@ -273,6 +286,7 @@ function changeSize(chapterRow: ChapterRow, ctx: PageContext): { added: number; 
   return size;
 }
 function measureChange(chapterRow: ChapterRow, ctx: PageContext): { added: number; removed: number; edited: boolean } | undefined {
+  if (!chapterRow.items.length) return undefined;
   const all = recordedFiles(chapterRow.items, resolveOutlineEvidence(ctx.session, chapterRow.id, chapterRow.items[0])?.entry);
   const files = all.length > 1 ? all.filter(file => base(file.path) === base(chapterRow.label)) : all;
   if (!files.length) return undefined;
@@ -522,6 +536,7 @@ export function turnBody(ctx: PageContext): Line[] {
   for (const segment of closed ? view.process : view.turn.segments) blocks.push(...segmentBlocks(segment, view, ctx, waitingOn));
   // On screen in the agent, not yet in the transcript: set as the words will be, so nothing changes when the record arrives.
   if (latest && ctx.extras.draft && going) blocks.push(wordLines(ctx.extras.draft, ctx));
+  if (latest && ctx.extras.calls?.length && going) blocks.push(callLines(ctx.extras.calls.map(announcedRow), view, ctx, waitingOn));
   blocks.push(tailLines(view, latest, ctx));
   return blocks.filter(block => block.length).flatMap((block, index) => index ? [[], ...block] : block);
 }

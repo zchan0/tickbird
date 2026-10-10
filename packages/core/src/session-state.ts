@@ -10,6 +10,8 @@ import type { Provider } from './model';
  * The file format is described in docs/SESSION_STATE.md.
  */
 export type SessionPhase = 'idle' | 'working' | 'waiting' | 'ended';
+export interface SessionCall { tool: string; input: Record<string, string>; at: number }
+
 export interface SessionState {
   provider: Provider;
   session: string;
@@ -24,6 +26,8 @@ export interface SessionState {
   activeAt: number;
   phase: SessionPhase;
   approval?: { tool: string; summary: string; at: number };
+  /** Calls the agent showed as about to run, newest last; the transcript may not have them yet. */
+  calls?: SessionCall[];
   /** Text the agent is showing now, assembled from its display parts in order. */
   draft?: { message: string; text: string; final: boolean; at: number };
 }
@@ -76,11 +80,14 @@ export function foldSessionState(text: string, isAlive: (pid: number) => boolean
       continue;
     }
     if (!state) continue;
-    if (line.e === 'end') { state.phase = 'ended'; delete state.approval; delete state.draft; continue; }
+    if (line.e === 'end') { state.phase = 'ended'; delete state.approval; delete state.draft; delete state.calls; continue; }
     state.activeAt = line.t;
     if (line.e === 'prompt' || line.e === 'stop') {
       state.phase = line.e === 'prompt' ? 'working' : 'idle';
-      delete state.approval; delete state.draft; parts = new Map();
+      delete state.approval; delete state.draft; delete state.calls; parts = new Map();
+    } else if (line.e === 'call') {
+      const input = line.input && typeof line.input === 'object' ? Object.fromEntries(Object.entries(line.input as Record<string, unknown>).filter(([, value]) => typeof value === 'string')) as Record<string, string> : {};
+      state.calls = [...(state.calls ?? []), { tool: str(line.tool), input, at: line.t }].slice(-CALLS_KEPT);
     } else if (line.e === 'approval') {
       state.phase = 'waiting';
       state.approval = { tool: str(line.tool), summary: str(line.summary), at: line.t };
@@ -96,7 +103,7 @@ export function foldSessionState(text: string, isAlive: (pid: number) => boolean
     }
   }
   if (state && state.phase !== 'ended' && state.agentPid && !isAlive(state.agentPid)) {
-    state.phase = 'ended'; delete state.approval; delete state.draft;
+    state.phase = 'ended'; delete state.approval; delete state.draft; delete state.calls;
   }
   return state;
 }
@@ -115,6 +122,39 @@ const squash = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
 /** A transcript record this much newer than a draft's last part means the agent moved on. */
 export const DRAFT_SUPERSEDED_MS = 1000;
+
+/** How many announced calls the state keeps, and how long one waits for its record before it is let go. */
+const CALLS_KEPT = 8;
+export const CALL_PENDING_MS = 30_000;
+
+/** The field a call is told apart by: the command it runs, the file, pattern or page it works on. */
+const callKey = (tool: string, input: Record<string, unknown>): string => {
+  const value = ['command', 'cmd', 'file_path', 'path', 'pattern', 'url', 'query', 'skill', 'description'].map(key => input[key]).find(field => typeof field === 'string' && field.trim());
+  return `${tool}\u0000${typeof value === 'string' ? squash(value).slice(0, 120) : ''}`;
+};
+
+/**
+ * Calls the agent shows as running that its transcript does not have yet:
+ * Claude Code can write a call seconds after showing it. A call goes once the
+ * transcript has one of the same tool on the same command or file (as many
+ * as were announced), or when it has waited long enough that the record must
+ * have come another way.
+ */
+export function pendingCalls(state: SessionState | undefined, recorded: Array<{ name: string; input: unknown }>, now: number): SessionCall[] {
+  if (!state?.calls?.length || state.phase === 'ended') return [];
+  const seen = new Map<string, number>();
+  for (const call of recorded) {
+    const input = call.input && typeof call.input === 'object' ? call.input as Record<string, unknown> : {};
+    const key = callKey(call.name, input);
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  // The newest announcements are the ones still out: match from the oldest, so the recorded ones use them up first.
+  return state.calls.filter(call => {
+    const key = callKey(call.tool, call.input), left = seen.get(key) ?? 0;
+    if (left) { seen.set(key, left - 1); return false; }
+    return now - call.at < CALL_PENDING_MS;
+  });
+}
 
 /**
  * The text still worth showing early: none once the transcript holds the same
