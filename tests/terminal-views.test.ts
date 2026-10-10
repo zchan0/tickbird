@@ -79,37 +79,40 @@ test('a finished turn: the request as title, its changes, each step\'s words, it
   const body = turnBody(ctxOf(model, 0));
   const lines = text(body);
   assert.deepEqual(lines.map(line => line.trimEnd()), [
-    ' 先看看测试为什么失败，再修好它',
-    ' 改动  M width.test.ts',
+    '  Prompt',
+    '┃ 先看看测试为什么失败，再修好它',
+    '  改动  M width.test.ts',
     '',
-    ' 先跑一遍测试，看失败在哪一步。',
+    '  先跑一遍测试，看失败在哪一步。',
     '',
-    ' Bash',
-    ' ├ Run the unit tests exit 1',
-    ' └ Run only the width tests',
-    ' Read',
-    ' └ width.ts',
+    '  Bash',
+    '  ├ Run the unit tests exit 1',
+    '  └ Run only the width tests',
+    '  Read',
+    '  └ width.ts',
     '',
-    ' 断言写反了：期望值和实际值调换了位置。改正后重跑：',
+    '  断言写反了：期望值和实际值调换了位置。改正后重跑：',
     '',
-    ' Edit',
-    ' └ width.test.ts +1 -1',
+    '  Edit',
+    '  └ width.test.ts +1 -1',
     '',
-    '  答复  修好了：assert.equal 的两个参数写反了。',
+    '  Final Answer',
+    '  修好了：assert.equal 的两个参数写反了。 ▾',
   ]);
-  // The request bold; the words in the body colour; the tool names bold in the body colour, to see what was used;
+  // The prompt under its label, a blue bar beside it; the words in the body colour; the tool names bold in the body colour, to see what was used;
   // what each call worked on grey, all alike, and the tree grey.
-  assert.ok(spans(body[0]).filter(span => span.text.trim()).every(span => span.style?.bold));
-  assert.ok(spans(body[3]).filter(span => span.text.includes('先跑')).every(span => !span.style?.dim));
-  assert.ok(spans(body[5]).some(span => span.text === 'Bash' && !span.style?.dim && span.style?.bold));
-  assert.ok(spans(body[6]).some(span => span.text.includes('├') && span.style?.dim));
-  assert.ok(spans(body[7]).some(span => span.text === 'Run only the width tests' && span.style?.dim));
-  assert.ok(spans(body[9]).filter(span => span.text.trim()).every(span => span.style?.dim));
-  assert.ok(spans(body[6]).some(span => span.text === 'exit 1' && span.style?.fg === 'red'));
-  assert.ok(spans(body[14]).some(span => span.text === 'width.test.ts' && span.style?.dim));
-  assert.ok(spans(body[14]).some(span => span.text === '+1' && span.style?.fg === 'green'));
-  // The answer's label is a block of colour, not a glyph.
-  assert.deepEqual(spans(body[16]).find(span => span.text.includes('答复'))?.style, { fg: 'green', inverse: true, bold: true });
+  assert.deepEqual(spans(body[0]).find(span => span.text.includes('Prompt'))?.style, { fg: 'blue', bold: true });
+  assert.equal(spans(body[1]).find(span => span.text === '┃')?.style?.fg, 'blue');
+  assert.ok(spans(body[4]).filter(span => span.text.includes('先跑')).every(span => !span.style?.dim));
+  assert.ok(spans(body[6]).some(span => span.text === 'Bash' && !span.style?.dim && span.style?.bold));
+  assert.ok(spans(body[7]).some(span => span.text.includes('├') && span.style?.dim));
+  assert.ok(spans(body[8]).some(span => span.text === 'Run only the width tests' && span.style?.dim));
+  assert.ok(spans(body[10]).filter(span => span.text.trim()).every(span => span.style?.dim));
+  assert.ok(spans(body[7]).some(span => span.text === 'exit 1' && span.style?.fg === 'red'));
+  assert.ok(spans(body[15]).some(span => span.text === 'width.test.ts' && span.style?.dim));
+  assert.ok(spans(body[15]).some(span => span.text === '+1' && span.style?.fg === 'green'));
+  // The answer's label on a line of its own, over the answer, as the prompt's is.
+  assert.deepEqual(spans(body[17]).find(span => span.text.includes('Final Answer'))?.style, { fg: 'green', bold: true });
   assert.ok(!lines.some(line => /→|✻|●|[$≡±]|calls/.test(line)));
 });
 
@@ -123,7 +126,7 @@ test('reads in a row hang from one Read, one per line; each is its own call to s
   ]);
   const model = modelOf(session);
   const lines = text(turnBody(ctxOf(model, 0)));
-  assert.deepEqual(lines.slice(2, 6).map(line => line.trimEnd()), [' Read', ' ├ a.ts', ' ├ b.ts', ' └ c.ts']);
+  assert.deepEqual(lines.slice(3, 7).map(line => line.trimEnd()), ['  Read', '  ├ a.ts', '  ├ b.ts', '  └ c.ts']);
   let state = key(update(initialState(), model), keyOf('down'), model);
   state = key(state, keyOf('down'), model);
   assert.equal(state.call, 1);
@@ -153,30 +156,30 @@ test('a long call label wraps to two lines at most, the second under the tree', 
     said('好了。', 3, true), done(4, 4000),
   ]);
   const all = text(turnBody(ctxOf(modelOf(session, { width: 30 }), 0)));
-  const lines = all.slice(3, 5);
-  assert.equal(all[2].trimEnd(), ' Bash');
-  assert.equal(all[5], '');
-  assert.match(lines[0], /^ └ one two/);
-  assert.match(lines[1].trimEnd(), /^ {3}\S.*…$/);
+  const lines = all.slice(4, 6);
+  assert.equal(all[3].trimEnd(), '  Bash');
+  assert.equal(all[6], '');
+  assert.match(lines[0], /^  └ one two/);
+  assert.match(lines[1].trimEnd(), /^ {4}\S.*…$/);
 });
 test('the running turn shows no agent word or clock and no end; a call still out is marked', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]));
   assert.equal(model.status.kind, 'running');
   const body = turnBody(ctxOf(model, 1));
   const lines = text(body);
-  assert.equal(lines.at(-2)!.trimEnd(), ' Bash');
-  assert.match(lines.at(-1)!, /^ └ Search for reversed assertions … *$/);
+  assert.equal(lines.at(-2)!.trimEnd(), '  Bash');
+  assert.match(lines.at(-1)!, /^  └ Search for reversed assertions … *$/);
   assert.equal(spans(body.at(-1)!).find(span => span.text === '…')?.style?.fg, 'yellow');
   assert.ok(!lines.some(line => line.includes('答复')));
   const header = text(headerLines(ctxOf(model, 1)));
   assert.equal(header.length, 1);
   assert.doesNotMatch(header[0], /运行中|\d+s|Claude Code/);
-  assert.match(header[0], /^ 第 2 轮 \/ 共 2 轮 · \d\d:\d\d 开始$/);
+  assert.match(header[0], /^  第 2 轮 \/ 共 2 轮 · \d\d:\d\d 开始$/);
 });
 test('a quiet open turn is not called running', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]), { now: Date.parse(at(22)) + 11 * 60_000 });
   assert.equal(model.status.kind, 'quiet');
-  assert.match(text(turnBody(ctxOf(model, 1))).at(-1)!, /^ 无新记录 · 最后一条 \d\d:\d\d$/);
+  assert.match(text(turnBody(ctxOf(model, 1))).at(-1)!, /^  无新记录 · 最后一条 \d\d:\d\d$/);
   // The agent's own word wins over the record clock.
   assert.equal(modelOf(parse([...FIRST, ...SECOND]), { now: Date.parse(at(22)) + 11 * 60_000, busy: true }).status.kind, 'running');
 });
@@ -185,19 +188,19 @@ test('waiting for an approval replaces the status line, marks the call and chang
   const model = modelOf(parse([...FIRST, ...SECOND]), { extras: { approval: { tool: 'Bash', summary: 'grep -rn "assert.equal(expected" tests' } } });
   assert.equal(model.status.kind, 'waiting');
   const lines = text(turnBody(ctxOf(model, 1)));
-  assert.equal(lines.at(-2), '  等你批准  Bash · grep -rn "assert.equal(expected" tests');
-  assert.equal(lines.at(-1), ' 在 Claude Code 里选择批准或拒绝。');
-  assert.match(lines.at(-4)!, /^ └ Search for reversed assertions \? *$/);
-  assert.match(text(headerLines(ctxOf(model, 1)))[0], / 等你批准  $/);
+  assert.match(lines.at(-2)!, /^ {2}Needs approval {2}Bash · grep -rn "assert/);
+  assert.equal(lines.at(-1), '  在 Claude Code 里选择批准或拒绝。');
+  assert.match(lines.at(-4)!, /^  └ Search for reversed assertions \? *$/);
+  assert.match(text(headerLines(ctxOf(model, 1)))[0], / Needs approval  $/);
   assert.equal(windowTitle(model), '⏸ 等你批准 — Sidecar · Claude Code');
 });
 
-test('text on screen but not yet in the transcript shows dim and italic before the status line', () => {
+test('text on screen but not yet in the transcript shows as the words will, so nothing changes when the record arrives', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]), { extras: { draft: '找到 3 处写反的断言，接下来逐个修正。' } });
   const lines = turnBody(ctxOf(model, 1));
   const draft = lines.at(-1)!;
-  assert.equal(plainText(draft), ' 找到 3 处写反的断言，接下来逐个修正。');
-  assert.ok(spans(draft).filter(span => span.text.trim()).every(span => span.style?.dim && span.style.italic));
+  assert.equal(plainText(draft), '  找到 3 处写反的断言，接下来逐个修正。');
+  assert.ok(spans(draft).filter(span => span.text.trim()).every(span => !span.style?.dim && !span.style?.italic));
   // Not on an older turn.
   assert.ok(!text(turnBody(ctxOf(model, 0))).some(line => line.includes('找到 3 处')));
 });
@@ -235,8 +238,8 @@ test('following shows the newest turn and jumps to a new one; an older turn on s
   assert.equal(state.notice, 2);
   // A label in a block of colour, as 答复 is, then what was asked.
   const notice = frame(state, third).at(-1)!;
-  assert.equal(plainText(notice).trimEnd(), '  新一轮  提交吧');
-  assert.deepEqual(spans(notice).find(span => span.text.includes('新一轮'))?.style, { fg: 'yellow', inverse: true, bold: true });
+  assert.equal(plainText(notice).trimEnd(), '  New turn  提交吧');
+  assert.deepEqual(spans(notice).find(span => span.text.includes('New turn'))?.style, { fg: 'yellow', inverse: true, bold: true });
   // A click on the notice, or 】 from a Chinese input method, does what ] does.
   const noticeY = text(frame(state, third)).length;
   assert.deepEqual([key(state, { type: 'mouse', action: 'press', button: 0, x: 3, y: noticeY }, third).index, key(state, { type: 'mouse', action: 'press', button: 0, x: 3, y: noticeY - 1 }, third).index], [2, 0]);
@@ -255,7 +258,7 @@ test('scrolling up pauses following, G resumes it at the end of the newest turn'
   assert.ok(end > 0, 'The turn is taller than the pane');
   state = key(state, wheel('wheelUp'), model);
   assert.deepEqual([state.follow, state.scroll], [false, Math.max(0, end - 3)]);
-  assert.match(text(frame(state, model))[0], /^ 第 2 轮.* 已暂停跟随 · G {3}\? 按键 $/);
+  assert.match(text(frame(state, model))[0], /^  第 2 轮.* 已暂停跟随 · G {3}\? 按键 $/);
   // New records do not move a paused view.
   state = update(state, model);
   assert.equal(state.scroll, Math.max(0, end - 3));
@@ -267,7 +270,7 @@ test('scrolling up pauses following, G resumes it at the end of the newest turn'
   assert.equal(state.follow, true);
 });
 
-test('↑↓ select calls and the answer; the selected one comes up from grey with a ⏎; ⏎ opens it; selecting stops following', () => {
+test('↑↓ select calls and the answer; the selected one comes up golden and underlined, every line of it; ⏎ opens it; selecting stops following', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]));
   let state = key(update(initialState(), model), keyOf('['), model);
   assert.equal(state.index, 0);
@@ -275,13 +278,14 @@ test('↑↓ select calls and the answer; the selected one comes up from grey wi
   assert.deepEqual([state.call, state.follow], [0, false]);
   let screen = frame(state, model);
   const lines = text(screen);
-  // The row keeps its place: no cursor in the margin, ⏎ at the right end.
-  assert.ok(lines.some(line => /^ ├ Run the unit tests exit 1 +⏎ $/.test(line)), lines.join('\n'));
+  // The row keeps its place: no cursor in the margin, no mark at the end.
+  assert.ok(lines.some(line => /^  ├ Run the unit tests exit 1 *$/.test(line)), lines.join('\n'));
+  assert.ok(!lines.some(line => line.includes('⏎ ') && !line.startsWith('  第')), 'No ⏎ on the call');
   assert.match(lines[0], /⏎ 详情/);
   const selected = spans(screen.find(line => text([line])[0].includes('Run the unit tests'))!);
   assert.notEqual(selected.find(span => span.text.includes('├'))?.style?.fg, 'yellow', 'The tree stays grey');
   assert.deepEqual([selected.find(span => span.text === 'Run the unit tests')?.style?.fg, selected.find(span => span.text === 'Run the unit tests')?.style?.dim], ['yellow', false]);
-  assert.equal(selected.find(span => span.text === '⏎')?.style?.fg, 'yellow');
+  assert.equal(selected.find(span => span.text === 'Run the unit tests')?.style?.underline, true);
   state = key(key(state, keyOf('down'), model), keyOf('up'), model);
   assert.equal(state.call, 0);
   // ⏎ opens, Esc comes back; q quits from anywhere.
@@ -296,7 +300,7 @@ test('↑↓ select calls and the answer; the selected one comes up from grey wi
   state = key(state, keyOf('enter'), model);
   assert.deepEqual([state.mode, state.answerOpen], ['turn', true]);
   screen = frame(state, model);
-  assert.ok(text(screen).some(line => line.startsWith(' 修好了')));
+  assert.ok(text(screen).some(line => line.startsWith('  修好了')));
   assert.equal(key(state, keyOf('enter'), model).answerOpen, false);
   // Esc on the turn page drops the selection.
   state = key(state, keyOf('escape'), model);
@@ -318,9 +322,9 @@ test('the pointer brings up the call under it; one click opens it', () => {
   let state = key(update(initialState(), model), keyOf('['), model);
   const y = text(frame(state, model)).findIndex(line => line.includes('Run only the width tests')) + 1;
   state = key(state, { type: 'mouse', action: 'move', button: 3, x: 10, y }, model);
-  const lines = text(frame(state, model));
-  assert.match(lines[y - 1], /Run only the width tests +⏎ $/);
-  assert.match(lines[0], /⏎ 详情/);
+  const screen = frame(state, model);
+  assert.equal(spans(screen[y - 1]).find(span => span.text === 'Run only the width tests')?.style?.underline, true);
+  assert.match(text(screen)[0], /⏎ 详情/);
   assert.equal(state.call, undefined);
   state = key(state, { type: 'mouse', action: 'press', button: 0, x: 10, y }, model);
   assert.deepEqual([state.mode, state.call], ['detail', 1]);
@@ -333,7 +337,7 @@ test('following an open turn keeps its end on screen; when it ends, the page goe
   const closed = modelOf(parse([...FIRST, ...SECOND, result('t5', 23), said('没有别的了。', 24, true), done(25, 5000)]), { height: 8, now: Date.parse(at(26)) });
   state = update(state, closed);
   assert.deepEqual([state.index, state.scroll, state.follow], [1, 0, true]);
-  assert.ok(text(frame(state, closed)).some(line => line.startsWith(' 再加一个回归测试')));
+  assert.ok(text(frame(state, closed)).some(line => line.startsWith('┃ 再加一个回归测试')));
 });
 test('details: a call shows its input and return; a read shows the file; a change shows the diff; [ ] move between calls', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]));
@@ -346,7 +350,7 @@ test('details: a call shows its input and return; a read shows the file; a chang
   assert.ok(lines.includes(' 返回 · exit 1') && lines.includes('      │ AssertionError'), lines.join('\n'));
   // Every content line has the same shape: a left column, a bar, the text.
   assert.ok(lines.filter(line => line && !/^ \S/.test(line)).every(line => /^ .{4} │ /.test(line)), lines.join('\n'));
-  assert.match(text(frame(state, model))[0], /^ ← Esc {2}Run the unit tests +Bash · exit 1 $/);
+  assert.match(text(frame(state, model))[0], /^  ← Esc {2}Run the unit tests +Bash · exit 1 $/);
   state = key(key(state, keyOf(']'), model), keyOf(']'), model);
   doc = openDetail(state, model)!;
   assert.deepEqual([doc.kind, doc.title, doc.directory, doc.meta, doc.path, doc.line], ['file', 'width.ts', 'src/', 'Read · 第 1–1 行', '/fixture/src/width.ts', 1]);
@@ -698,8 +702,89 @@ test('every call reads in grey under its tool\'s name; colour marks only a failu
   const session = parse([rec('user', '看看', 0), ...commands.flatMap((command, i) => [call(`c${i}`, 'Bash', { command, description: i === 2 ? 'Run the tests' : undefined }, 1 + i), result(`c${i}`, 1 + i, i === 2)]), said('好。', 20, true), done(21, 21_000)]);
   const body = turnBody(ctxOf(modelOf(session, { width: 80 }), 0));
   assert.ok(spans(body.find(line => plainText(line).trim() === 'Bash')!).some(span => span.text === 'Bash' && span.style?.bold && !span.style?.dim));
-  const calls = body.filter(line => /^ [├└] /.test(plainText(line)));
+  const calls = body.filter(line => /^  [├└] /.test(plainText(line)));
   assert.equal(calls.length, 3);
   for (const line of calls) assert.ok(spans(line)[1].style?.dim, plainText(line));
   assert.ok(spans(calls[2]).some(span => span.style?.fg === 'red'), 'The failure is marked in red');
+});
+
+test('back from a detail a click opened, nothing stays selected; from one opened with ⏎, the call stays', () => {
+  const model = modelOf(parse([...FIRST, ...SECOND]));
+  let state = key(update(initialState(), model), keyOf('['), model);
+  const y = text(frame(state, model)).findIndex(line => line.includes('Run the unit tests')) + 1;
+  state = key(state, { type: 'mouse', action: 'press', button: 0, x: 6, y }, model);
+  assert.equal(state.mode, 'detail');
+  assert.equal(key(state, keyOf('escape'), model).call, undefined);
+  const byKey = key(key(key(state, keyOf('escape'), model), keyOf('down'), model), keyOf('enter'), model);
+  assert.equal(byKey.mode, 'detail');
+  assert.equal(key(byKey, keyOf('escape'), model).call, 0);
+});
+
+test('a call that read an image opens it in the system viewer, the bytes of the time, not a page of its path', () => {
+  // A real 1×1 PNG: the parser keeps only image bytes that are what they say.
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const session = parse([
+    rec('user', '看看截图', 0),
+    call('i1', 'Read', { file_path: '/fixture/shot.png' }, 1),
+    rec('user', [{ type: 'tool_result', tool_use_id: 'i1', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }] }], 2),
+    said('看到了。', 3, true), done(4, 4000),
+  ]);
+  const model = modelOf(session);
+  let state = key(update(initialState(), model), keyOf('down'), model);
+  assert.match(text(frame(state, model))[0], /⏎ 打开图片/);
+  const opened = key(state, keyOf('enter'), model);
+  assert.equal(opened.mode, 'turn');
+  assert.deepEqual(opened.effect, { kind: 'view', image: { name: 'shot.png', data: png, mime: 'image/png', path: '/fixture/shot.png' } });
+  // A click opens it too, and leaves nothing selected.
+  const y = text(frame(state, model)).findIndex(line => line.includes('shot.png')) + 1;
+  state = key(update(initialState(), model), { type: 'mouse', action: 'press', button: 0, x: 6, y }, model);
+  assert.equal(state.effect?.kind, 'view');
+  assert.equal(state.call, undefined);
+});
+
+test('a call that points somewhere opens that place; calls with a detail of their own keep it', () => {
+  const session = parse([
+    rec('user', '发布一下', 0),
+    call('a1', 'Artifact', { file_path: '/fixture/page.html', url: 'https://claude.ai/artifact/abc' }, 1), result('a1', 2, false, 'Published at https://claude.ai/artifact/abc'),
+    call('w1', 'WebFetch', { url: 'https://example.com/docs/page', prompt: 'read' }, 3), result('w1', 4),
+    call('b1', 'Bash', { command: 'curl -s https://example.com/api', description: 'Fetch the API' }, 5), result('b1', 6),
+    said('好了。', 7, true), done(8, 8000),
+  ]);
+  const model = modelOf(session);
+  let state = key(update(initialState(), model), keyOf('down'), model);
+  assert.match(text(frame(state, model))[0], /⏎ 打开链接/);
+  assert.deepEqual(key(state, keyOf('enter'), model).effect, { kind: 'link', link: { target: 'https://claude.ai/artifact/abc', name: 'claude.ai' } });
+  state = key(state, keyOf('down'), model);
+  assert.deepEqual(key(state, keyOf('enter'), model).effect, { kind: 'link', link: { target: 'https://example.com/docs/page', name: 'example.com' } });
+  // A command that mentions an address is still a command: its detail opens.
+  state = key(state, keyOf('down'), model);
+  assert.equal(key(state, keyOf('enter'), model).mode, 'detail');
+});
+
+test('a call that wraps lights up whole: golden and underlined on every line, nothing added at the end', () => {
+  const session = parse([
+    rec('user', '发布', 0),
+    call('a1', 'Artifact', { url: 'https://claude.ai/artifact/KoZrtJW4XtTK2fMnYMvqiY/a/very/long/path/that/wraps' }, 1), result('a1', 2),
+    said('好了。', 3, true), done(4, 4000),
+  ]);
+  const model = modelOf(session, { width: 40 });
+  const state = key(update(initialState(), model), keyOf('down'), model);
+  const screen = frame(state, model);
+  const lit = screen.map(line => spans(line)).filter(parts => parts.some(span => span.style?.underline));
+  assert.equal(lit.length, 2, 'Both lines of the address');
+  for (const parts of lit) assert.ok(parts.filter(span => span.style?.underline).every(span => span.style?.fg === 'yellow'));
+  assert.ok(!text(screen).slice(1).some(line => line.includes('⏎')));
+});
+
+test('a prompt reads as it was typed: no list indents; the folded answer runs its opening lines together into one full line', () => {
+  const session = parse([
+    rec('user', '1. 竖线要连起来，而且不要折叠，都展开 2. 方案选L1\n第二行', 0),
+    said('核对过了：\n\n- 竖线连上了\n- 标签换了', 1, true), done(2, 2000),
+  ]);
+  const lines = text(turnBody(ctxOf(modelOf(session, { width: 40 }), 0))).map(line => line.trimEnd());
+  // Each typed line beside the bar, its wrapped part too, none set in under a list number.
+  const words = lines.slice(1, lines.indexOf('') > 0 ? lines.indexOf('') : undefined).filter(line => line.startsWith('┃ '));
+  assert.ok(words.length >= 3);
+  assert.ok(words.every(line => /^┃ \S/.test(line)), words.join('\n'));
+  assert.equal(lines.at(-1), '  核对过了： 竖线连上了 标签换了 ▾');
 });

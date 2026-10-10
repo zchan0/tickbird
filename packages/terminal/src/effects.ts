@@ -1,6 +1,8 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { basename } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, extname, join } from 'node:path';
 
 /**
  * What `o` and `y` do outside the screen. Both only read: `o` opens the file
@@ -48,6 +50,40 @@ export const commandExists = (command: string): boolean => {
 
 /** OSC 52: the terminal puts the text on the clipboard. */
 export const clipboardBytes = (text: string): string => `\x1b]52;c;${Buffer.from(text, 'utf8').toString('base64')}\x1b\\`;
+
+/**
+ * Opens an image in the system's viewer: the bytes the transcript kept, saved
+ * to a temporary file, or else the file it was read from as it is now.
+ */
+export function viewImage(image: { name: string; data?: string; mime?: string; path?: string }, platform = process.platform): string {
+  let path = image.path;
+  if (image.data) {
+    const extension = extname(image.name) || '.' + (image.mime ?? 'image/png').split('/')[1];
+    const directory = join(tmpdir(), 'agent-sidecar');
+    mkdirSync(directory, { recursive: true });
+    path = join(directory, createHash('sha256').update(image.data).digest('hex').slice(0, 12) + '-' + basename(image.name, extname(image.name)) + extension);
+    if (!existsSync(path)) writeFileSync(path, Buffer.from(image.data, 'base64'));
+  }
+  if (!path || !existsSync(path)) return `图片已不存在：${image.path ?? image.name}`;
+  try {
+    spawn(platform === 'darwin' ? 'open' : 'xdg-open', [path], { stdio: 'ignore', detached: true }).on('error', () => undefined).unref();
+    return `已用默认程序打开 ${image.name}${image.data ? '（当时读到的那张）' : ''}`;
+  } catch {
+    return `无法打开图片：${image.name}`;
+  }
+}
+
+/** Opens a web address in the browser, or a local file in its default program. */
+export function openLink(link: { target: string; name: string }, platform = process.platform): string {
+  const web = /^https?:\/\//.test(link.target);
+  if (!web && !existsSync(link.target)) return `文件已不存在：${link.target}`;
+  try {
+    spawn(platform === 'darwin' ? 'open' : 'xdg-open', [link.target], { stdio: 'ignore', detached: true }).on('error', () => undefined).unref();
+    return web ? `已在浏览器打开 ${link.name}` : `已用默认程序打开 ${link.name}`;
+  } catch {
+    return `无法打开：${link.target}`;
+  }
+}
 
 /**
  * Opens a file. A terminal editor takes over the pane until it exits (the

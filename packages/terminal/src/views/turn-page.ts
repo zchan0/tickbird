@@ -95,20 +95,26 @@ const OWNER = new WeakMap<Style, string>();
 const CHIP = new WeakSet<Style>();
 const owned = (style: Style, id: string): Style => { const own = { ...style }; OWNER.set(own, id); return own; };
 
+/** Roughly the hues of the label colours, to tint the background toward. */
+const HUES: Partial<Record<Color, readonly [number, number, number]>> = { blue: [108, 182, 255], green: [63, 185, 80], yellow: [227, 179, 65], red: [244, 112, 103] };
+
 /**
- * A label set in a block of colour: the answer, an approval, your message.
- * Inverse keeps the text in the theme's own background colour, so it reads
- * on any palette.
+ * A label: Prompt, Final Answer, New turn, an approval. Its words in its
+ * colour on a faint wash of that colour, so it sits close to the line under it
+ * without pressing on it. On a terminal whose background is unknown, a block
+ * of colour (inverse keeps the words in the theme's own background colour).
  */
-export function chip(text: string, fg: Color): Span {
-  const style: Style = { fg, inverse: true, bold: true };
+export function chip(text: string, fg: Color, background?: Capabilities['background']): Span {
+  const hue = HUES[fg];
+  const wash = background && hue ? [background.r, background.g, background.b].map((c, i) => Math.round(c + (hue[i] - c) * (background.dark ? 0.18 : 0.22))) as unknown as readonly [number, number, number] : undefined;
+  const style: Style = wash ? { fg, bold: true, bgRgb: wash } : { fg, inverse: true, bold: true };
   CHIP.add(style);
   return { text: ` ${text} `, style };
 }
 
 /** What the session is doing, on the right of the header; nothing while it runs or after it is done. */
-function statusSpans(status: SessionStatus): Span[] {
-  if (status.kind === 'waiting') return [chip('等你批准', 'yellow')];
+function statusSpans(status: SessionStatus, background?: Capabilities['background']): Span[] {
+  if (status.kind === 'waiting') return [chip('Needs approval', 'yellow', background)];
   if (status.kind === 'quiet') return [{ text: '无新记录', style: DIM }];
   if (status.kind === 'ended') return [{ text: '已退出', style: DIM }];
   return [];
@@ -122,14 +128,14 @@ export function headerLines(ctx: PageContext, aside: Span[] = []): Line[] {
   const { session, groups, index, width } = ctx;
   const group = groups[index];
   const narrow = width < 50;
-  const status = statusSpans(ctx.status);
+  const status = statusSpans(ctx.status, ctx.caps.background);
   const right: Span[] = status.length ? [...status, { text: ' ' }] : aside.length ? [...aside, { text: ' ' }] : [];
-  if (!group) return [row([{ text: ' 还没有记录', style: DIM }], right, width)];
+  if (!group) return [row([{ text: ' '.repeat(MARGIN) + '还没有记录', style: DIM }], right, width)];
   const ordinal = group.ordinal ?? index + 1;
   const total = groups.at(-1)?.ordinal ?? groups.length;
   const started = clock(viewOf(group, index === groups.length - 1, session.provider).turn.start);
   const left: Span[] = group.turnId
-    ? [{ text: ' ' }, { text: `第 ${ordinal} 轮`, style: { bold: true } }, { text: ` / 共 ${total} 轮${started ? ` · ${started}${narrow ? '' : ' 开始'}` : ''}`, style: DIM }]
+    ? [{ text: ' '.repeat(MARGIN) }, { text: `第 ${ordinal} 轮`, style: { bold: true } }, { text: ` / 共 ${total} 轮${started ? ` · ${started}${narrow ? '' : ' 开始'}` : ''}`, style: DIM }]
     : [{ text: ' 未归属回合的记录', style: DIM }];
   return [row(left, right, width)];
 }
@@ -137,12 +143,40 @@ export function headerLines(ctx: PageContext, aside: Span[] = []): Line[] {
 const requestText = (item: TimelineItem | undefined, group: TurnGroup): string =>
   plainPasted(item ? publicBody(item) : group.request).trim() || '（未取得本轮请求）';
 
-/** Everything starts one cell in: the request, the agent's words, the kind of each call. */
-const MARGIN = 1;
+/**
+ * Every word on the page starts in this column: the header, the labels' words,
+ * the prompt, the agent's words, the tools, the answer. The prompt's bar and a
+ * label's wash stand to its left; only a call's words are set further in,
+ * hanging from the tree.
+ */
+export const MARGIN = 2;
+/** A label starts a cell before the words, so the words in it line up with them. */
+const labelLead = (): Span => ({ text: ' '.repeat(MARGIN - 1) });
 
-/** The request is the page's title: bold. */
-const requestLines = (text: string, ctx: PageContext): Line[] =>
-  prose(text, ctx.width - 1, { glyph: ch => symbol(ctx.caps, ch), indent: MARGIN, style: { bold: true } });
+/**
+ * The label over a block of words, Prompt or Final Answer: a coloured word on
+ * a line of its own, the words right under it. No wash behind it: a block of
+ * colour presses on the line below, and a blank line between is too much.
+ */
+function heading(text: string, fg: Color): Span[] {
+  const style: Style = { fg, bold: true };
+  CHIP.add(style);
+  return [{ text: ' '.repeat(MARGIN) }, { text, style }];
+}
+
+/**
+ * What you asked, whole, under a Prompt label, a blue bar down its side: set
+ * apart from the agent's words without a rule across the page. Your words
+ * sent during the turn are set the same way.
+ */
+function promptLines(text: string, ctx: PageContext): Line[] {
+  // The bar in the first column, the words in the page's column.
+  const bar: Span[] = [{ text: symbol(ctx.caps, '┃'), style: { fg: 'blue' } }, { text: ' '.repeat(MARGIN - 1) }];
+  // Typed, not written as a document: each line as it was typed, wrapped beside the bar, no list indents.
+  const room = Math.max(8, ctx.width - MARGIN - 1);
+  const words = text.replace(/\r/g, '').split('\n').flatMap(source => source.trim() ? wrapSpans(inlineSpans(source.trimEnd()), room).map(line => [...bar, ...spans(line)]) : [bar.slice(0, 1)]);
+  return [heading('Prompt', 'blue'), ...words];
+}
 
 const base = (path: string) => path.replace(/\\/g, '/').split('/').at(-1) || path;
 
@@ -150,8 +184,8 @@ const base = (path: string) => path.replace(/\\/g, '/').split('/').at(-1) || pat
 function changedLine(view: TurnView, ctx: PageContext): Line[] {
   const files = view.turn.files;
   if (!files.length) return [];
-  const spans: Span[] = [{ text: ' ' }, { text: '改动', style: DIM }];
-  let used = 5, shown = 0;
+  const spans: Span[] = [{ text: ' '.repeat(MARGIN) }, { text: '改动', style: DIM }];
+  let used = MARGIN + 4, shown = 0;
   for (const file of files) {
     const piece = `  ${file.mark} ${base(file.path)}`;
     const rest = files.length - shown - 1;
@@ -347,8 +381,8 @@ export const CALL_LINES = 2;
 interface LineTarget { row: ChapterRow; height: number; from?: number; to?: number }
 /** The calls a line starts. */
 const TARGETS = new WeakMap<object, LineTarget[]>();
-/** The closing answer's line. */
-const ANSWER = new WeakSet<object>();
+/** The closing answer's first line, with how many lines a click on it takes. */
+const ANSWER = new WeakMap<object, number>();
 
 /** What shows on the right of a call: a failure in red, a call still out, the size of a change. */
 function callEnd(chapterRow: ChapterRow, ctx: PageContext, live: boolean, asking: boolean): Span[] {
@@ -388,14 +422,16 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
   const live = view.live || waitingOn;
   const names = rows.map(chapterRow => toolName(chapterRow, ctx));
   const lead = ' '.repeat(MARGIN);
-  // Two cells stay free at the right edge for the ⏎ a selected call ends in.
-  const room = Math.max(8, ctx.width - MARGIN - 2 - 3);
+  // As much room on the right as on the left.
+  const room = Math.max(8, ctx.width - MARGIN - 2 - MARGIN);
   const lines: Line[] = [];
   const push = (line: Span[], targets: LineTarget[]) => {
     const laid = band([line], ctx.width, tint)[0];
     if (targets.length) TARGETS.set(laid as object, targets);
     lines.push(laid);
   };
+  // A line of the band's own above and below: room around the block, where there is a band to show it.
+  if (rows.length && tint) push([], []);
   for (let at = 0; at < rows.length;) {
     let last = at;
     while (last + 1 < rows.length && names[last + 1] === names[at]) last++;
@@ -428,6 +464,7 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
     });
     at = last + 1;
   }
+  if (rows.length && tint) push([], []);
   return lines;
 }
 
@@ -455,11 +492,8 @@ const wordLines = (source: string, ctx: PageContext, style: Style = {}, indent =
 function segmentBlocks(segment: TurnSegment, view: TurnView, ctx: PageContext, waitingOn: boolean): Line[][] {
   if (segment.kind === 'answer') return [wordLines(publicBody(segment.item), ctx)];
   if (segment.kind === 'interjection') {
-    // Your own words sent during the turn, after a label of their own.
-    const you = chip('你', 'blue');
-    const lines = wordLines(publicBody(segment.item), ctx, {}, MARGIN + textWidth(you.text) + 1);
-    if (lines.length) lines[0] = withLead(lines[0], [{ text: ' '.repeat(MARGIN) }, you, { text: ' ' }]);
-    return [lines];
+    // Your own words sent during the turn: a prompt too.
+    return [promptLines(publicBody(segment.item), ctx)];
   }
   const { chapter } = segment;
   // The words, then the calls they explain, a blank line between: the calls are a block of their own.
@@ -472,18 +506,18 @@ function segmentBlocks(segment: TurnSegment, view: TurnView, ctx: PageContext, w
 function answerLines(view: TurnView, ctx: PageContext): Line[] {
   const text = view.answers.map(segment => segment.kind === 'answer' ? publicBody(segment.item) : '').filter(Boolean).join('\n\n');
   const lead: Span[] = [{ text: ' '.repeat(MARGIN) }];
-  if (!text) return view.turn.aborted ? [[...lead, chip('中断', 'red')]] : [];
-  const label = chip('答复', 'green');
+  if (!text) return view.turn.aborted ? [[labelLead(), chip('Interrupted', 'red', ctx.caps.background)]] : [];
+  // As the prompt is: the label over the answer; folded, one full line of it and a ▾ to open it.
+  const head = heading('Final Answer', 'green');
   if (ctx.answerOpen) {
-    const head = [...lead, label];
-    ANSWER.add(head);
-    return [head, [], ...wordLines(text, ctx)];
+    ANSWER.set(head, 1);
+    return [head, ...wordLines(text, ctx)];
   }
-  const firstText = text.split(/\n/).map(line => line.trim()).find(Boolean) ?? '';
-  const flat = inlineSpans(firstText.replace(/^#+\s*|^[-*]\s+|^\d+\.\s+/, ''));
-  const line = cutLine([...lead, label, { text: ' ' }, ...flat, ...(text.trim() !== firstText ? [{ text: ' …', style: DIM }] : [])], ctx.width);
-  ANSWER.add(line);
-  return [line];
+  // Its opening lines run together, marks of headings and lists dropped, so the line is full.
+  const flat = text.split(/\n/).map(line => line.trim().replace(/^#+\s*|^[-*]\s+|^\d+\.\s+|^>\s*/, '')).filter(Boolean).join(' ');
+  const open: Span = { text: ' ' + symbol(ctx.caps, '▾'), style: { dim: true, bold: true } };
+  ANSWER.set(head, 2);
+  return [head, [...cutLine([...lead, ...inlineSpans(flat)], ctx.width - 2 - MARGIN), open]];
 }
 
 /** The end of the turn: waiting on you, no word for a while, or the answer it closed with. While it runs, nothing. */
@@ -493,7 +527,7 @@ function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
   if (latest && status.kind === 'waiting') {
     const what = [status.approval.tool, /^\/.+\/[^/]+$/.test(status.approval.summary) ? status.approval.summary.split('/').at(-1)! : status.approval.summary].filter(Boolean);
     return [
-      cutLine([lead, chip('等你批准', 'yellow'), ...(what.length ? [{ text: ' ' + what[0], style: { bold: true } }, ...(what[1] ? [{ text: ' · ' + what[1].replace(/\s+/g, ' ') }] : [])] : [])], ctx.width),
+      cutLine([labelLead(), chip('Needs approval', 'yellow', ctx.caps.background), ...(what.length ? [{ text: ' ' + what[0], style: { bold: true } }, ...(what[1] ? [{ text: ' · ' + what[1].replace(/\s+/g, ' ') }] : [])] : [])], ctx.width),
       cutLine([lead, { text: `在 ${providerName(ctx.session.provider)} 里选择批准或拒绝。`, style: DIM }], ctx.width),
     ];
   }
@@ -504,32 +538,16 @@ function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
 }
 
 /**
- * Marks the call or answer under the cursor or the pointer as a link does:
- * golden yellow, and its first line ends in a ⏎, the key that opens it.
- * `owner` is the call's id; without one the line is the answer's.
+ * Marks the call or the answer under the cursor or the pointer as a link is
+ * marked: golden yellow and underlined, every line of it at once. `owner` is
+ * the call's id; without one the line is the answer's, and all its words are.
  */
-export function markSelected(line: Line, caps: Pick<Capabilities, 'symbols' | 'background'>, width: number, first: boolean, owner?: string): Line {
-  const gold = (span: Span): Span => ({ ...span, style: { ...span.style, ...YELLOW, dim: false } });
-  const answer = ANSWER.has(line as object);
-  const marked = spans(line).map(span => {
+export function markSelected(line: Line, owner?: string): Line {
+  return spans(line).map(span => {
     const style = span.style;
-    const mine = owner !== undefined ? Boolean(style && OWNER.get(style) === owner) : answer && Boolean(span.text.trim()) && !(style && CHIP.has(style));
-    return mine ? gold(span) : span;
+    const mine = owner !== undefined ? Boolean(style && OWNER.get(style) === owner) : Boolean(span.text.trim()) && !(style && CHIP.has(style));
+    return mine ? { ...span, style: { ...style, ...YELLOW, dim: false, underline: true } } : span;
   });
-  if (!first) return marked;
-  // ⏎ takes two cells at the right edge: from the blank at the end, else from the gap before the outcome.
-  const tint = marked.find(span => span.style?.bgRgb)?.style?.bgRgb;
-  const enter: Span[] = [{ text: symbol(caps, '⏎'), style: { ...YELLOW, bold: true } }, { text: ' ' }];
-  const blank = (span: Span | undefined) => Boolean(span && span.text.length && !span.text.trim());
-  const body = blank(marked.at(-1)) && marked.at(-1)!.text.length < 3 ? marked.slice(0, -1) : marked;
-  const gap = body.map((span, index) => index > 0 && blank(span) && span.text.length >= 3).lastIndexOf(true);
-  if (gap > 0 && gap < body.length - 1) {
-    const room = textWidth(plainText(body)) + 2 - width;
-    const shrunk = [...body.slice(0, gap), { ...body[gap], text: ' '.repeat(body[gap].text.length - Math.max(0, room)) }, ...body.slice(gap + 1), { text: ' ' }, ...enter];
-    return band([shrunk], width, tint)[0];
-  }
-  const left = blank(marked.at(-1)) ? marked.slice(0, -1) : marked;
-  return band([row(left, enter, width)], width, tint)[0];
 }
 
 /** A call or the answer on the page: its first line, how many lines it takes, and its cells when it shares the line. */
@@ -542,7 +560,8 @@ export function turnLayout(ctx: PageContext): { lines: Line[]; targets: CallTarg
   lines.forEach((line, index) => {
     if (typeof line !== 'object') return;
     for (const target of TARGETS.get(line) ?? []) targets.push({ line: index, ...target });
-    if (ANSWER.has(line)) targets.push({ line: index, height: 1, answer: true });
+    const answer = ANSWER.get(line);
+    if (answer) targets.push({ line: index, height: answer, answer: true });
   });
   return { lines, targets };
 }
@@ -561,10 +580,10 @@ export function turnBody(ctx: PageContext): Line[] {
   const going = latest && (ctx.status.kind === 'running' || waitingOn);
   // A finished turn's closing answer folds to one line; an open turn shows everything so far.
   const closed = !(latest && (view.live || waitingOn));
-  const blocks: Line[][] = [[...requestLines(requestText(view.turn.request, group), ctx), ...changedLine(view, ctx)]];
+  const blocks: Line[][] = [[...promptLines(requestText(view.turn.request, group), ctx), ...changedLine(view, ctx)]];
   for (const segment of closed ? view.process : view.turn.segments) blocks.push(...segmentBlocks(segment, view, ctx, waitingOn));
-  // On screen in the agent, not yet in the transcript: faint until the record arrives.
-  if (latest && ctx.extras.draft && going) blocks.push(wordLines(ctx.extras.draft, ctx, { dim: true, italic: true }));
+  // On screen in the agent, not yet in the transcript: set as the words will be, so nothing changes when the record arrives.
+  if (latest && ctx.extras.draft && going) blocks.push(wordLines(ctx.extras.draft, ctx));
   blocks.push(tailLines(view, latest, ctx));
   return blocks.filter(block => block.length).flatMap((block, index) => index ? [[], ...block] : block);
 }

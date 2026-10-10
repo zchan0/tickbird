@@ -5,10 +5,10 @@ import { symbol, type Capabilities } from './caps';
 import type { InputEvent } from './input';
 import { cutLine, row, spans, type Line, type Span } from './screen';
 import { contentsEntries, contentsLines, contentsOffset, ENTRY_LINES } from './views/contents';
-import { detailDoc, type DetailDoc } from './views/detail';
+import { callLink, detailDoc, recordedImage, type DetailDoc, type RecordedImage } from './views/detail';
 import { wrapSpans } from './views/prose';
 import { textWidth } from './width';
-import { chip, headerLines, markSelected, viewOf, providerName, turnLayout, type CallTarget, type PageContext, type SessionStatus } from './views/turn-page';
+import { MARGIN, chip, headerLines, markSelected, viewOf, providerName, turnLayout, type CallTarget, type PageContext, type SessionStatus } from './views/turn-page';
 
 /**
  * The watch pane's state and what each key does to it. No I/O here: the
@@ -28,7 +28,7 @@ export interface Model {
   focusAgent?: boolean;
 }
 
-export type Effect = { kind: 'open'; path: string; line?: number } | { kind: 'copy'; text: string; what: string } | { kind: 'focus' };
+export type Effect = { kind: 'open'; path: string; line?: number } | { kind: 'copy'; text: string; what: string } | { kind: 'focus' } | { kind: 'view'; image: RecordedImage } | { kind: 'link'; link: { target: string; name: string } };
 
 export interface AppState {
   mode: 'turn' | 'contents' | 'help' | 'detail';
@@ -42,8 +42,8 @@ export interface AppState {
   selected: number;
   /** Selected call on the turn page, by position: calls only ever append. */
   call?: number;
-  /** The open detail: its first line on screen and which change of the file. */
-  detail?: { scroll: number; edit?: number };
+  /** The open detail: its first line on screen, which change of the file, and whether a click opened it. */
+  detail?: { scroll: number; edit?: number; clicked?: boolean };
   /** A turn that started while an older one was on screen. */
   notice?: number;
   /** Turns known at the last update, to see a new one start. */
@@ -112,6 +112,24 @@ function entriesOf(model: Model): ReturnType<typeof contentsEntries> {
 }
 export const body = (state: AppState, model: Model): Line[] => layout(state, model).lines;
 const bottom = (state: AppState, model: Model) => Math.max(0, body(state, model).length - bodyHeight(state, model));
+
+/**
+ * What some calls open instead of a detail: an image it read, in the
+ * system's viewer; a call that points somewhere, at that place. A page of a
+ * path or an address would say nothing.
+ */
+const openHint = (model: Model, target: CallTarget): string => {
+  const effect = openTarget(model, target);
+  return effect?.kind === 'view' ? '⏎ 打开图片' : effect?.kind === 'link' ? (/^https?:/.test(effect.link.target) ? '⏎ 打开链接' : '⏎ 打开文件') : '⏎ 详情';
+};
+
+function openTarget(model: Model, target: CallTarget | undefined): Effect | undefined {
+  if (!target?.row) return undefined;
+  const image = recordedImage(model.session, target.row);
+  if (image) return { kind: 'view', image };
+  const link = callLink(model.session, target.row);
+  return link ? { kind: 'link', link } : undefined;
+}
 
 const DETAILS = new WeakMap<TurnGroup[], { key: string; value: DetailDoc | undefined }>();
 /**
@@ -244,7 +262,8 @@ function detailKey(state: AppState, name: string, model: Model): AppState {
   };
   switch (name) {
     case 'q': return { ...state, quit: true };
-    case 'escape': { const next: AppState = { ...state, mode: 'turn' }; delete next.detail; return next; }
+    // Back from a detail a click opened, nothing stays selected; from one opened with the keys, the call stays to move on from.
+    case 'escape': { const next: AppState = { ...state, mode: 'turn' }; delete next.detail; if (state.detail?.clicked) delete next.call; return next; }
     case 'up': case 'k': return scroll(detail.scroll - 1);
     case 'down': case 'j': return scroll(detail.scroll + 1);
     case 'space': case 'pagedown': return scroll(detail.scroll + height - 1);
@@ -301,7 +320,7 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
       return scrollTo({ ...state, pointer: { x: event.x, y: event.y }, ...(delta < 0 ? { follow: false } : {}) }, model, state.scroll + delta);
     }
     if (event.action !== 'press') return state;
-    if (state.mode === 'detail') return event.y === 1 && event.x <= 8 ? detailKey(state, 'escape', model) : state;
+    if (state.mode === 'detail') return event.y === 1 && event.x <= MARGIN + 7 ? detailKey(state, 'escape', model) : state;
     if (state.mode === 'turn' && event.y === 1) return { ...state, mode: 'contents', selected: state.index };
     // The line saying a new turn started takes you there: a click works whatever the input method.
     if (state.mode === 'turn' && state.notice !== undefined && event.y === HEADER + bodyHeight(state, model) + 1) return showTurn(state, model, state.notice);
@@ -312,7 +331,9 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
       if (at < 0) return state;
       const selected = selectCall(state, model, at, targets);
       if (targets[at].answer) return { ...selected, answerOpen: !state.answerOpen };
-      return { ...selected, mode: 'detail', detail: { scroll: 0 } };
+      const image = openTarget(model, targets[at]);
+      if (image) { const { call: _, ...rest } = selected; return { ...rest, effect: image }; }
+      return { ...selected, mode: 'detail', detail: { scroll: 0, clicked: true } };
     }
     if (state.mode === 'contents' && event.y > HEADER) {
       const entries = entriesOf(model);
@@ -356,6 +377,8 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
     case 'enter': {
       if (state.call === undefined) return state;
       if (targets()[state.call]?.answer) return { ...state, answerOpen: !state.answerOpen };
+      const image = openTarget(model, targets()[state.call]);
+      if (image) return { ...state, effect: image };
       return { ...state, mode: 'detail', detail: { scroll: 0 } };
     }
     case 'escape': { const next = { ...state }; delete next.call; return next; }
@@ -399,11 +422,11 @@ function detailFrame(state: AppState, model: Model): Line[] {
   const doc = openDetail(state, model);
   const lines: Line[] = [];
   if (!doc) {
-    lines.push(row([dim(' ← Esc')], '', width), [], [dim('   这个调用没有可显示的记录。')]);
+    lines.push(row([dim(' '.repeat(MARGIN) + '← Esc')], '', width), [], [dim(' '.repeat(MARGIN) + '这个调用没有可显示的记录。')]);
   } else {
-    lines.push(row([dim(' ← Esc  '), { text: doc.title, style: { bold: true } }], [dim(doc.meta + ' ')], width));
+    lines.push(row([dim(' '.repeat(MARGIN) + '← Esc  '), { text: doc.title, style: { bold: true } }], [dim(doc.meta + ' ')], width));
     const link = doc.path && model.caps.links ? `file://${doc.path}` : undefined;
-    const path: Span[] = doc.directory !== undefined ? [dim(' ' + doc.directory), { text: doc.title, style: { underline: Boolean(link), ...(link ? { link } : {}) } }] : [];
+    const path: Span[] = doc.directory !== undefined ? [dim(' '.repeat(MARGIN) + doc.directory), { text: doc.title, style: { underline: Boolean(link), ...(link ? { link } : {}) } }] : [];
     // What this detail can do, on the right of its path; what does not fit is on the help page.
     const room = width - 2 - (path.length ? Math.min(textWidth(path.map(span => span.text).join('')), Math.floor(width / 2)) + 2 : 0);
     const keys = fitKeys([doc.path ? 'o 打开' : '', `y 复制${doc.copy.what}`, doc.edits ? '< > 切换修改' : '', '? 按键'], room);
@@ -442,7 +465,7 @@ export function frame(state: AppState, model: Model): Line[] {
   if (state.mode === 'detail') return detailFrame(state, model);
   if (state.mode === 'contents') {
     const entries = entriesOf(model);
-    lines.push(row([{ text: ' ' }, { text: '目录', style: { bold: true } }, dim(`  共 ${model.groups.length} 轮`)], [dim(fitKeys(['⏎ 打开', 'Esc 返回'], width - 12) + ' ')], width), []);
+    lines.push(row([{ text: ' '.repeat(MARGIN) }, { text: '目录', style: { bold: true } }, dim(`  共 ${model.groups.length} 轮`)], [dim(fitKeys(['⏎ 打开', 'Esc 返回'], width - 12) + ' ')], width), []);
     const list = contentsLines(entries, state.selected, width, model.caps);
     const top = contentsScroll(state, model);
     lines.push(...list.slice(top, top + height - HEADER));
@@ -450,9 +473,9 @@ export function frame(state: AppState, model: Model): Line[] {
     return lines;
   }
   if (state.mode === 'help') {
-    lines.push(row([{ text: ' ' }, { text: '按键', style: { bold: true } }], [dim('Esc 返回 ')], width), []);
-    for (const [keys, what] of HELP.filter(([keys]) => keys !== 'a' || model.focusAgent)) lines.push(cutLine([{ text: '   ' + keys.padEnd(12) }, dim(what)], width));
-    lines.push([], cutLine([dim('   只读：按键只用来阅读和跳转，不会向 Agent 输入任何东西。')], width));
+    lines.push(row([{ text: ' '.repeat(MARGIN) }, { text: '按键', style: { bold: true } }], [dim('Esc 返回 ')], width), []);
+    for (const [keys, what] of HELP.filter(([keys]) => keys !== 'a' || model.focusAgent)) lines.push(cutLine([{ text: ' '.repeat(MARGIN) + keys.padEnd(12) }, dim(what)], width));
+    lines.push([], cutLine([dim(' '.repeat(MARGIN) + '只读：按键只用来阅读和跳转，不会向 Agent 输入任何东西。')], width));
     while (lines.length < height) lines.push([]);
     return lines.slice(0, height);
   }
@@ -462,7 +485,7 @@ export function frame(state: AppState, model: Model): Line[] {
   // The header says what a key does now: open what is selected, pick up following again, find the keys.
   const paused = !state.follow && state.index === model.groups.length - 1;
   const what = selected ?? pointed;
-  const aside = fitKeys([what ? (what.answer ? (state.answerOpen ? '⏎ 收起' : '⏎ 展开') : '⏎ 详情') : '', paused ? '已暂停跟随 · G' : '', '? 按键'], Math.max(0, width - 30));
+  const aside = fitKeys([what ? (what.answer ? (state.answerOpen ? '⏎ 收起' : '⏎ 展开') : openHint(model, what)) : '', paused ? '已暂停跟随 · G' : '', '? 按键'], Math.max(0, width - 30));
   lines.push(...headerLines(ctx, aside ? [dim(aside)] : []), []);
   const on = (target: CallTarget | undefined, at: number) => target !== undefined && at >= target.line && at < target.line + target.height;
   const visible = page.slice(state.scroll, state.scroll + bodyHeight(state, model)).map((line, index) => {
@@ -470,7 +493,7 @@ export function frame(state: AppState, model: Model): Line[] {
     // The selection first; the pointer brings up another call that shares the line too.
     let marked = line;
     for (const target of [selected, pointed !== selected ? pointed : undefined]) {
-      if (target && on(target, at)) marked = markSelected(marked, model.caps, width, at === target.line && marked === line, target.row?.id);
+      if (target && on(target, at)) marked = markSelected(marked, target.row?.id);
     }
     return marked;
   });
@@ -480,7 +503,7 @@ export function frame(state: AppState, model: Model): Line[] {
     const group = model.groups[state.notice];
     const request = (group?.request ?? '').replace(/\s+/g, ' ');
     // Set as the answer is, a label in a block of colour: 新一轮, then what was asked. A click or ] goes there.
-    lines.push(cutLine([{ text: ' ' }, chip('新一轮', 'yellow'), dim(request ? ' ' + request : '')], width));
+    lines.push(cutLine([{ text: ' '.repeat(MARGIN - 1) }, chip('New turn', 'yellow', model.caps.background), dim(request ? ' ' + request : '')], width));
   }
   return withMessage(lines.slice(0, height), state, model);
 }

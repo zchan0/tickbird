@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, statSync, watch as watchFiles } from 'node:fs';
 import { resolve } from 'node:path';
 import type { SessionCandidate } from '../../core/src/model';
 import { discoverSessions } from '../../core/src/sessions';
@@ -12,7 +12,7 @@ import type { Capabilities } from './caps';
 import { describe, InputParser } from './input';
 import { enterBytes, leaveBytes, row, Screen, type Line } from './screen';
 import { frame, initialState, key, pointerGone, pointerRest, update, windowTitle, type AppState, type Effect, type Model } from './app';
-import { clipboardBytes, openFile } from './effects';
+import { clipboardBytes, openFile, openLink, viewImage } from './effects';
 import { sessionStatus, viewOf } from './views/turn-page';
 import { prose } from './views/prose';
 
@@ -153,6 +153,8 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
   };
   const perform = (effect: Effect) => {
     if (effect.kind === 'focus') { focusAgent(); return; }
+    if (effect.kind === 'view') { say(viewImage(effect.image), 4000); return; }
+    if (effect.kind === 'link') { say(openLink(effect.link), 4000); return; }
     if (effect.kind === 'copy') {
       // OSC 52 only where the terminal says it takes it; otherwise the text is shown to copy by hand.
       if (caps.clipboard) { out.write(clipboardBytes(effect.text)); say(`已复制${effect.what}`); }
@@ -236,10 +238,19 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
   await follow();
   draw();
   // The state files and the running clock change without a transcript write.
-  setInterval(async () => {
+  const refresh = async () => {
     states = await readSessionStates(stateDir, undefined, cache).catch(() => states);
     if (agent && !alive(agent)) finish();
     await follow();
     draw();
-  }, STATE_POLL_MS);
+  };
+  setInterval(() => { void refresh(); }, STATE_POLL_MS);
+  // The agent's words arrive in the state files a piece at a time: show each piece as it lands, not on the next second.
+  let soon: NodeJS.Timeout | undefined;
+  try {
+    watchFiles(stateDir, { persistent: false }, () => {
+      if (soon) return;
+      soon = setTimeout(() => { soon = undefined; void refresh(); }, 30);
+    }).on('error', () => undefined);
+  } catch { /* No watching here: the second's poll still comes. */ }
 }

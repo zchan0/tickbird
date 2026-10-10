@@ -325,6 +325,47 @@ export function detailDoc({ session, group, row, width, glyph, edit, background 
   };
 }
 
+/** An image a call read, as the transcript kept it: its bytes where recorded, else the path it was read from. */
+export interface RecordedImage { name: string; data?: string; mime?: string; path?: string }
+
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|svg)$/i;
+
+/**
+ * The image a call only read, to open in the system's viewer rather than as
+ * a page of its path: the bytes of the time when the transcript has them.
+ */
+export function recordedImage(session: SessionData, row: ChapterRow): RecordedImage | undefined {
+  if (row.output || !/^(Read|view_image|view|NotebookRead)$/i.test(row.tool)) return undefined;
+  const evidence = resolveOutlineEvidence(session, row.id, row.items[0]);
+  const records = evidence ? evidence.items ?? [evidence.item] : row.items;
+  const input = records.flatMap(record => recordedToolInputs(record)).map(call => call.input as Record<string, unknown>)[0] ?? {};
+  const path = [input.file_path, input.path].find((value): value is string => typeof value === 'string');
+  const block = records.flatMap(record => record.detail?.blocks ?? []).find(candidate => candidate.kind === 'image' && candidate.data);
+  if (block?.data) return { name: base(path ?? `image.${(block.mime ?? 'image/png').split('/')[1]}`), data: block.data, ...(block.mime ? { mime: block.mime } : {}), ...(path ? { path: absolute(path, session) } : {}) };
+  return path && IMAGE_FILE.test(path) ? { name: base(path), path: absolute(path, session) } : undefined;
+}
+
+/** Calls whose detail says what a link could not: the file as read, the diff, the command and its output, the results. */
+const HAS_DETAIL = /^(Read|view|view_image|NotebookRead|Edit|MultiEdit|Write|NotebookEdit|apply_patch|edit_file|write_file|Bash|exec_command|shell|local_shell|BashOutput|KillShell|Terminal|Script|Grep|Glob|LS|WebSearch|Web|WEB|WebFind|ToolSearch|Ask|AskUserQuestion|Agent|Task|TodoWrite|Skill)$/i;
+const URL_AT = /https?:\/\/[^\s"'<>)\]]+/;
+
+/**
+ * Where a call points, to open instead of a page about it: the first web
+ * address in what the call shows, in its input, or in what came back; else a
+ * local file it was given. Calls with a detail of their own keep it.
+ */
+export function callLink(session: SessionData, row: ChapterRow): { target: string; name: string } | undefined {
+  if (row.output || HAS_DETAIL.test(row.tool)) return undefined;
+  const evidence = resolveOutlineEvidence(session, row.id, row.items[0]);
+  const records = evidence ? evidence.items ?? [evidence.item] : row.items;
+  const input = records.flatMap(record => recordedToolInputs(record)).map(call => (call.input ?? {}) as Record<string, unknown>)[0] ?? {};
+  const returned = records.flatMap(record => presentEvidence(record).outputs.map(block => block.text ?? '')).join('\n');
+  const url = [row.label, typeof input.url === 'string' ? input.url : '', returned].map(text => URL_AT.exec(text)?.[0]).find(Boolean);
+  if (url) return { target: url.replace(/[.,;:]+$/, ''), name: url.replace(/^https?:\/\//, '').split(/[/?#]/)[0] };
+  const path = [input.file_path, input.path].find((value): value is string => typeof value === 'string' && value.startsWith('/'));
+  return path ? { target: path, name: base(path) } : undefined;
+}
+
 /** Width check helper for tests and the app: the widest line in cells. */
 export const widest = (lines: Line[]): number => Math.max(0, ...lines.map(line => textWidth(plainText(line))));
 
