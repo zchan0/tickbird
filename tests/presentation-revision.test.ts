@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import { groupSessionTurns } from '../packages/core/src/timeline';
+import { turnView } from '../packages/core/src/turn-view';
 import { presentationCases } from './fixtures/presentation-cases';
 import { renderDetail, renderInlineEvidence, renderSidecar, projectSidecar, type TurnRenderCache } from '../packages/vscode/src/render';
 import { execCommandHint, recordedToolInputs } from '../packages/core/src/actions';
@@ -26,17 +28,18 @@ test('Bash occurrences remain sequential rows; each opens exactly its own call a
   }
 });
 
-test('nested identical Bash occurrences are not deduplicated and shared output appears once as its own row', () => {
+test('nested identical Bash occurrences are not deduplicated; the shared output is one record, never copied onto each call', () => {
   const data = sample('wrapper');
   data.items[1].detail!.blocks[0].text = 'await tools.exec_command({cmd:"a"}); await tools.exec_command({cmd:"b"}); await tools.exec_command({cmd:"a"});';
   const document = new JSDOM(renderSidecar({ projectName: 'fixture', session: data, nonce: 'fixture' })).window.document;
   const steps = [...document.querySelectorAll<HTMLElement>('.crow-item:has(.crow[data-tool="Bash"])')];
   assert.equal(steps.length, 3);
   assert.equal(new Set(steps.map(node => node.dataset.observationKey)).size, 3);
-  const outputs = document.querySelectorAll<HTMLElement>('.crow[data-tool="OUT"]');
+  // As in the terminal, the shared output takes no row: it is a record of the calls.
+  assert.equal(document.querySelectorAll('.crow').length, 3);
+  const outputs = turnView(groupSessionTurns(data)[0], false, data.provider).rows.filter(row => row.output);
   assert.equal(outputs.length, 1, 'One shared wrapper output, never copied onto each call');
-  const shared = resolveOutlineEvidence(data, outputs[0].dataset.itemId!)!;
-  assert.equal(shared.role, 'output');
+  assert.equal(resolveOutlineEvidence(data, outputs[0].id)!.role, 'output');
 });
 
 test('no-output action has no unknown-status boilerplate, no output row and still opens its input', () => {
@@ -90,14 +93,16 @@ test('exec command hint is syntax only, never evaluates expressions, branches, c
   const item = sample('opaque').items[1];
   assert.deepEqual(recordedToolInputs(item), [{ name: 'exec', input: source }]);
   const document = doc('opaque');
-  assert.equal(document.querySelector('.crow .ctool')!.textContent, 'Script');
+  assert.equal(document.querySelector('.crun .ctool')!.textContent, 'Script');
   assert.equal(document.querySelector('.crow .clabel')!.textContent, '调用 Bash · 动态参数');
 });
 
-test('Write shows short filenames and only a file opens a separate recorded diff', () => {
+test('a file change shows its short filename and size, and only a file opens a separate recorded diff', () => {
   const data = sample('file-event'), document = doc('file-event');
-  const file = document.querySelector<HTMLButtonElement>('.crow[data-tool="Write"]')!;
-  assert.equal(file.querySelector('.ctool')!.textContent, 'Write');
+  // A change that patched a file is an Edit, as in the terminal; its size follows its name.
+  const file = document.querySelector<HTMLButtonElement>('.crow[data-tool="Edit"]')!;
+  assert.equal(file.closest('.crun')!.querySelector('.ctool')!.textContent, 'Edit');
+  assert.equal(file.querySelector('.csize')!.textContent, '+1-1');
   assert.equal(file.querySelector('.clabel')!.textContent, 'model.ts');
   const evidence = resolveOutlineEvidence(data, file.dataset.itemId!)!;
   assert.equal(evidence.item.detail!.blocks[0].label, 'packages/core/src/model.ts');

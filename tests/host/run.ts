@@ -278,12 +278,12 @@ export async function run() {
         };
         await until(() => api.session?.id === 'cl-fixture', 'Followed the window\'s current session');
         await line({ e: 'approval', tool: 'Write', summary: '/fixture/numbers.txt' });
-        await until(() => deliveries.some(message => message.type === 'observation' && message.turns.some((turn: any) => turn.html.includes('等你批准') && turn.html.includes('Write numbers.txt'))),
+        await until(() => deliveries.some(message => message.type === 'observation' && message.turns.some((turn: any) => turn.html.includes('Needs approval') && turn.html.includes('<b>Write</b> · numbers.txt'))),
           'The approval reached the newest turn');
         // The agent moved on: a newer transcript record answers the approval (the hooks report no turns).
         await appendFile(claude.file, JSON.stringify({ type: 'assistant', uuid: 'host-after-approval', sessionId: 'cl-fixture', timestamp: new Date(Date.now() + 1).toISOString(),
           message: { role: 'assistant', content: [{ type: 'text', text: 'Approval handled.' }] } }) + '\n');
-        await until(() => deliveries.filter(message => message.type === 'observation').at(-1)?.turns.every((turn: any) => !turn.html.includes('等你批准')), 'The answered approval is gone');
+        await until(() => deliveries.filter(message => message.type === 'observation').at(-1)?.turns.every((turn: any) => !turn.html.includes('Needs approval')), 'The answered approval is gone');
         result.followDelivery = { observations: deliveries.filter(message => message.type === 'observation').length };
       } finally { webview.postMessage = originalPost; }
     });

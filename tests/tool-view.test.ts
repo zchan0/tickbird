@@ -36,7 +36,7 @@ test('quoted text, dynamic shell, unknown options and compound writes never beco
 test('namespaced CUA input follows the real Codex adapter, keeps JavaScript highlighting and does not duplicate protocol names', () => {
   const data = parseCodex({ file: '/synthetic/cua.jsonl', projectPath: '/synthetic', text: JSON.stringify({ type: 'response_item', payload: { type: 'function_call', namespace: 'mcp__cua_repl', name: 'js', call_id: 'cua', arguments: JSON.stringify({ title: '检查浏览器', code: 'await tab.getState();' }) } }) });
   const html = new JSDOM(renderSidecar({ projectName: 'test', session: data, nonce: 'test' })).window.document;
-  assert.equal(html.querySelector('.crow .ctool')!.textContent, 'Computer');
+  assert.equal(html.querySelector('.crun .ctool')!.textContent, 'Computer');
   assert.equal(html.querySelector('.crow .clabel')!.textContent, '检查浏览器');
   const evidence = new JSDOM(renderDetail({ item: data.items.find(item => item.kind === 'tool')!, provider: 'codex', kept: false, nonce: 'test' })).window.document;
   assert.equal(evidence.querySelector('[data-io="input"] code')!.textContent, 'await tab.getState();');
@@ -94,8 +94,8 @@ test('mixed wrapper input semantics never allocate its shared result to individu
   assert.equal(presentEvidence(item).outputs.length, 1);
   const data = sample(); data.items = [data.items[0], item];
   const document = new JSDOM(renderSidecar({ projectName: 'test', session: data, nonce: 'test' })).window.document;
-  assert.equal(document.querySelectorAll('.crow[data-tool="OUT"]').length, 1, 'One shared output row');
-  assert.deepEqual([...document.querySelectorAll('.crow')].map(node => node.getAttribute('data-tool')), ['Instructions', 'Goal', 'Computer', 'OUT']);
+  // As in the terminal, a shared output is a record of the calls, not a step: it opens from them and takes no row.
+  assert.deepEqual([...document.querySelectorAll('.crow')].map(node => node.getAttribute('data-tool')), ['Instructions', 'Goal', 'Computer']);
 });
 
 test('lens body comes from the full request rather than a truncated summary', () => {
@@ -105,5 +105,5 @@ test('lens body comes from the full request rather than a truncated summary', ()
   assert.equal(preview.querySelector('.turn-lens-title'), null);
   assert.ok(preview.querySelector('.turn-lens-request')!.textContent!.startsWith('优化工具展示。'));
   assert.ok(preview.querySelector('.turn-lens-request')!.textContent!.includes('超过三行的部分'));
-  assert.ok(!doc.querySelector('.turn-lens')!.getAttribute('aria-label')!.includes('附近'));
+  assert.ok(!doc.querySelector('.toc')!.getAttribute('aria-label')!.includes('附近'));
 });

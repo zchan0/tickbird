@@ -1,6 +1,8 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Provider, SessionData, TimelineItem } from '../packages/core/src/model';
 import { actionRows, actionRowSections, outlineTurn, resolveOutlineEvidence, visibleTurnGroups } from '../packages/core/src/outline';
 import { groupSessionTurns } from '../packages/core/src/timeline';
@@ -95,6 +97,9 @@ function scriptFixture(options: { detail?: boolean; state?: Record<string, unkno
     addEventListener(type: string, handler: () => void) { this.listeners.set(type, handler); }
     setAttribute(name: string, value: string) { this.attributes.set(name, value); }
     getAttribute(name: string) { return this.attributes.get(name) ?? null; }
+    hasAttribute(name: string) { return this.attributes.has(name); }
+    removeAttribute(name: string) { this.attributes.delete(name); }
+    toggleAttribute(name: string, force?: boolean) { const on = force ?? !this.attributes.has(name); if (on) this.attributes.set(name, ''); else this.attributes.delete(name); return on; }
     querySelector(selector: string) { return selector === 'summary' ? summaries.find(summary => summary.parent === this) ?? null : null; }
     getBoundingClientRect() { return this.rect ?? { right: 19, top: 49 + this.offsetTop - turnMap.scrollTop, height: this.offsetHeight }; }
     focus(value: { preventScroll?: boolean }) {
@@ -166,7 +171,8 @@ function scriptFixture(options: { detail?: boolean; state?: Record<string, unkno
       if (options.detail || selector === '[data-text-id]' || selector === '[data-inline-id]' || selector === 'details[data-fold]') return [];
       if (selector === 'button[data-item-id]') return [earlierNode, node, contextNode];
       if (selector === 'button[data-turn-id]') return nav;
-      if (selector === 'button[data-lens-turn-id]') return lensNav;
+      if (selector === 'button[data-lens-turn-id]' || selector === '.toc button[data-lens-turn-id]') return lensNav;
+      if (selector === '[data-turn-total]' || selector === '.cspin' || selector.startsWith('[data-nav=')) return [];
       if (selector === '[data-turn-panel]' || selector === '.turn-panel[data-turn-panel]' || selector === 'section[data-turn-panel]') return panels;
       if (selector === 'details[data-action-group]') return [...backgrounds, ...actionFolds];
       if (selector === 'summary[data-action-group]') return [...summaries, ...actionSummaries];
@@ -207,7 +213,7 @@ function scriptFixture(options: { detail?: boolean; state?: Record<string, unkno
     });
   }
   runInNewContext(source, {
-    Element: FixtureElement, document,
+    Element: FixtureElement, document, setInterval: () => 0,
     window: { innerWidth: options.viewport?.width ?? 300, innerHeight: options.viewport?.height ?? 700, addEventListener: (type: string, listener: (event: any) => void) => windowHandlers.set(type, listener) },
     acquireVsCodeApi: () => ({ getState: () => saved,
       setState: (value: Record<string, unknown>) => { saved = JSON.parse(JSON.stringify(value)); },
@@ -275,13 +281,12 @@ test('session navigation and all visible turn groups run newest first without re
   ]);
   const html = renderSidecar({ projectName: 'project', session: data, nonce });
   assert.match(html, /data-session-id="codex:session-1"/);
-  assert.match(html, /<h1[^>]*class="session-title"[^>]*>核对预览行为<\/h1>/);
-  assert.match(html, /<button[^>]*data-turn-id="turn:turn-1"[^>]*aria-pressed="false"/);
-  assert.match(html, /<button[^>]*data-turn-id="turn:turn-2"[^>]*aria-pressed="true"/);
+  assert.match(html, /<button[^>]*data-lens-turn-id="turn:turn-1"[^>]*aria-pressed="false"/);
+  assert.match(html, /<button[^>]*data-lens-turn-id="turn:turn-2"[^>]*aria-pressed="true"/);
   const panels = [...html.matchAll(/<section[^>]*data-turn-panel="([^"]+)"[^>]*>/g)];
   assert.equal(panels.length, 2);
   assert.deepEqual(panels.filter(panel => !/\bhidden\b/.test(panel[0])).map(panel => panel[1]), ['turn:turn-2', 'turn:turn-1']);
-  assert.ok(html.indexOf('data-turn-id="turn:turn-2"') < html.indexOf('data-turn-id="turn:turn-1"'));
+  assert.ok(html.indexOf('data-lens-turn-id="turn:turn-2"') < html.indexOf('data-lens-turn-id="turn:turn-1"'));
   assert.ok(html.indexOf('data-turn-panel="turn:turn-2"') < html.indexOf('data-turn-panel="turn:turn-1"'));
   assert.ok(!html.includes('只读观察 · 按需查看证据'));
   assert.ok(!html.includes('你的问题'));
@@ -292,56 +297,21 @@ test('session navigation and all visible turn groups run newest first without re
   assert.match(renderSidecar({ projectName: 'project', session: { ...data, provider: 'claude' }, nonce }), /data-session-id="claude:session-1"/);
 });
 
-test('the compact toolbar presents the session title with identity metadata and an icon-only chooser', () => {
+test('the page head names the turn and steps through turns; session actions and the name live in the view title bar', () => {
   const data = session([item()]);
   data.title = '检查回合目录的阅读体验';
   const html = renderSidecar({ projectName: 'project', session: data, nonce });
-  const toolbar = html.match(/<header class="toolbar">[\s\S]*?<\/header>/)?.[0];
-  assert.ok(toolbar);
-  assert.match(toolbar, /<h1[^>]*class="session-title"[^>]*>检查回合目录的阅读体验<\/h1>/);
-  for (const identity of ['Codex', 'session-1', 'project']) assert.ok(toolbar.includes(identity));
-  assert.match(toolbar, /<button[^>]*class="icon-button"[^>]*data-action="chooseSession"[^>]*>[\s\S]*?<svg/);
-  assert.ok(!html.includes('<section class="session"'));
-  assert.ok(!html.includes('class="session-button"'));
+  const head = html.match(/<header class="page-head">[\s\S]*?<\/header>/)?.[0];
+  assert.ok(head);
+  for (const action of ['older', 'newer', 'toc']) assert.match(head, new RegExp(`data-nav="${action}"`));
+  // No toolbar of its own: the name, switching and refreshing are VS Code's view title bar.
+  assert.ok(!html.includes('class="toolbar"') && !html.includes('session-title') && !html.includes('检查回合目录的阅读体验'));
+  const manifest = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
+  const menu = manifest.contributes.menus['view/title'].filter((entry: any) => entry.when === 'view == agentSidecar.observer').map((entry: any) => entry.command);
+  assert.deepEqual(menu, ['agentSidecar.chooseSession', 'agentSidecar.refresh', 'agentSidecar.coverage']);
 });
 
-test('session title tooltips distinguish saved source titles from the first-request fallback truthfully', () => {
-  for (const [titleSource, provider, expectedHint] of [
-    ['codex-index', 'codex', 'Codex 会话索引'],
-    ['claude-ai-title', 'claude', 'Claude 会话记录'],
-    ['request', 'codex', '当前以首条请求作为会话名称'],
-    [undefined, 'codex', '当前以首条请求作为会话名称'],
-  ] as const) {
-    const data = { ...session([item()]), title: '已保存的会话名', titleSource, provider };
-    const html = renderSidecar({ projectName: 'project', session: data, nonce });
-    const heading = html.match(/<h1 class="session-title"[^>]*>已保存的会话名<\/h1>/)?.[0];
-    assert.ok(heading);
-    const tooltip = heading.match(/\btitle="([^"]*)"/)?.[1];
-    assert.ok(tooltip);
-    for (const expected of [expectedHint, 'session-1', 'project']) assert.ok(tooltip.includes(expected));
-    if (titleSource === 'codex-index' || titleSource === 'claude-ai-title') {
-      assert.ok(!tooltip.includes('当前以首条请求作为会话名称'));
-    }
-  }
-});
-
-test('the left turn index uses a narrow centered neutral tick design without failure or latest ornaments', () => {
-  const html = renderSidecar({ projectName: 'project', nonce, session: session([item({ status: 'failed' })]) });
-  const style = html.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1];
-  assert.ok(style);
-  assert.match(style, /\.turn-map\s*\{[^}]*flex:\s*0 0 20px/);
-  assert.match(style, /\.turn-tick\s*\{[^}]*height:\s*2px/);
-  assert.match(style, /\.turn-map button:first-child\s*\{[^}]*margin-top:\s*auto/);
-  assert.match(style, /\.turn-map button:last-child\s*\{[^}]*margin-bottom:\s*auto/);
-  const map = html.match(/<nav class="turn-map"[^>]*>([\s\S]*?)<\/nav>/)?.[1];
-  assert.ok(map);
-  assert.ok(!map.includes('data-failed'));
-  assert.ok(!map.includes('data-latest'));
-  const mapRules = style.split('}').filter(rule => /\.turn-(?:map|mark|tick)/.test(rule)).join('}');
-  assert.ok(!/errorForeground|charts-|#[0-9a-f]{3,8}\b/i.test(mapRules), 'Navigation does not add status color coding');
-});
-
-test('the single-turn lens shows the source request once, five lines, latest first, without generated titles', () => {
+test('目录 lists each turn by its request, latest first, two lines each, without generated titles', () => {
   const data = session([
     item({ kind: 'request', summary: '第一问。后一句不应进入目录。' }),
     item({ id: 'request-2', turnId: 'turn-2', kind: 'request', summary: 'Check example.com please. Another sentence.' }),
@@ -349,7 +319,7 @@ test('the single-turn lens shows the source request once, five lines, latest fir
     item({ id: 'tool-4', turnId: 'turn-4' }),
   ]);
   const html = renderSidecar({ projectName: 'project', nonce, session: data });
-  const lens = html.match(/<nav id="turn-lens"[^>]*\bhidden>([\s\S]*?)<\/nav>/)?.[1];
+  const lens = html.match(/<div class="toc-list">([\s\S]*?)<\/div><\/nav>/)?.[1];
   assert.ok(lens);
   assert.deepEqual([...lens.matchAll(/data-lens-turn-id="([^"]+)"/g)].map(match => match[1]), ['turn:turn-4', 'turn:turn-3', 'turn:turn-2', 'turn:turn-1']);
   assert.match(lens, />未取得本轮问题<\/span>/);
@@ -358,110 +328,14 @@ test('the single-turn lens shows the source request once, five lines, latest fir
   assert.match(lens, /class="turn-lens-request">第一问。/);
   assert.match(lens, /Check example.com please\./);
   assert.match(lens, /&lt;script&gt;bad\(\)&lt;\/script&gt; 可以吗？/);
-  assert.ok(lens.includes('后一句'));
-  assert.ok(lens.includes('Another sentence'));
-  assert.match(html, /\.turn-lens-request[^}]+-webkit-line-clamp: 5/);
+  assert.match(html, /\.toc-list \.turn-lens-request[^}]+-webkit-line-clamp: 2/);
   assert.ok(!lens.includes('<script>'));
-  assert.match(html, /aria-controls="turn-lens" aria-expanded="false"/);
-});
-
-test('hover previews only the corresponding turn without reading, focus or host changes', () => {
-  const fixture = scriptFixture({ turnCount: 12 });
-  fixture.scroll(130);
-  const before = JSON.stringify(fixture.state);
-  assert.equal(fixture.turnLens.hidden, true);
-  for (const [index, expected] of [[0, [12]], [5, [7]], [11, [1]]] as const) {
-    fixture.hover(fixture.nav[index]);
-    assert.equal(fixture.turnLens.hidden, false);
-    assert.deepEqual(fixture.lensNav.filter(button => !button.hidden).map(button => button.dataset.lensTurnId), expected.map(number => `turn:turn-${number}`));
-    assert.equal(fixture.nav[index].getAttribute('aria-expanded'), 'true');
-    assert.equal(fixture.nav.filter(button => button.getAttribute('aria-expanded') === 'true').length, 1);
-    assert.equal(JSON.stringify(fixture.state), before);
-    assert.equal(fixture.timeline.scrollTop, 130);
-    assert.equal(fixture.turnMap.scrollTop, 0);
-    assert.equal(fixture.document.scrollingElement.scrollTop, 880);
-    assert.deepEqual(fixture.focused, []);
-  }
-  fixture.leave(fixture.nav[11], fixture.lensNav[10]);
-  assert.equal(fixture.turnLens.hidden, false, 'Moving from a tick into the adjacent lens keeps it usable');
-  fixture.leave(fixture.lensNav[10], fixture.node);
-  assert.equal(fixture.turnLens.hidden, true);
-  assert.ok(fixture.nav.every(button => button.getAttribute('aria-expanded') === 'false'));
-  assert.deepEqual(fixture.sent, []);
-  const short = scriptFixture({ turnCount: 2 });
-  short.hover(short.nav[0]);
-  assert.equal(short.lensNav.filter(button => !button.hidden).length, 1);
-});
-
-test('lens focus previews without navigation, supports keyboard entry and Escape, and does not reopen on refresh', () => {
-  const fixture = scriptFixture({ turnCount: 8 });
-  fixture.scroll(180);
-  fixture.focus(fixture.nav[4]);
-  assert.equal(fixture.turnLens.hidden, false);
-  assert.equal(fixture.state?.selectedTurnId, 'turn:turn-8');
-  assert.equal(fixture.timeline.scrollTop, 180);
-  assert.equal(fixture.key(fixture.nav[4], 'ArrowRight'), true);
-  assert.deepEqual(fixture.focused.at(-1), { dataset: { lensTurnId: 'turn:turn-4' }, preventScroll: true });
-  assert.equal(fixture.key(fixture.lensNav[4], 'ArrowDown'), true);
-  assert.deepEqual(fixture.focused.at(-1), { dataset: { lensTurnId: 'turn:turn-4' }, preventScroll: true });
-  assert.equal(fixture.key(fixture.lensNav[4], 'Escape'), true);
-  assert.equal(fixture.turnLens.hidden, true);
-  assert.deepEqual(fixture.focused.at(-1), { dataset: { turnId: 'turn:turn-4' }, preventScroll: true });
-  assert.equal(fixture.timeline.scrollTop, 180);
-  assert.equal(fixture.state?.selectedTurnId, 'turn:turn-8');
-  const refreshed = scriptFixture({ turnCount: 8, state: fixture.state });
-  assert.equal(refreshed.turnLens.hidden, true, 'Refresh restores the map focus, not a transient preview overlay');
-  assert.equal(refreshed.timeline.scrollTop, 180);
-  fixture.focus(fixture.nav[0]);
-  fixture.blur(fixture.nav[0], fixture.refresh);
-  assert.equal(fixture.turnLens.hidden, true);
-  assert.deepEqual(fixture.sent, []);
-});
-
-test('the corresponding lens click uses the same turn jump as the minimap and never opens host details', () => {
-  const fixture = scriptFixture({ turnCount: 7 });
-  fixture.hover(fixture.nav[5]);
-  fixture.click(fixture.lensNav[5]);
-  assert.equal(fixture.timeline.scrollTop, fixture.panels[5].offsetTop);
-  assert.equal(fixture.state?.selectedTurnId, fixture.nav[5].dataset.turnId);
-  assert.equal(fixture.nav[5].getAttribute('aria-pressed'), 'true');
-  assert.equal(fixture.lensNav[5].getAttribute('aria-pressed'), 'true');
-  assert.equal(fixture.turnLens.hidden, true);
-  assert.deepEqual(fixture.focused.at(-1), { dataset: { turnId: 'turn:turn-2' }, preventScroll: true });
-  assert.equal(fixture.panels.every(panel => !panel.hidden), true);
-  assert.deepEqual(fixture.sent, []);
-});
-
-test('the lens is clamped to the webview and dismissal cannot move reading or send resize messages', () => {
-  for (const viewport of [{ width: 300, height: 700 }, { width: 180, height: 160 }]) {
-    const fixture = scriptFixture({ turnCount: 8, viewport });
-    for (const top of [-20, viewport.height + 20]) {
-      fixture.nav[3].rect = { right: viewport.width - 1, top, height: 16 };
-      fixture.hover(fixture.nav[3]);
-      const left = Number.parseFloat(fixture.turnLens.style.left);
-      const lensTop = Number.parseFloat(fixture.turnLens.style.top);
-      assert.ok(left >= 8);
-      assert.ok(left + fixture.turnLens.offsetWidth <= viewport.width - 8);
-      assert.ok(lensTop >= 8);
-      assert.ok(lensTop + fixture.turnLens.offsetHeight <= viewport.height - 8);
-    }
-    fixture.windowHandlers.get('resize')!({});
-    assert.equal(fixture.turnLens.hidden, true);
-    assert.equal(fixture.timeline.scrollTop, 0);
-    fixture.hover(fixture.nav[3]);
-    fixture.scrollMap(20);
-    assert.equal(fixture.turnLens.hidden, true);
-    fixture.hover(fixture.nav[3]);
-    fixture.scroll(90);
-    assert.equal(fixture.turnLens.hidden, true);
-    assert.deepEqual(fixture.sent, []);
-  }
 });
 
 test('a subagent reads as an Agent call row in its place, named in text and opening its record in the editor', () => {
   const html = renderSidecar({ projectName: 'project', nonce, session: session([item({ kind: 'subagent', title: '子 Agent 返回' })]) });
   assert.match(html, /<button type="button" class="crow node-button" data-item-id="tool-1" data-tool="Agent"/);
-  assert.match(html, /<span class="ctool">Agent<\/span>/);
+  assert.match(html, /<div class="ctool">Agent<\/div>/);
   assert.doesNotMatch(html, /class="record-disclosure/);
 });
 
@@ -477,11 +351,10 @@ test('unavailable nonclickable action and subagent rows keep reasons accessible 
   assert.ok(!body.includes('内容不可用'));
   assert.match(body, /aria-label="[^"]*未取得可读的记录内容/);
   assert.match(body, /<div class="crow"[^>]*aria-label="[^"]*未取得可读的记录内容/);
-  assert.match(body, /<b class="cbad">failed<\/b>/);
+  assert.match(body, /<span class="cbad"[^>]*>failed<\/span>/);
   assert.match(body, /data-status="running"[^>]*(?:title|aria-label)="[^"]*进行中/);
   assert.ok(!body.includes('<i class="cnone">进行中</i>'), 'No word on the row itself');
   assert.ok(!body.includes('data-item-id='));
-  assert.match(html, /data-action="coverage"/);
 });
 
 test('unsupported notices and partial or unknown evidence states are not hidden by quieter unavailable rows', () => {
@@ -497,71 +370,6 @@ test('unsupported notices and partial or unknown evidence states are not hidden 
   assert.doesNotMatch(html, /状态未核实/);
 });
 
-test('turn index jumps within the continuous scroll and scrolling updates the active mark without host navigation', () => {
-  const before = scriptFixture();
-  assert.deepEqual(before.panels.map(panel => panel.hidden), [false, false]);
-  before.scroll(310);
-  before.click(before.nav[1]);
-  assert.deepEqual(before.panels.map(panel => panel.hidden), [false, false]);
-  assert.deepEqual(before.nav.map(button => button.getAttribute('aria-pressed')), ['false', 'true']);
-  assert.equal(before.timeline.scrollTop, 1014, 'The directory moves to the requested turn heading');
-  assert.equal(before.state?.selectedTurnId, 'turn:turn-1');
-  assert.equal(before.state?.focusTurnId, 'turn:turn-1');
-  before.scroll(1200);
-  assert.deepEqual(before.state?.readingAnchor, { turnId: 'turn:turn-1', offset: 186 });
-  assert.deepEqual(before.sent, []);
-  const refreshed = scriptFixture({ state: before.state });
-  assert.deepEqual(refreshed.panels.map(panel => panel.hidden), [false, false]);
-  assert.equal(refreshed.timeline.scrollTop, 1200);
-  assert.deepEqual(refreshed.focused, [{ dataset: { turnId: 'turn:turn-1' }, preventScroll: true }]);
-  before.focus(before.node);
-  assert.equal(before.state?.focusTurnId, '');
-  before.focus(before.refresh);
-  assert.equal(before.state?.focusAction, 'refresh');
-  before.scroll(80);
-  assert.equal(before.state?.selectedTurnId, 'turn:turn-2');
-  assert.deepEqual(before.nav.map(button => button.getAttribute('aria-pressed')), ['true', 'false']);
-});
-
-test('short final turns remain selected after a directory jump is clamped to the real scroll range', () => {
-  const html = renderSidecar({projectName:'project',nonce,session:session([item()])});
-  assert.match(html,/\.turn-panel:last-child\s*\{\s*min-height:\s*100%;\s*\}/);
-  assert.ok(!/\.turn-panel\s*\{[^}]*min-height:/.test(html), 'Earlier turns must not receive per-turn viewport spacers.');
-  for (const panelHeights of [[900,100],[80,60]]) {
-    const geometry = {viewportHeight:600,panelHeights};
-    const fixture = scriptFixture({geometry});
-    const finalPanel = fixture.panels.at(-1)!;
-    assert.equal(fixture.panels[0].offsetHeight,panelHeights[0]);
-    fixture.click(fixture.nav.at(-1)!);
-    assert.equal(fixture.timeline.scrollTop,fixture.timeline.scrollHeight - fixture.timeline.clientHeight);
-    assert.equal(finalPanel.offsetTop - fixture.timeline.scrollTop,14, 'The final heading reaches the normal top padding.');
-    // A native scroll event follows the browser-clamped assignment asynchronously.
-    fixture.scroll(fixture.timeline.scrollTop);
-    assert.deepEqual(fixture.nav.map(button => button.getAttribute('aria-pressed')),['false','true']);
-    assert.equal(fixture.state?.selectedTurnId,'turn:turn-1');
-    assert.deepEqual(fixture.state?.readingAnchor,{turnId:'turn:turn-1',offset:-14});
-    const refreshed = scriptFixture({geometry,state:fixture.state});
-    assert.equal(refreshed.timeline.scrollTop,fixture.timeline.scrollTop);
-    assert.equal(refreshed.nav.at(-1)!.getAttribute('aria-pressed'),'true');
-    assert.deepEqual(fixture.sent,[]);
-  }
-});
-
-test('a long turn index initially reveals the latest turn without moving the process or page', () => {
-  const fixture = scriptFixture({ turnCount: 45 });
-  const latest = fixture.nav[0];
-  assert.equal(fixture.panels.filter(panel => !panel.hidden).length, 45);
-  assert.equal(fixture.panels[0].hidden, false);
-  assert.equal(latest.getAttribute('aria-pressed'), 'true');
-  assert.equal(fixture.turnMap.scrollTop, 0);
-  assert.ok(latest.offsetTop >= fixture.turnMap.scrollTop);
-  assert.ok(latest.offsetTop + latest.offsetHeight <= fixture.turnMap.scrollTop + fixture.turnMap.clientHeight);
-  assert.equal(fixture.timeline.scrollTop, 0, 'A new session opens at the latest turn');
-  assert.equal(fixture.document.scrollingElement.scrollTop, 880);
-  assert.deepEqual(fixture.focused, []);
-  assert.deepEqual(fixture.sent, []);
-});
-
 test('refresh preserves the reader-chosen turn index position independently from process scroll', () => {
   const before = scriptFixture({ turnCount: 45 });
   before.scroll(275);
@@ -574,32 +382,6 @@ test('refresh preserves the reader-chosen turn index position independently from
   assert.equal(refreshed.panels.at(-1)!.hidden, false);
   before.scrollMap(0);
   assert.equal(scriptFixture({ turnCount: 45, state: before.state }).turnMap.scrollTop, 0, 'A saved zero is not treated as missing');
-});
-
-test('refresh anchors the current turn when a newer turn is prepended', () => {
-  const before = scriptFixture();
-  before.scroll(1200);
-  const refreshed = scriptFixture({ turnCount: 3, state: before.state });
-  assert.equal(refreshed.timeline.scrollTop, 2200);
-  assert.equal(refreshed.nav[2].getAttribute('aria-pressed'), 'true');
-  assert.equal(refreshed.panels.every(panel => !panel.hidden), true);
-});
-
-test('initial reading anchor survives a host-triggered refresh without a prior click or scroll', () => {
-  const before = scriptFixture();
-  assert.deepEqual(before.state?.readingAnchor, { turnId: 'turn:turn-2', offset: -14 });
-  const refreshed = scriptFixture({ turnCount: 3, state: before.state });
-  assert.equal(refreshed.timeline.scrollTop, 1000);
-  assert.equal(refreshed.state?.selectedTurnId, 'turn:turn-2');
-  assert.deepEqual(refreshed.focused, []);
-});
-
-test('old single-turn saved positions migrate to continuous history without resetting the reader', () => {
-  const fixture = scriptFixture({ state: { sessionId: 'codex:session-1', selectedTurnId: 'turn:turn-1',
-    turnScroll: { 'turn:turn-1': 95 }, scrollTop: 95 } });
-  assert.equal(fixture.timeline.scrollTop, 1109);
-  assert.equal(fixture.panels.every(panel => !panel.hidden), true);
-  assert.equal(fixture.nav[1].getAttribute('aria-pressed'), 'true');
 });
 
 test('turn selection, expansion and scroll state are scoped to the bound session, including provider', () => {
@@ -717,13 +499,15 @@ test('semantic action rows separate type and purpose and open source-backed evid
   const data = session([skill, web, ...results]);
   const html = renderSidecar({ projectName: 'project', nonce, session: data });
   const rows = actionHtmlRows(html);
-  assert.equal(rows.length, projectedRows(data).length);
+  // As in the terminal, a search's sources are a record of that search: they open from it and take no row.
+  const shown = projectedRows(data).filter(row => !row.items.every(record => record.title === 'Web 来源'));
+  assert.equal(rows.length, shown.length);
   assert.ok(!html.includes('class="action-group"'));
   assert.ok(!html.includes('class="action-members"'));
   const skillRow = rows.find(row => row.includes('data-tool="Skill"'));
   const webRow = rows.find(row => row.includes('VS Code API'));
   assert.ok(skillRow && webRow);
-  assert.match(skillRow, /class="ctool">Skill<\/span>/);
+  assert.match(html, /<div class="ctool">Skill<\/div>/);
   assert.match(skillRow, /openai-docs · 读取定义/);
   assert.match(webRow, /data-tool="WebSearch"/);
   assert.match(webRow, /class="clabel [a-z]+">VS Code API/);
@@ -736,7 +520,7 @@ test('semantic action rows separate type and purpose and open source-backed evid
     assert.ok(!row.includes('>exec<'));
     assert.ok(!row.includes('次调用'), 'Source records are not labelled as verified call executions');
   }
-  for (const projected of projectedRows(data)) {
+  for (const projected of shown) {
     assert.ok(html.includes(`data-item-id="${attributeValue(projected.id)}"`), 'Each row opens its own evidence');
     const evidence = resolveOutlineEvidence(data, projected.id);
     assert.ok(evidence, 'Each row resolves through the same evidence path used by the extension');
@@ -750,8 +534,8 @@ test('a source-result-only action row still identifies its evidence instead of d
   ]);
   const rows = actionHtmlRows(renderSidecar({ projectName: 'project', nonce, session: data }));
   assert.equal(rows.length, 1);
-  assert.match(rows[0], /class="ctool">WEB<\/span>/);
-  assert.match(rows[0], /来源结果/);
+  // Sources with no search before them are the search itself.
+  assert.match(rows[0], /data-tool="WebSearch"/);
   assert.ok(!rows[0].includes('次调用'));
   assert.ok(resolveOutlineEvidence(data, projectedRows(data)[0].id));
 });
@@ -786,7 +570,7 @@ test('repeated adjacent inputs retain counts without an extra outer directory', 
   const html = renderSidecar({ projectName: 'project', nonce, session: session([first, { ...first, id: 'repeat-2' }]) });
   assert.doesNotMatch(html, /<details class="action-fold"/);
   assert.equal(actionHtmlRows(html).length, 1);
-  assert.match(html, /class="crep"> · 2 次<\/i>/);
+  assert.match(html, /class="clabel[^"]*">[^<]* · 2 次<\/span>/);
 });
 
 test('readable outputs are direct entries and one shared wrapper output is never attributed to individual input atoms', () => {
@@ -806,12 +590,10 @@ test('readable outputs are direct entries and one shared wrapper output is never
   const rows = actionHtmlRows(html);
   assert.ok(rows.every(row => !row.includes('返回 · ')));
   assert.ok(rows.every(row => !row.includes('functions.exec') && !row.includes('>exec<')));
-  // The wrapper's one output is its own row; the calls inside it do not each claim it.
-  const outputs = rows.filter(row => row.includes('data-tool="OUT"'));
-  assert.equal(outputs.length, 1);
+  // The wrapper's one output is a record of its calls, as in the terminal: no row, and the calls inside it do not each claim it.
+  assert.ok(rows.every(row => !row.includes('data-tool="OUT"') && !row.includes('data-tool="Output"')));
   const resultRows = projectedRows(data).filter(row => row.id.startsWith('action-result:'));
   assert.equal(resultRows.length, 1);
-  assert.ok(outputs[0].includes(`data-item-id="${attributeValue(resultRows[0].id)}"`));
   const shared = resolveOutlineEvidence(data, resultRows[0].id)!;
   assert.deepEqual(shared.items, [wrapper]);
   assert.ok(JSON.stringify(shared).includes('SHARED PUBLIC OUTPUT'));
@@ -948,7 +730,7 @@ test('a shared Bash wrapper keeps visible input identities after a readable retu
   const directoryId = (html: string) => html.match(/<details class="action-fold" data-action-group="([^"]+)"/)?.[1];
   assert.equal(directoryId(before), undefined);
   assert.equal(directoryId(after), undefined);
-  assert.equal((after.match(/data-tool="OUT"/g) ?? []).length, 1);
+  assert.equal((after.match(/data-tool="(?:OUT|Output)"/g) ?? []).length, 0, 'The return is a record of the calls, with no row of its own');
   const sourceDirectoryId = (data: SessionData) => {
     const group = outlineTurn(groupSessionTurns(data)[0]).nodes.find(node => node.kind === 'actions');
     assert.ok(group && group.kind === 'actions');
@@ -967,18 +749,18 @@ test('a shared Bash wrapper keeps visible input identities after a readable retu
   assert.deepEqual(refreshed.focused, [{ dataset: { itemId: rowId }, preventScroll: true }]);
 });
 
-test('truly empty ended turns disappear from body, map and lens without renumbering substantive turns', () => {
+test('truly empty ended turns disappear from the page and 目录 without renumbering substantive turns', () => {
   const empty = item({ id: 'empty-ended', turnId: 'turn-2', kind: 'notice', title: '回合结束', summary: '', availability: 'none', detail: undefined });
   const active = item({ id: 'active', turnId: 'turn-4', kind: 'notice', title: '回合开始', summary: '', status: 'running', availability: 'none', detail: undefined });
   const data = session([readInput('first'), empty, readInput('third', { turnId: 'turn-3' }), active]);
   const original = JSON.stringify(data);
   const html = renderSidecar({ projectName: 'project', nonce, session: data });
-  for (const attribute of ['data-turn-id', 'data-turn-panel', 'data-lens-turn-id']) {
+  for (const attribute of ['data-turn-panel', 'data-lens-turn-id']) {
     assert.ok(!html.includes(`${attribute}="turn:turn-2"`));
     assert.ok(html.includes(`${attribute}="turn:turn-3"`));
     assert.ok(html.includes(`${attribute}="turn:turn-4"`), 'An active begin-only turn remains observable');
   }
-  assert.match(html, /data-turn-panel="turn:turn-3" aria-label="第 3 轮"/);
+  assert.match(html, /data-turn-panel="turn:turn-3" data-ordinal="3"[^>]* aria-label="第 3 轮"/);
   assert.equal(JSON.stringify(data), original, 'Display filtering cannot delete source or coverage data');
   const emptyOnly = renderSidecar({ projectName: 'project', nonce, session: session([empty]) });
   assert.match(emptyOnly, /暂没有可展示的过程/);
@@ -1000,7 +782,7 @@ test('refresh cannot resurrect a filtered empty turn and still restores a surviv
   surviving.click(surviving.nav[2]);
   surviving.scroll(2140);
   const refreshed = scriptFixture({ turnCount: 3, hiddenTurns: [2], state: surviving.state });
-  assert.equal(refreshed.timeline.scrollTop, 1140);
+  assert.equal(refreshed.timeline.scrollTop, 2140, 'The surviving turn, where the reader was in it');
   assert.equal(refreshed.state?.selectedTurnId, 'turn:turn-1');
   assert.equal(refreshed.turnLens.hidden, true);
 });
@@ -1050,14 +832,16 @@ test('CSP forbids external content and rejects nonce injection', () => {
   assert.throws(() => renderSidecar({ projectName: 'project', nonce: "x' 'unsafe-inline" }), /nonce/);
 });
 
-test('final answers remain full Markdown at their chronological position and need no separate detail button', () => {
+test('a final answer folds to one line under Final Answer, after the process, and opens to full Markdown in place', () => {
   const answer = item({ kind: 'answer', title: '历史回答', summary: 'fallback',
     detail: { title: '原始回答', blocks: [{ kind: 'text', label: '正文', text: '**有格式的回答**\n[link](command:danger)' }] },
   });
   const html = renderSidecar({ projectName: 'project', session: session([item({ id: 'before' }), answer]), nonce });
-  assert.match(html, /class="narrative final-answer"/);
-  assert.match(html, /<strong>有格式的回答<\/strong>/);
-  assert.ok(html.indexOf('data-observation-key="before"') < html.indexOf('class="narrative final-answer"'));
+  const fold = /<details class="cfold fanswer"[^>]*><summary><div class="tlabel" data-tone="green">Final Answer<\/div><span class="fline"><span class="ftext">([^<]*)<\/span>[\s\S]*?<\/summary><div class="fbody">([\s\S]*?)<\/div><\/details>/.exec(html);
+  assert.ok(fold, 'The answer under its label, folded');
+  assert.equal(fold[1], '有格式的回答 link', 'One line of it, as words: no Markdown marks');
+  assert.match(fold[2], /<strong>有格式的回答<\/strong>/, 'Opened, the whole answer');
+  assert.ok(html.indexOf('data-observation-key="') < html.indexOf('class="cfold fanswer"'));
   assert.ok(!html.includes('data-item-id="tool-1"'));
   assert.ok(!html.includes('<a '));
 });
@@ -1511,7 +1295,7 @@ test('webview script parses, preserves per-session scroll and focus, and sends n
   assert.match(source, /previous\.sessionId === sessionId/);
   assert.match(source, /setState\(/);
   assert.match(source, /selectedTurnId/);
-  assert.match(source, /turnScroll/);
+  assert.match(source, /readingVersion: 3/);
   assert.match(source, /preventScroll: true/);
   assert.equal((source.match(/type: 'viewport'/g) ?? []).length, 0, 'A sidebar view has no editor width to calibrate');
   assert.match(source, /addEventListener\('resize', hideLens\)/, 'Resize only dismisses a transient lens; viewport reporting remains one-shot');
@@ -1520,7 +1304,7 @@ test('webview script parses, preserves per-session scroll and focus, and sends n
 });
 
 test('toolbar refresh remembers the actual control instead of restoring the previous timeline button', () => {
-  const before = scriptFixture({ state: { sessionId: 'codex:session-1', readingVersion: 2, selectedId: 'tool-1', focusId: 'tool-1', scrollTop: 220 } });
+  const before = scriptFixture({ state: { sessionId: 'codex:session-1', readingVersion: 3, selectedId: 'tool-1', focusId: 'tool-1', scrollTop: 220 } });
   before.focus(before.refresh);
   before.click(before.refresh);
   assert.equal(before.state?.focusAction, 'refresh');
@@ -1542,27 +1326,28 @@ test('refresh restoration does not focus any control when the webview is not foc
     { focusTurnId: 'turn:turn-2' },
     { focusGroupId: 'background:turn:turn-2' },
   ]) {
-    const fixture = scriptFixture({ focused: false, state: { sessionId: 'codex:session-1', readingVersion: 2, ...target, scrollTop: 220 } });
+    const fixture = scriptFixture({ focused: false, state: { sessionId: 'codex:session-1', readingVersion: 3, ...target, scrollTop: 220 } });
     assert.deepEqual(fixture.focused, []);
     assert.equal(fixture.timeline.scrollTop, 220);
     assert.deepEqual([...fixture.windowHandlers.keys()].sort(), ['message', 'resize'], 'Only transient-lens dismissal is added; no global focus watcher is installed');
   }
 });
 
-test('refresh may restore a prior turn control without moving continuous reading position', () => {
+test('refresh restores the turn the reader was on, and the control they had focused in it', () => {
   const fixture = scriptFixture({ state: {
-    sessionId: 'codex:session-1', selectedTurnId: 'turn:turn-2', focusId: 'tool-previous',
+    sessionId: 'codex:session-1', selectedTurnId: 'turn:turn-1', focusId: 'tool-previous', readingVersion: 3, scrollTop: 40,
     expandedActionIds: [],
   } });
-  assert.deepEqual(fixture.panels.map(panel => panel.hidden), [false, false]);
+  // One turn to a page, the older one the reader was on; the newest is in the page, not shown.
+  assert.deepEqual(fixture.panels.map(panel => panel.hasAttribute('data-current')), [false, true]);
   assert.deepEqual(fixture.focused, [{ dataset: { itemId: 'tool-previous' }, preventScroll: true }]);
-  assert.equal(fixture.timeline.scrollTop, 14);
+  assert.equal(fixture.timeline.scrollTop, 40);
 });
 
 test('refresh cannot focus an attached context button inside a collapsed background', () => {
   const fixture = scriptFixture({ state: {
     sessionId: 'codex:session-1', selectedTurnId: 'turn:turn-2', focusId: 'context-1',
-    expandedActionIds: [], readingVersion: 2, scrollTop: 220,
+    expandedActionIds: [], readingVersion: 3, scrollTop: 220,
   } });
   assert.equal(fixture.panels[1].hidden, false);
   assert.equal(fixture.backgrounds[1].open, false);
@@ -1614,13 +1399,11 @@ test('only the newest open turn carries live markers: a call still out, or the a
   // From this turn's panel to the next one: turns never nest.
   const panel = (key: string) => html.slice(html.indexOf(`data-turn-panel="turn:${key}"`)).split(/<section class="turn-panel|<\/main>/)[0];
   assert.match(panel('t2'), /data-last-at="2026-09-23T06:24:07.000Z"/);
-  assert.match(panel('t2'), /<button type="button" class="crow node-button"[^>]* data-out [^>]*title="Read · read-out\.ts · 进行中/);
-  assert.match(panel('t2'), /<ol class="cstream live">[\s\S]*<li class="cseg live-tail"[^>]*><div class="ctail"><span class="shimmer" data-live-verb="(Working)">\1<\/span><span data-since="2026-09-23T06:24:07.000Z"><\/span>/, 'One playful verb per turn');
-  assert.ok(!panel('t1').includes('data-last-at') && !panel('t1').includes('live-tail'), 'An older turn is never live');
-  html = renderSidecar({ projectName: 'project', nonce, session: session([request('q1', 't1'), request('q2', 't2'), said('s2', 't2')]) });
-  const verb = /data-live-verb="([^"]+)"/.exec(panel('t2'))![1];
-  html = renderSidecar({ projectName: 'project', nonce, session: session([request('q1', 't1'), request('q2', 't2'), said('s2', 't2'), said('s3', 't2')]) });
-  assert.equal(/data-live-verb="([^"]+)"/.exec(panel('t2'))![1], verb, 'The verb stays put as the turn grows');
+  // A call still out turns where its branch would be; the end spinner is there too, and the page shows one at a time.
+  assert.match(panel('t2'), /<button type="button" class="crow node-button"[^>]* data-out [^>]*title="Read · read-out\.ts · 进行中[^"]*"><span class="cbranch" aria-hidden="true"><span class="cspin"><\/span><\/span>/);
+  assert.match(panel('t2'), /<li class="cseg tend live-tail"[^>]*><span class="cbranch"><span class="cspin"><\/span><\/span>/);
+  assert.match(html, /\.chapter-turn:has\(\.crow\[data-out\]:not\(\[data-ask\]\)\) \.live-tail \{ display: none; \}/);
+  assert.ok(!panel('t1').includes('data-last-at') && !panel('t1').includes('live-tail') && !panel('t1').includes('data-out'), 'An older turn is never live');
   html = renderSidecar({ projectName: 'project', nonce, session: session([request('q2', 't2'), said('s2', 't2'),
     item({ id: 'end', turnId: 't2', kind: 'notice', title: '回合结束', summary: '', status: 'completed', availability: 'none', detail: undefined, timestamp: at })]) });
   assert.ok(!panel('t2').includes('data-last-at') && !panel('t2').includes('live-tail'), 'The source closed the turn');
@@ -1654,8 +1437,8 @@ test('a background task notification is a row in the turn; the turn header carri
     note('ok', 'Run real VS Code host tests', 'completed'), note('bad', 'Render replay page', 'failed', 144)]) });
   const rows = actionHtmlRows(html);
   assert.equal(rows.length, 2);
-  assert.match(rows[0], /data-tool="Bash"[\s\S]*Run real VS Code host tests<i class="cnone">done<\/i>/);
-  assert.match(rows[1], /<b class="cbad">exit 144<\/b> · Render replay page/);
+  assert.match(rows[0], /data-tool="Bash"[\s\S]*Run real VS Code host tests<\/span><span class="cnote">done<\/span>/);
+  assert.match(rows[1], /Render replay page<\/span><span class="cbad"[^>]*>exit 144<\/span>/);
   assert.ok(!html.includes('子任务通知') && !html.includes('项失败'));
 });
 
@@ -1677,7 +1460,7 @@ test('a read of one file opens as that file: its recorded lines, numbered where 
   assert.ok(!detail({ ...read('failed', { command: 'cat missing.ts' }, 'No such file'), status: 'failed' }).includes('class="code-surface'));
 });
 
-test('a turn that is over folds its whole process into the line the agent prints; the request, files and answer stay; a running turn stays open', () => {
+test('a turn that is over keeps its process open, the answer folded at its end; a running turn ends in a spinner', () => {
   const said = (id: string, turnId: string) => item({ id, turnId, kind: 'message', title: '过程说明', summary: id, availability: 'none', detail: undefined });
   const bash = (id: string, turnId: string) => item({ id, turnId, title: 'Bash', detail: { title: 'Bash', blocks: [{ kind: 'json', label: '当时调用参数', text: JSON.stringify({ command: `npm run ${id}` }) }] } });
   const html = renderSidecar({ projectName: 'project', nonce, session: session([
@@ -1685,17 +1468,15 @@ test('a turn that is over folds its whole process into the line the agent prints
     said('long', 't1'), bash('a', 't1'), readInput('r1', { turnId: 't1' }), said('short', 't1'), bash('c', 't1'),
     item({ id: 'done', turnId: 't1', kind: 'answer', title: '历史回答', summary: '改好了。', availability: 'none', detail: undefined, timestamp: '2026-09-23T06:03:12.000Z' })]) });
   const panel = html.slice(html.indexOf('data-turn-panel="turn:t1"')).split(/<section class="turn-panel|<\/main>/)[0];
-  const fold = /<details class="cprocess" data-fold="process:turn:t1"><summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/.exec(panel)!;
-  assert.ok(fold, 'One fold for the whole process');
-  assert.match(fold[1].replace(/<[^>]+>/g, ''), /^(Baked|Brewed|Churned|Cogitated|Cooked|Crunched|Sautéed|Worked) for 3m 12s · 3 calls›$/);
-  assert.equal((fold[2].match(/class="csay"/g) ?? []).length, 2, 'The agent\'s words are inside');
-  assert.ok(panel.indexOf('class="turn-question"') < panel.indexOf('cprocess') && panel.indexOf('</details>') < panel.indexOf('final-answer'), 'Request above, answer below and outside');
-  assert.ok(!panel.includes('class="cfold"'), 'No per-chapter folds any more');
-  const codex = renderSidecar({ projectName: 'project', nonce, session: { ...session([said('x', 't1'), bash('y', 't1')]) } });
-  assert.match(codex, /<span class="cdone">Process<\/span>/, 'Without a duration it is just the process');
+  // The reader is here for the process: nothing folds it away. The calls hang from their tool's name on a tree.
+  assert.ok(!panel.includes('cprocess'));
+  assert.equal((panel.match(/class="csay"/g) ?? []).length, 3, 'The agent\'s words, and the answer\'s');
+  assert.deepEqual([...panel.matchAll(/<div class="ctool">([^<]+)<\/div>/g)].map(match => match[1]), ['Bash', 'Read', 'Bash']);
+  assert.ok(panel.indexOf('class="tlabel" data-tone="blue">Prompt') < panel.indexOf('class="ccalls"') && panel.indexOf('class="ccalls"') < panel.indexOf('Final Answer'), 'Prompt above, the answer at the end');
   const at = '2026-09-23T06:24:07.000Z';
   const running = renderSidecar({ projectName: 'project', nonce, session: session([said('newest', 't2'), ...['d', 'e', 'f'].map(id => ({ ...bash(id, 't2'), timestamp: at }))]) });
-  assert.ok(!running.slice(running.indexOf('data-turn-panel="turn:t2"')).split('</main>')[0].includes('class="cprocess"'), 'A running turn stays open');
+  const live = running.slice(running.indexOf('data-turn-panel="turn:t2"')).split('</main>')[0];
+  assert.ok(!live.includes('Final Answer') && live.includes('class="cseg tend live-tail"'), 'A running turn has no answer yet; its end turns');
 });
 
 test('the loading word is the agent\'s own: one of Claude Code\'s verbs per turn, Working for Codex', async () => {
@@ -1715,8 +1496,9 @@ test('a question to the user sits in its place among the calls and shows what wa
   const html = renderSidecar({ projectName: 'project', nonce, session: session([bash('before'), ask, bash('after')]) });
   const rows = actionHtmlRows(html);
   assert.deepEqual(rows.map(row => /data-tool="([^"]+)"/.exec(row)![1]), ['Bash', 'Ask', 'Bash'], 'In source order, not after the calls around it');
-  assert.match(rows[1], /仓库设为？<span class="cchoices"><b class="cchoice">✓ 私有 \(Recommended\)<\/b><\/span>/, 'Only what was chosen');
-  assert.ok(!rows[1].includes('公开'), 'An option not chosen is not shown as if it were an answer');
+  const asked = /<li class="crow-item"[^>]*><button[^>]*data-tool="Ask"[\s\S]*?<\/li>/.exec(html)![0];
+  assert.match(asked, /仓库设为？<\/span><\/button><div class="cchoices"><b class="cchoice">✓ 私有 \(Recommended\)<\/b><\/div>/, 'Only what was chosen, under it on the tree');
+  assert.ok(!asked.includes('公开'), 'An option not chosen is not shown as if it were an answer');
 });
 
 test('an image placeholder in a request stays as the text the user sent', () => {

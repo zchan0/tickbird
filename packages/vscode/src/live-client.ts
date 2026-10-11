@@ -15,7 +15,7 @@ export const liveClient = `
       if (current.nodeType === 1 && current.dataset.inlineLoaded && current.dataset.inlineRevision === next.dataset?.inlineRevision) return;
       if (current.isEqualNode(next)) return;
       if (current.nodeType !== 1) { if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue; return; }
-      const local = name => name === 'open' && current.tagName === 'DETAILS' || name === 'aria-pressed' || name === 'aria-expanded' || name === 'data-stale' || name === 'data-fresh' || name === 'data-idle' || name === 'style';
+      const local = name => name === 'open' && current.tagName === 'DETAILS' || name === 'aria-pressed' || name === 'aria-expanded' || name === 'data-stale' || name === 'data-fresh' || name === 'data-idle' || name === 'data-current' || name === 'style';
       const animating = [...current.classList].filter(transient);
       for (const attribute of [...current.attributes]) if (!local(attribute.name) && !next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
       for (const attribute of [...next.attributes]) if (!local(attribute.name) && current.getAttribute(attribute.name) !== attribute.value) current.setAttribute(attribute.name, attribute.value);
@@ -29,7 +29,7 @@ export const liveClient = `
     // rows follow a step apart, and the loading line comes back only after all of
     // it. A new burst waits for the one still appearing; a long one is quickened.
     const FADE = 260, WORDS = FADE + 380, ROW = 170, TAIL = 220, BACKLOG = 2500;
-    const words = part => part.matches('.csay, .turn-question, .turn-heading, .final-answer, .interjection');
+    const words = part => part.matches('.csay, .tprompt, .turn-heading, .cfold');
     const reveal = (part, delay) => {
       // Restart: a part already fading (the loading line) goes back to waiting.
       part.classList.remove('arrived'); void part.offsetWidth;
@@ -92,9 +92,6 @@ export const liveClient = `
     // Only the newest turn, still open in the source, carries data-last-at. Running
     // means records keep coming; a long silence is shown as such, a day-old one not at all.
     const QUIET = 10 * 60 * 1000, GONE = 6 * 60 * 60 * 1000;
-    // The agents' own format: 12s, 1m 33s, 1h 2m 5s.
-    const clock = ms => { const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
-      return h ? h + 'h ' + m + 'm ' + (s % 60) + 's' : m ? m + 'm ' + (s % 60) + 's' : s + 's'; };
     const span = ms => ms < 3600000 ? Math.max(1, Math.round(ms / 60000)) + ' 分钟' : Math.round(ms / 3600000) + ' 小时';
     // Claude Code publishes busy/idle for its session; when it does, that wins over any guess from silence.
     let agentState = '';
@@ -109,8 +106,9 @@ export const liveClient = `
         live.toggleAttribute('data-fresh', !gone); live.toggleAttribute('data-stale', stale);
         live.toggleAttribute('data-idle', agentState === 'idle');
         const verb = live.querySelector('[data-live-verb]'), since = live.querySelector('[data-since]');
-        if (verb) verb.textContent = stale ? '无新记录' : verb.dataset.liveVerb;
-        if (since) since.textContent = gone ? '' : ' · ' + (stale ? span(quiet) : clock(now - Date.parse(since.dataset.since)));
+        // Quiet for long: the spinner gives way to how long it has been. Otherwise the spinner says enough.
+        if (verb) verb.textContent = stale ? '无新记录' : '';
+        if (since) since.textContent = stale ? ' · ' + span(quiet) : '';
       }
       if (status && status.dataset.state !== 'paused') {
         const state = !live || gone ? '' : stale ? 'quiet' : 'running';
@@ -147,13 +145,13 @@ export const liveClient = `
       // Prefer the innermost block crossing the viewport, then the first below.
       const anchor = visible.filter(node => node.getBoundingClientRect().top <= top).at(-1) || visible[0];
       const anchorKey = anchor && key(anchor), anchorTop = anchor && anchor.getBoundingClientRect().top;
-      const oldScroll = timeline.scrollTop, mapScroll = turnMap && turnMap.scrollTop;
+      const oldScroll = timeline.scrollTop;
       const active = document.activeElement, activeKey = active && key(active);
       const expanded = new Set(groups().filter(group => group.open).map(group => group.dataset.actionGroup));
       const hadFocus = document.hasFocus() && active && sidecar.contains(active);
       const existing = new Map(panels().map(panel => [panel.dataset.turnPanel, panel]));
-      const wasLive = panels()[0]?.hasAttribute('data-last-at') ? panels()[0].dataset.turnPanel : '';
       const latestChanged = message.order[0] !== panels()[0]?.dataset.turnPanel || message.turns.some(turn => turn.key === message.order[0]);
+      const wasNewest = panels()[0]?.dataset.turnPanel || '';
       const incoming = new Map();
       for (const turn of message.turns) {
         const next = fragment(turn.html).firstElementChild;
@@ -177,15 +175,12 @@ export const liveClient = `
         after = node;
       }
       for (const [id, node] of existing) if (!message.order.includes(id)) node.remove();
-      patch(turnMap, message.map); patch(turnLens, message.lens);
+      patch(document.querySelector('.toc-list'), message.lens);
       if (!message.reset) stagger(arrivals);
       arrivals = [];
       // A failed call can move out of an ordinary action run. Its disclosure
       // identity still denotes the same source input, so preserve reader state.
       groups().forEach(group => { group.open = expanded.has(group.dataset.actionGroup); });
-      const title = document.querySelector('.session-title');
-      if (title && typeof message.name === 'string') title.textContent = message.name;
-      if (title && typeof message.identity === 'string') title.title = message.identity;
       version = message.version; resyncPending = false;
       const health = message.health;
       agentState = health && (health.agent === 'busy' || health.agent === 'waiting') ? 'busy' : health && health.agent === 'idle' ? 'idle' : '';
@@ -195,22 +190,18 @@ export const liveClient = `
         if (status && status.dataset.state === 'paused') status.dataset.state = '';
         if (problem) problem.hidden = true;
       }
+      // A new turn: the reader on the newest one sent it, and goes on to it. Someone reading an older turn stays, with a note at the bottom.
+      const arrivedTurn = !message.reset && message.order.length && !existing.has(message.order[0]) && existing.size ? message.order[0] : '';
+      if (arrivedTurn && (following || selectedTurnId === wasNewest)) { selectedTurnId = arrivedTurn; resumeFollowing(); }
+      else if (arrivedTurn) noticeTurnId = arrivedTurn;
+      if (following) selectedTurnId = message.order[0] || selectedTurnId;
       onUpdated();
       tickActivity();
       const found = anchorKey && [...timeline.querySelectorAll('[data-observation-key], [data-turn-panel]')].find(node => key(node) === anchorKey);
       // A row just folded away is anchored by its fold line.
       const replacement = found && (found.closest('details:not([open])') || found);
       timeline.scrollTop = replacement && Number.isFinite(anchorTop) ? oldScroll + replacement.getBoundingClientRect().top - anchorTop : oldScroll;
-      if (message.order.length && !existing.has(message.order[0]) && existing.size) resumeFollowing();
       if (latestChanged) followLatest();
-      // The turn just ended and its calls folded away: a reader at the live edge
-      // now reads the answer from its start, as it fades in.
-      const newest = panels()[0];
-      if (wasLive && newest && newest.dataset.turnPanel === wasLive && !newest.hasAttribute('data-last-at') && following) {
-        const answer = newest.querySelector('.final-answer');
-        if (answer) setTimeout(() => { if (following && answer.isConnected) readFromTop(answer); }, parseInt(answer.style.animationDelay, 10) || 0);
-      }
-      if (turnMap) turnMap.scrollTop = mapScroll;
       if (hadFocus && !active.isConnected && activeKey && document.hasFocus()) {
         const target = [...sidecar.querySelectorAll('button, summary')].find(node => key(node) === activeKey);
         if (target && !target.closest('[hidden]') && !(target.tagName !== 'SUMMARY' && target.closest('details:not([open])'))) target.focus({ preventScroll: true });

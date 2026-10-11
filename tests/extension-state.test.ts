@@ -841,7 +841,7 @@ const posted = (host: ReturnType<typeof harness>, type: string) => (host.api.obs
 const followButtonShown = (host: ReturnType<typeof harness>, messagesBefore: number) => {
   const html: string = (host.api.observer as any).webview.html;
   const later = posted(host, 'follow').slice(messagesBefore);
-  return later.length ? later.at(-1).paused : !/data-action="resumeFollow"[^>]* hidden>/.test(html.slice(html.indexOf('<main')));
+  return later.length ? later.at(-1).paused : !/<div class="integration-hint follow-session" hidden>/.test(html.slice(html.indexOf('<main')));
 };
 
 test('the window follows its own current session, and only that one', async () => {
@@ -900,10 +900,10 @@ test('an approval and text on screen reach the newest turn without a new record'
     host.sessionStates.list = [liveState('a', { phase: 'waiting', approval: { tool: 'Write', summary: '/fixture/numbers.txt', at: 1 } })];
     await host.api.refreshStates(); for (let i = 0; i < 3; i++) await tick();
     const waiting = posted(host, 'observation').at(-1);
-    assert.ok(waiting.turns.some((turn: any) => turn.html.includes('等你批准') && turn.html.includes('Write numbers.txt')));
+    assert.ok(waiting.turns.some((turn: any) => turn.html.includes('Needs approval') && turn.html.includes('<b>Write</b> · numbers.txt')));
     host.sessionStates.list = [liveState('a', { phase: 'idle' })];
     await host.api.refreshStates(); for (let i = 0; i < 3; i++) await tick();
-    assert.ok(!posted(host, 'observation').at(-1).turns.some((turn: any) => turn.html.includes('等你批准')), 'Answered: the wait is gone');
+    assert.ok(!posted(host, 'observation').at(-1).turns.some((turn: any) => turn.html.includes('Needs approval')), 'Answered: the wait is gone');
     const count = posted(host, 'observation').length;
     await host.api.refreshStates(); for (let i = 0; i < 3; i++) await tick();
     assert.equal(posted(host, 'observation').length, count, 'Unchanged state posts nothing');

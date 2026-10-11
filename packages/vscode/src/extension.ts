@@ -76,8 +76,15 @@ export function activate(context: vscode.ExtensionContext) {
     if (!disposed && token === scanGeneration) candidates = result.candidates;
     return result;
   }
+  /** The session's name, in the view's title bar after its name: only a name the agent saved, never the first request. */
+  function describe(snapshot: SessionData | undefined) {
+    if (!observer) return;
+    const named = snapshot && (snapshot.titleSource === 'claude-ai-title' || snapshot.titleSource === 'codex-index') ? snapshot.title : undefined;
+    if (observer.description !== named) observer.description = named;
+  }
   function renderObserver() {
     if (!observer) return;
+    describe(workspaceGap() ? undefined : session);
     gapShown = workspaceGap();
     if (gapShown) observer.webview.html = renderWorkspaceGap(gapShown, nonce(), vscode.env?.language);
     else {
@@ -105,6 +112,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (!source || !view || !panel || disposed) return;
     const extras = liveExtras(source.session);
     publishedExtras = JSON.stringify(extras);
+    describe(source.session);
     const message = view.update(source.session, source.health, reset, extras);
     delivery = delivery.catch(() => undefined).then(async () => {
       if (!disposed && live === source && observer === panel) await panel.webview.postMessage(message);

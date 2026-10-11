@@ -32,12 +32,14 @@
       {
         "command": "agentSidecar.chooseSession",
         "title": "Choose Project Session",
-        "category": "Agent Sidecar"
+        "category": "Agent Sidecar",
+        "icon": "$(arrow-swap)"
       },
       {
         "command": "agentSidecar.refresh",
         "title": "Refresh Selected Session",
-        "category": "Agent Sidecar"
+        "category": "Agent Sidecar",
+        "icon": "$(refresh)"
       },
       {
         "command": "agentSidecar.keepEvidence",
@@ -50,6 +52,13 @@
         "category": "Agent Sidecar"
       }
     ],
+    "menus": {
+      "view/title": [
+        { "command": "agentSidecar.chooseSession", "when": "view == agentSidecar.observer", "group": "navigation@1" },
+        { "command": "agentSidecar.refresh", "when": "view == agentSidecar.observer", "group": "navigation@2" },
+        { "command": "agentSidecar.coverage", "when": "view == agentSidecar.observer", "group": "more@1" }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {

@@ -15,19 +15,21 @@ const session = () => parse([
 ]);
 const latestHtml = (live?: Parameters<typeof projectSidecar>[0]['live']) => projectSidecar({ projectName: 'p', session: session(), locale: 'zh-CN', live }).turns.at(-1)!.html;
 
-test('waiting for an approval replaces the status word, naming the tool and the file', () => {
+test('waiting for an approval ends the turn with Needs approval, naming the tool and the file; the call shows ?', () => {
   const html = latestHtml({ approval: { tool: 'Write', summary: '/private/tmp/project/numbers.txt' } });
-  assert.match(html, /class="cseg live-tail awaiting"/);
-  assert.match(html, /<span class="cwait">等你批准<\/span> · <span class="cwait-what">Write numbers\.txt<\/span>/);
-  assert.ok(!html.includes('data-live-verb'), 'No status word while the agent waits for the reader');
-  assert.match(latestHtml({ approval: { tool: 'Bash', summary: 'rm -rf build' } }), /Bash rm -rf build/);
-  assert.match(latestHtml({}), /data-live-verb/, 'Without an approval the status word stays');
+  assert.match(html, /class="cseg tend awaiting"/);
+  assert.match(html, /<div class="tlabel" data-tone="yellow">Needs approval<\/div><div class="cwait-what"><b>Write<\/b> · numbers\.txt<\/div>/);
+  assert.match(html, /在 Claude Code 里选择批准或拒绝。/);
+  assert.match(html, /data-out data-ask[^>]*><span class="cbranch" aria-hidden="true">\?<\/span>/, 'The call waiting on the reader shows ? where its branch would be');
+  assert.ok(!html.includes('live-tail"'), 'No spinner while the agent waits for the reader');
+  assert.match(latestHtml({ approval: { tool: 'Bash', summary: 'rm -rf build' } }), /<b>Bash<\/b> · rm -rf build/);
+  assert.match(latestHtml({}), /class="cseg tend live-tail"/, 'Without an approval the end spinner stays');
 });
 
-test('text on screen shows faint before the tail, and its markup is escaped like any agent text', () => {
+test('text on screen is set as the words will be, before the end, and its markup is escaped like any agent text', () => {
   const html = latestHtml({ draft: '**先说结论**：<img src=x onerror=alert(1)>' });
-  const draft = html.indexOf('class="cseg cdraft-item"'), tail = html.indexOf('class="cseg live-tail"');
-  assert.ok(draft > 0 && tail > draft, 'The draft comes before the status line');
+  const draft = html.indexOf('data-observation-key="draft:'), tail = html.indexOf('class="cseg tend live-tail"');
+  assert.ok(draft > 0 && tail > draft, 'The draft comes before the end spinner');
   assert.match(html, /<strong>先说结论<\/strong>/);
   assert.ok(!/<img/.test(html.slice(draft, tail)));
 });
@@ -38,15 +40,15 @@ test('extras belong to the newest turn only and change its HTML without a new re
   assert.notEqual(plain.turns.at(-1)!.html, waiting.turns.at(-1)!.html);
   const ended = parse([row('user', '只回复 ok', 0), { ...row('assistant', [], 1), message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'ok' }] } }]);
   const html = projectSidecar({ projectName: 'p', session: ended, locale: 'zh-CN', live: { approval: { tool: 'Write', summary: 'x' }, draft: 'late' } }).turns.at(-1)!.html;
-  assert.ok(!html.includes('等你批准') && !html.includes('cdraft'), 'An ended turn waits for nothing');
+  assert.ok(!html.includes('Needs approval') && !html.includes('draft:'), 'An ended turn waits for nothing');
 });
 
 test('the follow button and the integration hint render hidden unless asked for', () => {
   const page = (options: { followPaused?: boolean; integrationHint?: boolean }) => renderSidecar({ projectName: 'p', session: session(), nonce: 'n', streamId: 's', ...options });
   const panel = (html: string) => html.slice(html.indexOf('<main'));
-  assert.match(panel(page({})), /class="follow-button follow-session" data-action="resumeFollow"[^>]* hidden>/);
+  assert.match(panel(page({})), /<div class="integration-hint follow-session" hidden>/);
   assert.match(panel(page({})), /<div class="integration-hint" hidden>/);
-  assert.doesNotMatch(panel(page({ followPaused: true })), /data-action="resumeFollow"[^>]* hidden>/);
+  assert.match(panel(page({ followPaused: true })), /<div class="integration-hint follow-session"><span>自动跟随已暂停/);
   assert.match(panel(page({ integrationHint: true })), /<div class="integration-hint"><span>装上 Agent Sidecar 接入后/);
 });
 
@@ -63,7 +65,7 @@ test('the page shows and hides the follow button and the hint as the host says, 
   assert.equal(button.hidden, true); assert.equal(hint.hidden, true);
   send({ type: 'follow', paused: true }); send({ type: 'integrationHint', show: true });
   assert.equal(button.hidden, false); assert.equal(hint.hidden, false);
-  button.click();
+  button.querySelector<HTMLButtonElement>('[data-action="resumeFollow"]')!.click();
   hint.querySelector<HTMLButtonElement>('[data-action="dismissHint"]')!.click();
   // Objects from the page's realm compare by their JSON.
   assert.equal(JSON.stringify(sent.filter((message: any) => message.type !== 'observerReady')), JSON.stringify([{ type: 'resumeFollow' }, { type: 'dismissHint' }]));

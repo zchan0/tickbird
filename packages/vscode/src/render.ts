@@ -90,19 +90,10 @@ const styles = `
   .sidecar { display: flex; flex-direction: column; height: 100vh; background: var(--surface); }
   [hidden] { display: none !important; }
   .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; flex: none; }
-  .project { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
-  .sidecar > .toolbar { min-height: 49px; padding: 9px 10px; border-bottom: 1px solid var(--border); }
-  .session-title { min-width: 0; font-size: 13px; line-height: 1.5; font-weight: 600; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-  .controls { display: flex; align-items: center; gap: 1px; flex: none; }
-  .observation-status { flex: none; color: var(--muted); font-size: 10px; white-space: nowrap; }
-  .observation-status[data-state="paused"] { color: var(--warning); }
-  .observation-status[data-state="running"] { color: var(--vscode-foreground); }
-  .observation-status[data-state="running"]::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 1px; border-radius: 50%; background: var(--vscode-charts-green, var(--vscode-foreground)); }
   .observation-problem { flex: none; color: var(--warning); padding: 7px 12px; font-size: 11px; border-bottom: 1px solid var(--border); }
   .integration-hint { flex: none; display: flex; gap: 8px; align-items: baseline; padding: 6px 12px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); }
   .integration-hint > span { flex: 1; min-width: 0; }
   .integration-hint > button { flex: none; border: 0; padding: 0; background: transparent; color: var(--vscode-textLink-foreground); font-size: 11px; }
-  .follow-session { color: var(--vscode-foreground); background: var(--vscode-list-hoverBackground); }
   .icon-button { display: grid; place-items: center; width: 24px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: transparent; }
   .icon-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
   .icon-button:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
@@ -110,24 +101,6 @@ const styles = `
   .quiet-button:hover:not(:disabled), .node-button:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
   .eyebrow { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
   .reading-layout { display: flex; flex: 1; min-height: 0; }
-  .turn-map { position: relative; flex: 0 0 20px; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; padding: 8px 1px; gap: 0; }
-  .turn-map button:first-child { margin-top: auto; }
-  .turn-map button:last-child { margin-bottom: auto; }
-  .turn-map::-webkit-scrollbar { display: none; }
-  .turn-mark { position: relative; display: flex; justify-content: center; align-items: center; border: 0; background: transparent; min-height: 16px; flex: none; width: 100%; padding: 4px 1px; border-radius: 3px; }
-  .turn-tick { height: 2px; background: var(--vscode-foreground); opacity: .25; width: 5px; border-radius: 1px; }
-  .turn-mark[data-weight="2"] .turn-tick { width: 7px; }
-  .turn-mark[data-weight="3"] .turn-tick { width: 9px; }
-  .turn-mark[data-weight="4"] .turn-tick { width: 12px; }
-  .turn-mark:hover, .turn-mark:focus-visible { background: var(--vscode-list-hoverBackground); }
-  .turn-mark[aria-pressed="true"] .turn-tick { opacity: .9; }
-  .turn-lens { position: fixed; z-index: 3; width: min(260px, calc(100vw - 28px)); max-height: calc(100vh - 16px); overflow-y: auto; padding: 5px; border: 1px solid var(--vscode-widget-border, var(--border)); border-radius: 7px; background: var(--vscode-editorWidget-background, var(--surface)); box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent); }
-  .turn-lens button { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 9px; border: 0; border-radius: 4px; background: transparent; text-align: left; }
-  .turn-lens button:hover, .turn-lens button:focus-visible { background: var(--vscode-list-hoverBackground); }
-  .turn-lens button[aria-pressed="true"] { background: var(--vscode-list-inactiveSelectionBackground); }
-  .turn-lens-number { color: var(--muted); font-size: 10px; }
-  .turn-lens-title { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
-  .turn-lens-request { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12px; line-height: 1.5; }
   .tool-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; font-size: 12px; }
   .tool-fields dt { color: var(--muted); }
   .tool-fields dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -277,9 +250,6 @@ const styles = `
   .bash-disclosure .io-preview-text { -webkit-line-clamp: 6; max-height: 10.5em; }
   .io-more { display: block; width: 100%; padding: 5px 8px; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 11px; text-align: right; }
   .io-more:hover { color: var(--vscode-foreground); background: var(--vscode-list-hoverBackground); }
-  .follow-bar { flex: none; padding: 5px 12px 6px 26px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 10px; }
-  .follow-button { border: 0; border-radius: 4px; padding: 3px 7px; color: var(--vscode-foreground); background: var(--vscode-list-hoverBackground); font-size: 11px; }
-  .follow-button[aria-pressed="true"] { color: var(--muted); background: transparent; }
   .tool-disclosure > summary, .record-disclosure > summary { cursor: pointer; list-style: none; }
   .tool-disclosure > summary::-webkit-details-marker, .record-disclosure > summary::-webkit-details-marker { display: none; }
   .tool-disclosure > summary:hover, .record-disclosure > summary:hover { background: var(--vscode-list-hoverBackground); }
@@ -309,7 +279,6 @@ const styles = `
   .file-change-result { margin: 0; }
   .file-change-result .action-copy { grid-column: auto; }
   .text-expanded > .question-text, .text-expanded > .narrative-preview { max-height: none; }
-  .follow-button { padding: 2px 5px; font-size: 10px; white-space: nowrap; margin-right: 3px; }
   .action-io { margin: 0 0 0 27px; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
   .io-preview { display: grid; grid-template-columns: 25px minmax(0, 1fr); gap: 7px; width: 100%; padding: 8px; border: 0; background: var(--vscode-textCodeBlock-background, transparent); text-align: left; }
   .io-preview + .io-preview { border-top: 1px solid var(--border); }
@@ -345,11 +314,6 @@ const styles = `
   figure img { display: block; max-width: 100%; height: auto; }
   figcaption { color: var(--muted); font-size: 11px; margin-top: 8px; }
   /* Accepted reading layout: prose gets room; actions remain compact and quiet. */
-  .sidecar > .toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px; padding: 14px 14px 10px; }
-  .session-title { grid-column: 1 / -1; font-size: 14px; font-weight: 500; }
-  .observation-status { font-size: 11px; }
-  .controls { justify-content: flex-end; gap: 3px; }
-  .follow-button { white-space: nowrap; font-size: 11px; min-height: 26px; }
   .timeline { padding-top: 18px; padding-bottom: 30px; }
   .turn-question { padding: 12px 13px; border-radius: 9px; background: var(--vscode-editor-background); margin-bottom: 20px; }
   .question-text { font-weight: 400; line-height: 1.8; max-height: none; }
@@ -414,6 +378,36 @@ const styles = `
   .write-added, .write-removed { font: 11px/1.6 var(--vscode-editor-font-family, monospace); white-space: nowrap; }
   .write-added { color: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-foreground)); }
   .write-removed { color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-errorForeground)); }
+  /* One turn to a page: the header says which, ‹ › go to the turn before and after, ☰ lists them all. */
+  .page-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 8px 3px 20px; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .ph-turn { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ph-turn b { font-weight: 600; }
+  .ph-turn .tsub { color: var(--muted); }
+  .ph-aside { flex: none; display: flex; align-items: center; gap: 1px; }
+  .ph-nav { width: 22px; height: 22px; font-size: 14px; line-height: 1; color: var(--muted); }
+  .ph-nav:hover:not(:disabled) { color: var(--vscode-foreground); }
+  .ph-nav:disabled { opacity: .35; }
+  .ph-follow { border: 0; border-radius: 4px; padding: 2px 6px; margin-right: 4px; background: transparent; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .ph-follow:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+  .ph-follow[aria-pressed="true"] { display: none; }
+  .timeline { padding: 0 0 24px; }
+  .turn-panel:not([data-current]) { display: none; }
+  .turn-panel + .turn-panel { margin-top: 0; padding-top: 0; border-top: 0; }
+  .turn-panel .turn-heading { display: none; }
+  .sidecar[data-toc] .timeline, .sidecar[data-toc] .new-turn { display: none; }
+  .toc { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 8px 16px 12px; }
+  .toc-head { padding: 4px 8px 8px; font-size: 12px; }
+  .toc-head .tsub { color: var(--muted); }
+  .toc-list button { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; text-align: left; }
+  .toc-list button:hover, .toc-list button:focus-visible { background: var(--vscode-list-hoverBackground); }
+  .toc-list button[aria-pressed="true"] { background: var(--vscode-list-inactiveSelectionBackground); }
+  .toc-list .turn-lens-number { color: var(--muted); font-size: 11px; }
+  .toc-list .turn-lens-request { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12.5px; line-height: 1.5; }
+  /* A turn that started while an older one is on the page: one line at the bottom, its prompt after the label. */
+  .new-turn { flex: none; display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 5px 14px 6px 20px; border: 0; border-top: 1px solid var(--border); background: var(--surface); text-align: left; }
+  .new-turn .nt-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
+  .new-turn:hover .nt-text { color: var(--vscode-foreground); }
+  .new-turn .tlabel { color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); }
 `;
 
 const script = `(() => {
@@ -434,7 +428,7 @@ const script = `(() => {
   const nodes = () => [...document.querySelectorAll('button[data-item-id]')];
   const panels = () => [...document.querySelectorAll('[data-turn-panel]')];
   const turns = () => [...document.querySelectorAll('button[data-turn-id]')];
-  const lensTurns = () => [...document.querySelectorAll('button[data-lens-turn-id]')];
+  const lensTurns = () => [...document.querySelectorAll('.toc button[data-lens-turn-id]')];
   const groups = () => [...document.querySelectorAll('details[data-action-group]')];
   const summaries = () => [...document.querySelectorAll('summary[data-action-group]')];
   // A changed evidence membership receives a new ID. Do not silently retarget
@@ -453,10 +447,8 @@ const script = `(() => {
   ${followClient}
   ${inlineClient}
   const persist = () => {
-    const panel = panels().find(panel => panel.dataset.turnPanel === selectedTurnId);
     vscode.setState({ sessionId, selectedId, focusId, focusAction, scrollTop: timeline ? timeline.scrollTop : 0,
-      readingVersion: 2, selectedTurnId, focusTurnId, focusGroupId, autoFollow: following,
-      readingAnchor: panel && timeline ? { turnId: selectedTurnId, offset: timeline.scrollTop - panel.offsetTop } : undefined,
+      readingVersion: 3, selectedTurnId, focusTurnId, focusGroupId, autoFollow: following,
       mapScrollTop: turnMap ? turnMap.scrollTop : 0,
       expandedTextIds: [...expandedTexts],
       expandedInlineSections: [...expandedInlineSections],
@@ -525,36 +517,75 @@ const script = `(() => {
     else if (mark.offsetTop + mark.offsetHeight > turnMap.scrollTop + turnMap.clientHeight)
       turnMap.scrollTop = mark.offsetTop + mark.offsetHeight - turnMap.clientHeight;
   };
-  const trackReading = () => {
-    if (!timeline) return;
-    const visible = panels().filter(panel => panel.offsetTop <= timeline.scrollTop + 24).at(-1) || panels()[0];
-    if (visible && selectedTurnId !== visible.dataset.turnPanel) {
-      selectedTurnId = visible.dataset.turnPanel;
-      selectTurn(); revealMark();
+  // One turn to a page, as in the terminal: which turn is the reader's choice, not where the page is scrolled.
+  const trackReading = () => {};
+  const pageHead = document.querySelector('.ph-turn');
+  const toc = document.querySelector('.toc');
+  const newTurn = document.querySelector('.new-turn');
+  // A turn that started while an older one is on the page: noted at the bottom until the reader goes there.
+  let noticeTurnId = '';
+  const current = () => panels().find(panel => panel.dataset.turnPanel === selectedTurnId) || panels()[0];
+  const showTurn = () => {
+    const shown = current();
+    if (shown) selectedTurnId = shown.dataset.turnPanel;
+    panels().forEach(panel => panel.toggleAttribute('data-current', panel === shown));
+    const total = String(Math.max(0, ...panels().map(panel => Number(panel.dataset.ordinal) || 0)));
+    document.querySelectorAll('[data-turn-total]').forEach(node => { if (node.textContent !== total) node.textContent = total; });
+    const heading = shown && shown.querySelector('.turn-heading');
+    if (pageHead) pageHead.innerHTML = heading ? heading.innerHTML : '';
+    const all = panels(), at = all.indexOf(shown);
+    document.querySelectorAll('[data-nav="older"]').forEach(button => { button.disabled = at < 0 || at >= all.length - 1; });
+    document.querySelectorAll('[data-nav="newer"]').forEach(button => { button.disabled = at <= 0; });
+    if (noticeTurnId && (!all.some(panel => panel.dataset.turnPanel === noticeTurnId) || noticeTurnId === selectedTurnId)) noticeTurnId = '';
+    if (newTurn) {
+      newTurn.hidden = !noticeTurnId;
+      const request = noticeTurnId && all.find(panel => panel.dataset.turnPanel === noticeTurnId)?.querySelector('.tprompt .question-text');
+      newTurn.querySelector('.nt-text').textContent = request ? ' ' + request.textContent.replace(/\s+/g, ' ').trim() : '';
     }
+    selectTurn();
   };
+  const closeToc = () => { if (toc && !toc.hidden) { toc.hidden = true; sidecar.removeAttribute('data-toc'); } };
+  const openToc = () => {
+    if (!toc) return;
+    toc.hidden = false; sidecar.setAttribute('data-toc', '');
+    const mark = lensTurns().find(button => button.dataset.lensTurnId === selectedTurnId);
+    if (mark) { mark.scrollIntoView({ block: 'nearest' }); mark.focus({ preventScroll: true }); }
+  };
+  // Going to a turn reads it from its start; going to the newest follows it again, at its end while it runs.
+  const goTo = id => {
+    closeToc();
+    const all = panels(), target = all.find(panel => panel.dataset.turnPanel === id);
+    if (!target) return;
+    selectedTurnId = id; selectedId = ''; focusId = '';
+    select(); showTurn();
+    if (target === all[0]) { resumeFollowing(); timeline.scrollTop = target.hasAttribute('data-last-at') ? timeline.scrollHeight : 0; followLatest(); }
+    else { pauseFollowing(); timeline.scrollTop = 0; }
+    persist();
+  };
+  const step = by => { const all = panels(), at = all.indexOf(current()); const target = all[at + by]; if (target) goTo(target.dataset.turnPanel); };
+  document.addEventListener('click', event => {
+    const target = event.target instanceof Element ? event.target.closest('[data-nav]') : null;
+    if (!target || target.disabled) return;
+    const action = target.dataset.nav;
+    if (action === 'older') step(1);
+    else if (action === 'newer') step(-1);
+    else if (action === 'toc') { if (toc && toc.hidden) openToc(); else closeToc(); }
+    else if (action === 'newest' && noticeTurnId) goTo(noticeTurnId);
+  });
+  // The terminal's keys: [ and ] for the turn before and after, t for 目录, Esc back.
+  document.addEventListener('keydown', event => {
+    if (event.metaKey || event.ctrlKey || event.altKey || (event.target instanceof Element && event.target.closest('input, textarea'))) return;
+    if (event.key === '[') { event.preventDefault(); step(1); }
+    else if (event.key === ']') { event.preventDefault(); step(-1); }
+    else if (event.key === 't') { event.preventDefault(); if (toc && toc.hidden) openToc(); else closeToc(); }
+    else if (event.key === 'Escape' && toc && !toc.hidden) { event.preventDefault(); closeToc(); timeline.focus({ preventScroll: true }); }
+  });
   selectTurn();
   document.addEventListener('click', event => {
     const target = event.target instanceof Element ? event.target.closest('button') : null;
     if (!target || target.disabled) return;
     const turnId = target.dataset.turnId || target.dataset.lensTurnId;
-    if (turnId) {
-      const panel = panels().find(panel => panel.dataset.turnPanel === turnId);
-      if (!panel) return;
-      selectedTurnId = turnId;
-      selectedId = ''; focusId = ''; focusAction = ''; focusGroupId = ''; focusTurnId = selectedTurnId;
-      selectTurn(); select();
-      if (timeline) timeline.scrollTop = panel.offsetTop;
-      hideLens();
-      revealMark();
-      if (target.dataset.lensTurnId) {
-        returningFromLens = true;
-        turns().find(button => button.dataset.turnId === turnId)?.focus({ preventScroll: true });
-        returningFromLens = false;
-      }
-      persist();
-      return;
-    }
+    if (turnId) { focusAction = ''; focusGroupId = ''; goTo(turnId); return; }
     if (target.dataset.itemId) {
       selectedId = target.dataset.itemId;
       focusId = selectedId;
@@ -638,25 +669,24 @@ const script = `(() => {
     const fold = event.target instanceof Element && event.target.matches('details[data-fold]') ? event.target : null;
     if (!fold) return;
     if (fold.open) openFolds.add(fold.dataset.fold); else openFolds.delete(fold.dataset.fold);
+    // An opened answer that does not fit below reads from its label; one that fits stays put.
+    if (fold.open && fold.matches('.fanswer') && timeline && fold.getBoundingClientRect().bottom > timeline.getBoundingClientRect().bottom) readFromTop(fold);
     persist();
   }, true);
+  // A call still out turns where its branch would be, as the terminal's does: one frame each 80ms.
+  const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const turn = () => { const frame = still ? '⠿' : SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]; document.querySelectorAll('.cspin').forEach(spin => { if (spin.textContent !== frame) spin.textContent = frame; }); };
+  turn(); if (!still) setInterval(turn, 80);
   const ready = () => {
     applyFolds();
     measureText();
     select();
     if (timeline) {
-      const anchor = saved.readingVersion === 2 && saved.readingAnchor;
-      const panel = anchor && panels().find(panel => panel.dataset.turnPanel === anchor.turnId);
-      if (panel && Number.isFinite(anchor.offset)) timeline.scrollTop = Math.max(0, panel.offsetTop + anchor.offset);
-      else if (saved.readingVersion === 2 && Number.isFinite(saved.scrollTop)) timeline.scrollTop = saved.scrollTop;
-      else {
-        // Migrate the old single-turn reading location, without hiding history.
-        const legacy = panels().find(panel => panel.dataset.turnPanel === saved.selectedTurnId);
-        const offset = saved.turnScroll && saved.turnScroll[saved.selectedTurnId];
-        timeline.scrollTop = legacy ? legacy.offsetTop + (Number.isFinite(offset) ? offset : 0) : 0;
-      }
-      trackReading();
-      followLatest();
+      if (following) selectedTurnId = panels()[0]?.dataset.turnPanel || '';
+      showTurn();
+      if (following) { timeline.scrollTop = timeline.scrollHeight; followLatest(); }
+      else timeline.scrollTop = saved.readingVersion === 3 && Number.isFinite(saved.scrollTop) ? saved.scrollTop : 0;
     }
     if (turnMap) {
       if (Number.isFinite(saved.mapScrollTop)) turnMap.scrollTop = saved.mapScrollTop;
@@ -682,7 +712,7 @@ const script = `(() => {
       bindGroups();
       if (selectedId && !nodes().some(node => node.dataset.itemId === selectedId)) selectedId = '';
       if (!panels().some(panel => panel.dataset.turnPanel === selectedTurnId)) selectedTurnId = panels()[0]?.dataset.turnPanel || '';
-      select(); selectTurn();
+      select(); showTurn();
       loadOpenInline();
       if (turnLens && !turnLens.hidden && lensAnchor) {
         const mark = turns().find(button => button.dataset.turnId === lensAnchor.dataset.turnId);
@@ -860,17 +890,16 @@ function renderRequest(item: TimelineItem): string {
   return `<section class="turn-question" data-text-id="${escapeHtml(item.id)}" aria-label="用户问题"><div class="question-text">${renderUserText(publicBody(item))}</div><div class="question-foot">${more}</div></section>`;
 }
 
-function renderTurn(group: TurnGroup, locale?: string, latest = false, provider?: Provider, extras?: LiveExtras): string {
+function renderTurn(group: TurnGroup, session: SessionData, locale?: string, latest = false, extras?: LiveExtras): string {
   const keyed = (html: string, id: string) => html.slice(0, html.indexOf('>')).includes('data-observation-key=') ? html
     : html.replace(/^<(li|section)/, `<$1 data-observation-key="${escapeHtml(id)}"`);
   return renderChapterTurn(group, {
     publicBody,
     request: item => keyed(renderRequest(item), item.id),
     record: item => keyed(renderItem(item, locale), item.id),
-    answer: renderNarrative,
     attachments: renderAttachments,
     unavailable: unavailableReason,
-  }, latest, provider, extras);
+  }, { latest, session, extras });
 }
 
 function toolbarIcon(action: string, label: string, path: string): string {
@@ -921,7 +950,7 @@ export function projectSidecar({ projectName, session, locale, live }: Pick<Side
       const extras = latest ? live : undefined;
       const digest = cache ? createHash('sha256').update(JSON.stringify([locale, latest, group, extras ?? null])).digest('hex') : '';
       const previous = cache?.get(group.key);
-      const html = previous?.digest === digest ? previous.html : renderTurn(group, locale, latest, session?.provider, extras);
+      const html = previous?.digest === digest ? previous.html : renderTurn(group, session!, locale, latest, extras);
       cache?.set(group.key, { digest, html });
       return { key: group.key, html };
     }) };
@@ -929,10 +958,15 @@ export function projectSidecar({ projectName, session, locale, live }: Pick<Side
 
 export function renderSidecar({ projectName, session, nonce, streamId = '', locale, live, followPaused = false, integrationHint = false }: SidecarRenderOptions, projection?: SidecarProjection): string {
   const p = projection ?? projectSidecar({ projectName, session, locale, live });
+  const nav = (action: string, label: string, glyph: string) => `<button type="button" class="icon-button ph-nav" data-nav="${action}" aria-label="${label}" title="${label}">${glyph}</button>`;
   const body = `<main class="sidecar" data-observation-stream="${escapeHtml(streamId)}" aria-label="Sidecar 过程观察">
-    <header class="toolbar"><h1 class="session-title" title="${escapeHtml(p.identity)}">${escapeHtml(p.name)}</h1><span class="observation-status" title="按会话记录推断：最新一轮未结束且仍有新记录时显示运行中" ${streamId ? '' : 'hidden'}></span><div class="controls"><button type="button" class="follow-button follow-session" data-action="resumeFollow" title="自动跟随已暂停：你选了另一个会话。点击跟随这个窗口正在进行的会话"${followPaused ? '' : ' hidden'}>跟随当前会话</button>${streamId ? '<button type="button" class="follow-button" data-follow-toggle aria-pressed="true">跟随 ↓</button>' : ''}${toolbarIcon('chooseSession', '切换会话', 'M3 4.5h10m-3-3 3 3-3 3M13 11.5H3m3-3-3 3 3 3')}${toolbarIcon('refresh', '刷新', 'M12.5 5A5 5 0 1 0 13 9M12.5 1.5V5H9')}${toolbarIcon('coverage', '覆盖记录', 'M3 2.5h10v11H3zM5.5 5.5h5M5.5 8h5M5.5 10.5h3')}</div></header>
     <div class="integration-hint"${integrationHint ? '' : ' hidden'}><span>装上 Agent Sidecar 接入后，可以自动跟随当前会话，并显示「等你批准」。</span><button type="button" data-action="dismissHint">不再提示</button></div>
-    <div class="observation-problem" hidden></div><div class="reading-layout"><nav class="turn-map" aria-label="回合目录（从新到旧）">${p.map}</nav><nav id="turn-lens" class="turn-lens" aria-label="对应回合的问题预览" hidden>${p.lens}</nav><section class="timeline" tabindex="0" aria-label="完整会话过程（从新到旧）"><div data-live-warnings>${p.warnings}</div><div data-live-empty>${p.empty}</div>${p.turns.map(turn => turn.html).join('')}</section></div></main>`;
+    <div class="integration-hint follow-session"${followPaused ? '' : ' hidden'}><span>自动跟随已暂停：你选了另一个会话。</span><button type="button" data-action="resumeFollow">跟随当前会话</button></div>
+    <div class="observation-problem" hidden></div>
+    <header class="page-head"><span class="ph-turn"></span><span class="ph-aside">${streamId ? '<button type="button" class="ph-follow" data-follow-toggle aria-pressed="true"></button>' : ''}${nav('older', '上一轮 [', '‹')}${nav('newer', '下一轮 ]', '›')}${nav('toc', '目录 t', '☰')}</span></header>
+    <nav class="toc" aria-label="目录（从新到旧）" hidden><div class="toc-head"><b>目录</b><span class="tsub"> 共 <span data-turn-total></span> 轮</span></div><div class="toc-list">${p.lens}</div></nav>
+    <section class="timeline" tabindex="0" aria-label="这一轮的过程"><div data-live-warnings>${p.warnings}</div><div data-live-empty>${p.empty}</div>${p.turns.map(turn => turn.html).join('')}</section>
+    <button type="button" class="new-turn" data-nav="newest" hidden><span class="tlabel" data-tone="yellow">New turn</span><span class="nt-text"></span></button></main>`;
   return documentHtml('Agent Sidecar', body, nonce, p.sessionKey, locale);
 }
 

@@ -1,9 +1,10 @@
-import type { TimelineItem } from '../../core/src/model';
+import type { SessionData, TimelineItem } from '../../core/src/model';
 import type { TurnGroup } from '../../core/src/timeline';
-import type { ChapterRow, ChangedFile } from '../../core/src/chapters';
-import { clock, duration, rowView, runStarts, turnView } from '../../core/src/turn-view';
+import type { ChapterRow, ChangedFile, TurnSegment } from '../../core/src/chapters';
+import { clock, rowView, turnView } from '../../core/src/turn-view';
+import { announcedRow, callEnd, callSteps, callText, callTool } from '../../core/src/call-line';
+import { shortFileLabels } from '../../core/src/presentation';
 import { renderMarkdown } from './markdown';
-import type { Provider } from '../../core/src/model';
 import type { LiveExtras } from '../../core/src/live-extras';
 
 export type { LiveExtras };
@@ -18,7 +19,6 @@ export interface ChapterRenderers {
   publicBody(item: TimelineItem): string;
   request(item: TimelineItem): string;
   record(item: TimelineItem): string;
-  answer(item: TimelineItem): string;
   /** Images and other blocks that came with the agent's words. */
   attachments(item: TimelineItem): string;
   /** Why a row cannot be opened, in the product's existing words. */
@@ -29,200 +29,243 @@ const escapeHtml = (value: unknown): string => String(value ?? '').replace(/[&<>
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[character]!);
 
-// Machine strings (paths, patterns, identifiers) and the agent's prose are two voices.
-const MACHINE = new Set(['Read', 'Write', 'Edit', 'Skill', 'Instructions', 'Memory', 'Grep', 'Glob', 'ToolSearch', 'WebFetch']);
+const base = (path: string) => path.replace(/\\/g, '/').split('/').at(-1) || path;
 
-function rowHtml(row: ChapterRow, lead: boolean, render: ChapterRenderers, key: string, live: boolean): string {
-  const state = row.outcome ? row.outcome.kind === 'empty' ? 'empty' : 'failed' : row.running ? 'running' : 'info';
-  // In the live turn a call without a return is still out: its arrow moves, the
-  // label stays still. Elsewhere a missing return only means none was recorded.
+/**
+ * A call on the tree: its words in the editor font, grey, and what shows at
+ * its end. A call still out turns where its branch would be; one waiting on
+ * you shows ? there. Done, the branch is back.
+ */
+function callHtml(row: ChapterRow, key: string, session: SessionData, live: boolean, asking: boolean, unavailable: ChapterRenderers['unavailable']): string {
   const view = rowView(row, live);
-  const out = view.out ? ' data-out' : '';
-  const note = view.note ? `<i class="cnone">${escapeHtml(view.note)}</i>` : '';
-  const { word, reason: exit, label, tool } = view;
-  const voice = row.output || MACHINE.has(row.tool) ? 'machine' : 'prose';
-  // A question shows what was chosen under it; waiting in a live turn says so.
-  const answer = !view.choices ? '' : view.choices.map(choice => `<span class="cchoices">${choice.header ? `<i class="cq">${escapeHtml(choice.header)}</i>` : ''}`
-    + (choice.chosen.length ? choice.chosen.map(value => `<b class="cchoice">✓ ${escapeHtml(value)}</b>`).join('')
-      : choice.waiting ? '<i class="cq">等待你的选择</i>' : '')
-    + '</span>').join('');
-  const copy = `<span class="ctool"${lead && tool.length > 7 ? ` title="${escapeHtml(tool)}"` : ''}>${lead ? escapeHtml(tool) : ''}</span>`
-    + `<span class="clabel ${voice}${answer ? ' asked' : ''}">${word ? `<b class="cbad">${word}</b> · ` : ''}${escapeHtml(label)}${answer}`
-    + `${view.count > 1 ? `<i class="crep"> · ${view.count} 次</i>` : ''}`
-    + `${view.empty ? '<i class="cnone">no match</i>' : ''}`
-    + `${note}</span>`;
-  // The state stays in the tooltip; on the row it is the label's shimmer, not a word.
-  const title = [row.tool, label, word, exit, row.running || out ? '进行中' : '', row.openable ? '在编辑器里打开记录' : render.unavailable(row.items)].filter(Boolean).join(' · ');
+  const words = callText(row, session);
+  const end = callEnd(row, session, live);
+  const state = end?.kind === 'failed' ? 'failed' : end?.kind === 'empty' ? 'empty' : view.out || row.running ? 'running' : 'info';
+  const label = words.text + (row.count > 1 ? ` · ${row.count} 次` : '');
+  const tail = (words.more ? `<span class="cmore">+${words.more}</span>` : '')
+    + (end?.kind === 'failed' ? `<span class="cbad" title="${escapeHtml(end.reason)}">${escapeHtml(end.word)}</span>`
+      : end?.kind === 'empty' ? '<span class="cnote">no match</span>'
+      : end?.kind === 'note' ? `<span class="cnote">${escapeHtml(end.text)}</span>`
+      : end?.kind === 'size' ? `<span class="csize">${end.added ? `<span class="cadd">+${end.added}</span>` : ''}${end.removed ? `<span class="cdel">-${end.removed}</span>` : ''}</span>` : '');
+  const out = view.out ? ` data-out${asking ? ' data-ask' : ''}` : '';
+  const copy = `<span class="cbranch" aria-hidden="true">${view.out ? asking ? '?' : '<span class="cspin"></span>' : ''}</span>`
+    + `<span class="clabel${words.command ? ' command' : ''}">${escapeHtml(label)}</span>${tail}`;
+  const title = [callTool(row, session), label, end?.kind === 'failed' ? `${end.word} ${end.reason}`.trim() : '', view.out || row.running ? '进行中' : '', row.openable ? '' : unavailable(row.items)].filter(Boolean).join(' · ');
+  const tool = escapeHtml(callTool(row, session));
   const body = row.openable
-    ? `<button type="button" class="crow node-button" data-item-id="${escapeHtml(row.id)}" data-tool="${escapeHtml(tool)}" data-status="${state}"${out} aria-pressed="false" title="${escapeHtml(title)}">${copy}<span class="cgo" aria-hidden="true">→</span></button>`
-    : `<div class="crow" data-tool="${escapeHtml(tool)}" data-status="${state}"${out} role="group" aria-label="${escapeHtml(title)}">${copy}${out ? '<span class="cgo" aria-hidden="true">→</span>' : '<span></span>'}</div>`;
-  return `<li class="crow-item" data-observation-key="${escapeHtml(key)}">${body}</li>`;
+    ? `<button type="button" class="crow node-button" data-item-id="${escapeHtml(row.id)}" data-tool="${tool}" data-status="${state}"${out} aria-pressed="false" title="${escapeHtml(title)}">${copy}</button>`
+    : `<div class="crow" data-tool="${tool}" data-status="${state}"${out} role="group" aria-label="${escapeHtml(title)}">${copy}</div>`;
+  // A question's chosen answers, under it on the tree.
+  const choices = (view.choices ?? []).map(choice => {
+    const chosen = choice.chosen.length ? choice.chosen.map(value => `<b class="cchoice">✓ ${escapeHtml(value)}</b>`).join('') : choice.waiting ? '<i class="cwaiting">等待你的选择</i>' : '';
+    return chosen ? `<div class="cchoices">${choice.header ? `<i class="cq">${escapeHtml(choice.header)}</i>` : ''}${chosen}</div>` : '';
+  }).join('');
+  return `<li class="crow-item" data-observation-key="${escapeHtml(key)}">${body}${choices}</li>`;
 }
 
-/** A tool name is written once per run of the same tool; the column stays aligned. */
-/** Keyed by position in the chapter, not by row id: rows only ever append, while an
- *  id changes whenever a repeated call raises the count. Position keeps the node,
- *  so a live update rewrites its text in place instead of replacing the row. */
-function rowsHtml(rows: ChapterRow[], render: ChapterRenderers, chapterKey: string, live: boolean): string {
-  const leads = runStarts(rows);
-  return rows.map((row, index) => rowHtml(row, leads[index], render, `${chapterKey}#${index}`, live)).join('');
+/**
+ * A step's calls on a band, under the words that explain them, as a tree: the
+ * tool's name once for a run of one tool, each call hung from it. Every call is
+ * shown: the reader is here for the process. Keyed by position, not by row id:
+ * rows only ever append, while an id changes when a repeated call raises its
+ * count, so a live update rewrites a row in place.
+ */
+function callsHtml(all: ChapterRow[], key: string, session: SessionData, live: boolean, waiting: boolean, unavailable: ChapterRenderers['unavailable']): string {
+  const rows = callSteps(all);
+  if (!rows.length) return '';
+  const names = rows.map(row => callTool(row, session));
+  let html = '';
+  for (let at = 0; at < rows.length;) {
+    let last = at;
+    while (last + 1 < rows.length && names[last + 1] === names[at]) last++;
+    const run = rows.slice(at, last + 1).map((row, index) => callHtml(row, `${key}#${at + index}`, session, live, waiting && at + index === rows.length - 1, unavailable)).join('');
+    html += `<div class="crun" data-observation-key="${escapeHtml(`${key}@${at}`)}"><div class="ctool">${escapeHtml(names[at])}</div><ol class="ctree">${run}</ol></div>`;
+    at = last + 1;
+  }
+  return `<div class="ccalls" data-observation-key="${escapeHtml(key + ':calls')}">${html}</div>`;
 }
 
-function filesHtml(files: ChangedFile[], turnKey: string): string {
+/** The label over a block, as in the terminal: a coloured word on a line of its own. */
+const label = (text: string, tone = ''): string => `<div class="tlabel"${tone ? ` data-tone="${tone}"` : ''}>${text}</div>`;
+
+/** The answer folded: its opening lines run together, as words: marks of headings, lists, emphasis, code and links dropped. */
+const flatAnswer = (text: string): string => text.split(/\n/).map(line => line.trim().replace(/^#+\s*|^[-*]\s+|^\d+\.\s+|^>\s*/, '')).filter(Boolean).join(' ')
+  .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*|__|`/g, '');
+
+/**
+ * The files the turn changed, after its answer: folded, how many and the
+ * lines changed in all ("等" when some have no counts, known only from a
+ * script's fragment); opened, a line each, which opens its change.
+ */
+function changesHtml(files: ChangedFile[], turnKey: string): string {
   if (!files.length) return '';
-  const base = (path: string) => path.replace(/\\/g, '/').split('/').at(-1) || path;
-  const row = (file: ChangedFile) => `<li data-observation-key="${escapeHtml(file.id)}"><button type="button" class="cfile node-button" data-item-id="${escapeHtml(file.id)}" aria-pressed="false" title="${escapeHtml(file.path)}">`
-    + `<span class="cmark" data-mark="${file.mark}">${file.mark}</span><span class="cname">${escapeHtml(base(file.path))}</span>`
-    + `<span class="ccount">${file.count > 1 ? file.count + ' 次' : ''}</span><span class="cgo" aria-hidden="true">→</span></button></li>`;
-  const [shown, rest] = [files.slice(0, 4), files.slice(4)];
-  return `<section class="changed" aria-label="本轮改动的文件"><div class="kicker">Changed</div><ol class="cfiles">${shown.map(row).join('')}</ol>`
-    + (rest.length ? `<details class="cfiles-more" data-action-group="changed:${escapeHtml(turnKey)}"><summary data-action-group="changed:${escapeHtml(turnKey)}">全部 ${files.length} 个文件</summary><ol class="cfiles">${rest.map(row).join('')}</ol></details>` : '')
-    + '</section>';
+  const size = (added?: number, removed?: number) => `${added ? `<span class="cadd">+${added}</span>` : ''}${removed ? `<span class="cdel">-${removed}</span>` : ''}`;
+  const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0), removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
+  const partial = files.some(file => file.added === undefined);
+  const names = shortFileLabels(files.map(file => file.path));
+  const rows = files.map((file, index) => `<li data-observation-key="${escapeHtml(file.id)}"><button type="button" class="cfile node-button" data-item-id="${escapeHtml(file.id)}" aria-pressed="false" title="${escapeHtml(file.path)}">`
+    + `<span class="cmark" data-mark="${file.mark}">${file.mark}</span><span class="cname">${escapeHtml(names[index] || base(file.path))}</span><span class="csize">${size(file.added, file.removed)}</span></button></li>`).join('');
+  return `<details class="cfold cchanges" data-fold="changes:${escapeHtml(turnKey)}" data-observation-key="changes:${escapeHtml(turnKey)}"><summary>${label('Changes')}`
+    + `<span class="fline"><span class="ftext">${files.length} 个文件 <span class="csize">${size(added, removed)}</span>${partial ? '<span class="cnote">等</span>' : ''}</span><span class="fchev" aria-hidden="true">▾</span></span></summary>`
+    + `<ol class="cfiles">${rows}</ol></details>`;
 }
-
 
 /** A path names its file; anything else is kept, shortened by the row's own ellipsis. */
-const waitingFor = ({ tool, summary }: { tool: string; summary: string }): string =>
-  [tool, /^\/.+\/[^/]+$/.test(summary) ? summary.split('/').at(-1) : summary].filter(Boolean).join(' ');
+const waitingFor = ({ tool, summary }: { tool: string; summary: string }): string[] =>
+  [tool, /^\/.+\/[^/]+$/.test(summary) ? summary.split('/').at(-1)! : summary].filter(Boolean);
 
-/** `latest` marks the newest turn: only it can still be running. */
-export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, latest = false, provider?: Provider, extras: LiveExtras = {}): string {
-  const view = turnView(group, latest, provider);
-  const { turn, live, label } = view;
-  const segmentHtml = (segment: typeof turn.segments[number]) => {
-    if (segment.kind === 'answer') return `<li class="cseg" data-observation-key="${escapeHtml(segment.item.id)}">${render.answer(segment.item)}</li>`;
-    if (segment.kind === 'interjection') return `<li class="cseg interjection" data-observation-key="${escapeHtml(segment.item.id)}"><div class="kicker">你的消息</div>${render.request(segment.item)}</li>`;
-    const { chapter } = segment;
-    // The agent's own words are shown in full, never clamped.
-    const say = chapter.headings.map(heading => `<div class="csay" data-observation-key="say:${escapeHtml(heading.id)}" data-text-id="${escapeHtml(heading.id)}" data-status="${escapeHtml(heading.status)}">`
-      + `${heading.status === 'failed' ? '<span class="availability">失败</span>' : ''}${renderMarkdown(render.publicBody(heading))}${render.attachments(heading)}</div>`).join('');
-    return `<li class="chapter${chapter.headings.length ? '' : ' silent'}" data-observation-key="${escapeHtml(chapter.key)}">${say}`
-      + (chapter.rows.length ? `<ol class="crows">${rowsHtml(chapter.rows, render, chapter.key, live)}</ol>` : '')
-      + (chapter.records.length ? `<ol class="nodes">${chapter.records.map(render.record).join('')}</ol>` : '')
-      + '</li>';
-  };
+export interface TurnContext { latest: boolean; session: SessionData; extras?: LiveExtras }
+
+/**
+ * The whole turn, top to bottom, as the terminal sets it: what was asked under
+ * a Prompt label; the agent's words with the calls each explains on a band
+ * under them; then how the turn ended. While it runs, a spinner at the end when
+ * no call turns; waiting on you, Needs approval. Over, the answer and the
+ * changes fold to a line each; the process stays open.
+ */
+export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { latest, session, extras = {} }: TurnContext): string {
+  const view = turnView(group, latest, session.provider);
+  const { turn, live } = view;
   // Waiting for the reader keeps the turn open, whatever its record clock says.
   const waiting = latest && !turn.ended && extras.approval;
   const open = live || Boolean(waiting);
-  // Once a turn is over its whole process folds into the line the agents print
-  // ("Crunched for 3m 12s"); the request, the files and the final answer stay.
-  const process = open ? turn.segments : view.process;
-  const answers = open ? [] : view.answers;
-  const { calls } = view;
-  const stream = process.map(segmentHtml).join('');
-  // One status line while the turn runs, as the agents show it. The clock counts
-  // from the start of the turn, the same point Claude Code and Codex time from.
-  const { verb } = view;
-  // Waiting for the reader replaces the status word: the agent is not working.
-  const tail = waiting
-    ? `<li class="cseg live-tail awaiting" data-observation-key="live-tail:${escapeHtml(group.key)}"><div class="ctail"><span class="cwait">等你批准</span>`
-      + `${waitingFor(waiting) ? ` · <span class="cwait-what">${escapeHtml(waitingFor(waiting))}</span>` : ''}</div></li>`
-    : live
-    ? `<li class="cseg live-tail" data-observation-key="live-tail:${escapeHtml(group.key)}"><div class="ctail"><span class="shimmer" data-live-verb="${verb}">${verb}</span><span data-since="${escapeHtml(turn.start ?? turn.lastAt)}"></span></div></li>` : '';
-  // On screen in the agent, not yet in the transcript: shown faint until the record arrives.
+  const words = (item: TimelineItem) => `<div class="csay" data-observation-key="say:${escapeHtml(item.id)}" data-text-id="${escapeHtml(item.id)}" data-status="${escapeHtml(item.status)}">`
+    + `${item.status === 'failed' ? '<span class="availability">失败</span>' : ''}${renderMarkdown(render.publicBody(item))}${render.attachments(item)}</div>`;
+  const segmentHtml = (segment: TurnSegment) => {
+    if (segment.kind === 'answer') return `<li class="cseg" data-observation-key="${escapeHtml(segment.item.id)}">${words(segment.item)}</li>`;
+    // Your own words sent during the turn: a prompt too.
+    if (segment.kind === 'interjection') return `<li class="cseg tprompt" data-observation-key="${escapeHtml(segment.item.id)}">${label('Prompt', 'blue')}${render.request(segment.item)}</li>`;
+    const { chapter } = segment;
+    return `<li class="chapter" data-observation-key="${escapeHtml(chapter.key)}">${chapter.headings.map(words).join('')}`
+      + callsHtml(chapter.rows, chapter.key, session, open, Boolean(waiting), render.unavailable)
+      + (chapter.records.length ? `<ol class="nodes">${chapter.records.map(render.record).join('')}</ol>` : '')
+      + '</li>';
+  };
+  const stream = (open ? turn.segments : view.process).map(segmentHtml).join('');
+  // On screen in the agent, not yet in the transcript: set as the words and calls will be, so nothing moves when the record comes.
   const draft = live && extras.draft
-    ? `<li class="cseg cdraft-item" data-observation-key="draft:${escapeHtml(group.key)}"><div class="cdraft" title="Agent 正在显示，还没写入会话记录">${renderMarkdown(extras.draft)}</div></li>` : '';
-  return `<section class="turn-panel chapter-turn tw-${view.toolWidth}" data-turn-panel="${escapeHtml(group.key)}"${live ? ` data-last-at="${escapeHtml(turn.lastAt)}"` : ''} aria-label="${label}">`
-    + `<header class="turn-heading"><span class="tclock">${clock(turn.start)}</span><span class="tlabel">${label}</span>${turn.aborted ? '<span class="tstop">中断</span>' : live ? '<span class="tstop tidle">已停止</span>' : ''}<span class="tdur">${duration(turn.durationMs)}</span></header>`
-    + (turn.request ? render.request(turn.request) : '')
-    + filesHtml(turn.files, group.key)
-    + (open || !process.length ? `<ol class="cstream${view.chapters > 1 ? ' tracked' : ''}${tail ? ' live' : ''}">${stream}${draft}${tail}</ol>`
-      : `<details class="cprocess" data-fold="process:${escapeHtml(group.key)}"><summary>`
-        + `<span class="cdone">${view.done}</span>`
-        + `${calls ? `<span class="ccount-calls"> · ${calls} ${calls === 1 ? 'call' : 'calls'}</span>` : ''}<span class="cfold-arrow" aria-hidden="true">›</span></summary>`
-        + `<ol class="cstream${view.chapters > 1 ? ' tracked' : ''}">${stream}</ol></details>`)
-    + (answers.length ? `<ol class="cstream">${answers.map(segmentHtml).join('')}</ol>` : '')
-    + (turn.segments.length || tail ? '' : '<p class="empty">暂未取得本轮过程。</p>')
+    ? `<li class="cseg" data-observation-key="draft:${escapeHtml(group.key)}"><div class="csay">${renderMarkdown(extras.draft)}</div></li>` : '';
+  const announced = open && extras.calls?.length
+    ? `<li class="chapter" data-observation-key="announced:${escapeHtml(group.key)}">${callsHtml(extras.calls.map(announcedRow), `announced:${group.key}`, session, true, Boolean(waiting), render.unavailable)}</li>` : '';
+  let end = '';
+  if (waiting) {
+    const [tool, what] = waitingFor(waiting);
+    end = `<li class="cseg tend awaiting" data-observation-key="live-tail:${escapeHtml(group.key)}">${label('Needs approval', 'yellow')}`
+      + `${tool ? `<div class="cwait-what"><b>${escapeHtml(tool)}</b>${what ? ` · ${escapeHtml(what.replace(/\s+/g, ' '))}` : ''}</div>` : ''}`
+      + `<div class="cnote">在 ${session.provider === 'claude' ? 'Claude Code' : 'Codex'} 里选择批准或拒绝。</div></li>`;
+  } else if (live) {
+    // The agent works out its next step: the spinner turns where the answer will come. The client hides it while a call turns.
+    end = `<li class="cseg tend live-tail" data-observation-key="live-tail:${escapeHtml(group.key)}"><span class="cbranch"><span class="cspin"></span></span><span class="cquiet" data-live-verb=""></span><span class="cquiet" data-since=""></span></li>`;
+  }
+  const answers = open ? [] : view.answers.map(segment => segment.kind === 'answer' ? render.publicBody(segment.item) : '').filter(Boolean);
+  const answerItems = open ? [] : view.answers.flatMap(segment => segment.kind === 'answer' ? [segment.item] : []);
+  const closing = answers.length
+    ? `<details class="cfold fanswer" data-fold="answer:${escapeHtml(group.key)}" data-observation-key="answer:${escapeHtml(group.key)}"><summary>${label('Final Answer', 'green')}`
+      + `<span class="fline"><span class="ftext">${escapeHtml(flatAnswer(answers.join('\n')))}</span><span class="fchev" aria-hidden="true">▾</span></span></summary>`
+      + `<div class="fbody">${answerItems.map(words).join('')}</div></details>`
+    : !open && turn.aborted ? `<div class="tend" data-observation-key="interrupted:${escapeHtml(group.key)}">${label('Interrupted', 'red')}</div>` : '';
+  const prompt = turn.request ? `<section class="tprompt" data-observation-key="prompt:${escapeHtml(group.key)}">${label('Prompt', 'blue')}${render.request(turn.request)}</section>` : '';
+  const ordinal = group.ordinal ?? 0;
+  const started = clock(turn.start);
+  return `<section class="turn-panel chapter-turn" data-turn-panel="${escapeHtml(group.key)}" data-ordinal="${ordinal}"${live ? ` data-last-at="${escapeHtml(turn.lastAt)}"` : ''} aria-label="${escapeHtml(view.label)}">`
+    + `<header class="turn-heading">${group.turnId ? `<b>第 ${ordinal} 轮</b><span class="tsub"> / 共 <span data-turn-total>${ordinal}</span> 轮${started ? ` · ${started} 开始` : ''}</span>` : '<span class="tsub">未归属回合的记录</span>'}</header>`
+    + prompt
+    + `<ol class="cstream">${stream}${draft}${announced}${end}</ol>`
+    + closing
+    + (open ? '' : changesHtml(turn.files, group.key))
+    + (turn.segments.length || end ? '' : '<p class="empty">暂未取得本轮过程。</p>')
     + `<div class="turn-content-end" aria-hidden="true"></div></section>`;
 }
 
-/** Colours come only from the VS Code theme; greys are mixed from it. */
+/**
+ * Colours come only from the VS Code theme. As in the terminal: words in the
+ * body colour; a tool's name bold; what a call worked on in grey, in the
+ * editor font; colour only where it means something: red a failure, green and
+ * red a change's size, gold a call still out and the line under the pointer.
+ */
 export const chapterStyles = `
-  .chapter-turn { --ink-3: color-mix(in srgb, var(--vscode-foreground) 72%, transparent); --ink-4: color-mix(in srgb, var(--vscode-foreground) 58%, transparent);
-    --hair: color-mix(in srgb, var(--vscode-foreground) 14%, transparent); --mono: var(--vscode-editor-font-family, ui-monospace, monospace); --tw: 6ch; }
-  ${Array.from({ length: 5 }, (_, index) => `.chapter-turn.tw-${index + 3} { --tw: ${index + 3 + 1}ch; }`).join(' ')}
-  .chapter-turn .turn-heading { justify-content: flex-start; gap: 8px; font: 10.5px/1.6 var(--mono); color: var(--ink-4); }
-  .chapter-turn .tdur { margin-left: auto; }
-  .chapter-turn .tstop { color: var(--ink-3); }
-  .chapter-turn .kicker { font: 9.5px/1.8 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-4); }
-  .changed { margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--hair); }
-  .cfiles { list-style: none; margin: 2px 0 0; padding: 0; }
-  .cfile { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto 14px; align-items: baseline; gap: 8px; width: 100%; padding: 2px 4px; margin: 0 -4px; border: 0; border-radius: 4px; background: transparent; text-align: left; }
-  .cmark { font: 10px/1.7 var(--mono); color: var(--ink-4); }
-  .cmark[data-mark="A"] { color: var(--vscode-charts-green, var(--vscode-foreground)); }
-  .cmark[data-mark="D"] { color: var(--vscode-errorForeground); }
-  .cname { font: 11px/1.7 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ccount { font: 10px/1.7 var(--mono); color: var(--ink-4); }
-  .cfiles-more > summary { cursor: pointer; font-size: 11px; color: var(--ink-3); padding: 2px 0; }
+  .chapter-turn { --ink-3: var(--vscode-descriptionForeground); --ink-4: color-mix(in srgb, var(--vscode-foreground) 45%, transparent);
+    --hair: color-mix(in srgb, var(--vscode-foreground) 22%, transparent); --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
+    --band: color-mix(in srgb, var(--vscode-foreground) 5%, var(--surface)); --gold: var(--vscode-editorWarning-foreground, #cca700);
+    --spin: color-mix(in srgb, var(--gold) 72%, var(--surface)); --blue: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
+    --green: var(--vscode-charts-green, var(--vscode-gitDecoration-addedResourceForeground)); --red: var(--vscode-errorForeground);
+    --left: 20px; --right: 14px; padding: 0 var(--right) 0 var(--left); }
+  .chapter-turn .turn-heading { justify-content: flex-start; gap: 0; margin: 0 calc(-1 * var(--right)) 0 calc(-1 * var(--left)); padding: 7px var(--right) 7px var(--left); font-size: 12px; color: var(--vscode-foreground); }
+  .chapter-turn .turn-heading b { font-weight: 600; }
+  .chapter-turn .tsub { color: var(--ink-3); white-space: pre; }
+  /* A label over a block: a coloured word on a line of its own, the block right under it. */
+  .tlabel { font-weight: 700; font-size: 12px; line-height: 1.6; }
+  .tlabel[data-tone="blue"] { color: var(--blue); } .tlabel[data-tone="green"] { color: var(--green); }
+  .tlabel[data-tone="yellow"] { color: var(--gold); } .tlabel[data-tone="red"] { color: var(--red); }
+  /* What you asked: a blue bar down its side, out in the margin. */
+  .tprompt { margin: 12px 0 0; }
+  .tprompt .turn-question { margin: 0 0 0 -12px; padding: 0 0 0 9px; border: 0; border-left: 3px solid var(--blue); border-radius: 0; background: transparent; }
   .cstream { list-style: none; margin: 0; padding: 0; }
-  .chapter, .cseg { margin: 0 0 16px; }
-  .csay { line-height: 1.7; overflow-wrap: anywhere; }
-  .csay .markdown > :first-child { margin-top: 0; }
-  .crows { list-style: none; margin: 6px 0 0; padding: 0; }
-  /* A finished turn's process, folded into one line; open, it is the full process. */
-  .cprocess { margin: 0 0 4px; }
-  .cprocess > summary { display: flex; align-items: baseline; width: fit-content; max-width: 100%; padding: 2px 0; list-style: none; cursor: pointer; font-size: 12px; color: var(--ink-3); }
-  .cprocess > summary::-webkit-details-marker { display: none; }
-  .cprocess > summary:hover { color: var(--vscode-foreground); }
-  .cprocess > summary::before { content: "✻"; margin-right: 7px; color: var(--ink-4); }
-  .ccount-calls { white-space: pre; color: var(--ink-4); }
-  .cfold-arrow { display: inline-block; margin-left: 8px; transition: transform .12s; }
-  .cprocess[open] > summary .cfold-arrow { transform: rotate(90deg); }
-  .cprocess > .cstream { margin-top: 10px; }
-  .crow { display: grid; grid-template-columns: var(--tw) minmax(0, 1fr) 14px; align-items: baseline; gap: 8px; width: 100%; padding: 1px 4px; margin: 0 -4px; border: 0; border-radius: 4px; background: transparent; text-align: left; }
-  .ctool { font: 600 10px/1.8 var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  /* Two lines at most: a raw command without a description can be a paragraph. */
-  .clabel { min-width: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-  .clabel.machine { font: 11px/1.7 var(--mono); }
-  .cbad { font-weight: 500; color: var(--vscode-errorForeground); }
-  /* A question: its words, then its options on one wrapping line, the chosen ones marked. */
-  .clabel.asked { display: block; -webkit-line-clamp: unset; }
-  .cchoices { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 12px; margin-top: 2px; font-size: 12px; }
-  .cchoices:empty { display: none; }
-  .cchoice { font-weight: 500; color: var(--vscode-foreground); }
-  .cchoices .cq { font-style: normal; font-size: 11px; color: var(--ink-4); }
-  .crow[data-status="empty"] .clabel { color: var(--ink-3); }
-  .crep, .cnone { font-style: normal; color: var(--ink-4); }
-  .cnone { margin-left: 6px; font: 10px/1 var(--mono); }
-  .cgo { font: 11px/1.6 var(--mono); color: var(--ink-4); text-align: right; }
-  .crow.node-button:hover .cgo, .cfile:hover .cgo, .crow[aria-pressed="true"] .cgo, .cfile[aria-pressed="true"] .cgo { color: var(--vscode-textLink-foreground); }
-  .crow[aria-pressed="true"], .cfile[aria-pressed="true"] { background: var(--vscode-list-inactiveSelectionBackground); }
-  /* Several chapters: a rail with one dot per chapter. One chapter needs no rail, unless the turn is running. */
-  :is(.cstream.tracked, [data-fresh] .cstream.live) > :is(.chapter, .live-tail) { position: relative; padding-left: 14px; }
-  :is(.cstream.tracked, [data-fresh] .cstream.live) > :is(.chapter, .live-tail)::before { content: ""; position: absolute; left: 2px; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--ink-4); }
-  :is(.cstream.tracked, [data-fresh] .cstream.live) > .chapter::after { content: ""; position: absolute; left: 4px; top: calc(.62em + 9px); bottom: -12px; width: 1px; background: var(--hair); }
-  :is(.cstream.tracked, [data-fresh] .cstream.live) > .chapter:last-of-type::after, .turn-panel:not([data-fresh]) .cstream > .chapter:has(+ .live-tail)::after { display: none; }
-  .interjection .turn-question { margin-bottom: 0; }
-  .ctail { font-size: 12px; line-height: 1.6; padding: 1px 0; color: var(--ink-3); }
-  /* A light sweeps across the word while the turn runs, as in Claude Code and Codex; it stops when the source goes quiet. */
-  .shimmer { background: linear-gradient(90deg, var(--ink-4) 35%, var(--vscode-foreground) 50%, var(--ink-4) 65%) 0 0 / 250% 100%;
-    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; animation: sidecar-shimmer 2s linear infinite; }
-  @keyframes sidecar-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-  .turn-panel[data-stale] .shimmer { animation: none; background: none; -webkit-text-fill-color: currentColor; }
-  /* The rail's last dot is the live edge: it breathes while the turn runs. */
-  .chapter-turn .cstream.live > .live-tail::before { background: var(--vscode-foreground); animation: sidecar-beat 1.4s ease-in-out infinite; }
-  @keyframes sidecar-beat { 0%, 100% { opacity: .3; transform: scale(1); } 50% { opacity: 1; transform: scale(1.4); } }
-  .turn-panel[data-stale] .cstream > .live-tail::before { animation: none; background: var(--ink-4); }
-  /* Hidden until the client sees the source is still being written: a day-old open turn is not running. */
-  .turn-panel:not([data-fresh]) .live-tail { display: none; }
-  /* Waiting for the reader shows whatever the record clock says. */
-  .chapter-turn .cstream > .live-tail.awaiting { display: block; }
-  .chapter-turn .cstream.live > .live-tail.awaiting::before { background: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); animation: none; }
-  .cwait { font-weight: 600; color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); }
-  .cwait-what { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
-  .cdraft { color: var(--ink-4); font-size: 12.5px; line-height: 1.55; }
-  /* Aligned with the chapters' text, without a rail dot of its own: it is not a step yet. */
-  :is(.cstream.tracked, [data-fresh] .cstream.live) > .cdraft-item { padding-left: 14px; }
-  .cdraft > :first-child { margin-top: 0; } .cdraft > :last-child { margin-bottom: 0; }
-  /* The agent says it went idle without writing a stop: an interrupt before any output. */
-  .tidle { display: none; }
-  .turn-panel[data-idle] .tidle { display: inline; }
-  /* A call still out: its arrow nudges forward and back. Multi-line labels stay still. */
-  .turn-panel[data-fresh]:not([data-stale]) .crow[data-out] .cgo { color: var(--vscode-foreground); animation: sidecar-nudge 1.2s ease-in-out infinite; }
-  @keyframes sidecar-nudge { 0%, 100% { transform: translateX(-2px); opacity: .35; } 50% { transform: translateX(2px); opacity: 1; } }
+  .chapter, .cseg { margin: 12px 0 0; }
+  .csay { line-height: 1.65; overflow-wrap: anywhere; }
+  .csay + .csay { margin-top: 8px; }
+  .csay .markdown { line-height: 1.65; }
+  /* A step's calls on a band, the width of the panel. */
+  .ccalls { margin: 10px calc(-1 * var(--right)) 0 calc(-1 * var(--left)); padding: 7px var(--right) 7px var(--left); background: var(--band); }
+  .chapter > .ccalls:first-child { margin-top: 0; }
+  .ctool { font-weight: 700; font-size: 12.5px; line-height: 1.6; }
+  .ctree { list-style: none; margin: 0; padding: 0; }
+  /* The tree: a line down from the tool's name, a tick to each call. Drawn, not typed, so it stays joined in any font. */
+  .crow-item { position: relative; padding-left: 16px; }
+  .crow-item::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; border-left: 1px solid var(--hair); }
+  .crow-item:last-child::before { bottom: auto; height: .8em; }
+  .crow-item::after { content: ""; position: absolute; left: 4px; top: .8em; width: 7px; border-top: 1px solid var(--hair); }
+  .crow-item:has(> .crow[data-out])::after { display: none; }
+  .crow-item:has(> .crow[data-out])::before { top: 1.45em; }
+  .crow-item:last-child:has(> .crow[data-out])::before { display: none; }
+  .crow { display: flex; align-items: last baseline; gap: 6px; width: 100%; min-width: 0; padding: 0; margin: 0; border: 0; background: transparent; text-align: left; color: var(--ink-3); font: 12px/1.6 var(--mono); }
+  .cbranch { position: absolute; left: 0; width: 11px; text-align: center; color: var(--spin); font: 700 12px/1.6 var(--mono); }
+  .clabel { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  .clabel.command { -webkit-line-clamp: 1; word-break: break-all; }
+  .cmore { flex: none; font-weight: 700; color: var(--ink-4); }
+  .cbad { flex: none; color: var(--red); }
+  .cnote { flex: none; color: var(--ink-4); }
+  .csize { flex: none; display: inline-flex; gap: 5px; }
+  .cadd { color: var(--green); } .cdel { color: var(--red); }
+  /* The line under the cursor or the pointer: gold and underlined, as a link is. */
+  .crow.node-button:hover, .crow[aria-pressed="true"], .cfile:hover, .cfile[aria-pressed="true"] { color: var(--gold); }
+  .crow.node-button:hover .clabel, .crow[aria-pressed="true"] .clabel, .cfile:hover .cname, .cfile[aria-pressed="true"] .cname { text-decoration: underline; text-underline-offset: 2px; }
+  .crow.node-button:hover > :not(.cbranch), .crow[aria-pressed="true"] > :not(.cbranch) { color: var(--gold); }
+  .cchoices { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 10px; font-size: 12px; }
+  .cchoice { font-weight: 600; color: var(--vscode-foreground); }
+  .cq, .cwaiting { font-style: normal; color: var(--ink-3); }
+  .chapter > .nodes { margin-top: 6px; }
+  /* The end of a running turn: the spinner where the answer will come, or how long it has been quiet. */
+  .tend { margin-top: 12px; }
+  .live-tail { position: relative; min-height: 1.6em; font-size: 12px; color: var(--ink-3); }
+  .live-tail .cbranch { left: -2px; }
+  .live-tail .cquiet:empty { display: none; }
+  .turn-panel:not([data-fresh]) .live-tail, .turn-panel[data-idle] .live-tail { display: none; }
+  .turn-panel[data-stale] .live-tail .cbranch { display: none; }
+  /* One spinner at a time: while a call turns, the end is empty. */
+  .chapter-turn:has(.crow[data-out]:not([data-ask])) .live-tail { display: none; }
+  .awaiting .cwait-what { font-size: 12px; overflow-wrap: anywhere; }
+  .awaiting .cwait-what b { font-weight: 700; }
+  .awaiting .cnote { font-size: 12px; color: var(--ink-3); }
+  /* The answer and the changes fold to a line each: the label, then one full line and ▾. */
+  .cfold { margin-top: 12px; }
+  .cfold > summary { display: block; list-style: none; cursor: pointer; }
+  .cfold > summary::-webkit-details-marker { display: none; }
+  .fline { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .ftext { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .fchev { flex: none; color: var(--ink-3); font-weight: 700; }
+  .cfold > summary:hover .ftext { text-decoration: underline; text-underline-offset: 2px; }
+  .cfold[open] .fline { display: none; }
+  .fbody .csay + .csay { margin-top: 10px; }
+  .cchanges .ftext { display: flex; gap: 8px; }
+  .cfiles { list-style: none; margin: 0; padding: 0; }
+  .cfile { display: grid; grid-template-columns: 1em minmax(0, 1fr) auto; align-items: baseline; gap: 8px; width: 100%; padding: 0; border: 0; background: transparent; text-align: left; }
+  .cmark { font: 12px/1.6 var(--mono); color: var(--ink-3); }
+  .cmark[data-mark="A"] { color: var(--green); } .cmark[data-mark="D"] { color: var(--red); }
+  .cname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cfile .csize { font: 12px/1.6 var(--mono); }
   /* Live arrivals fade in one after another, a step apart, so a burst reads in order. */
   @keyframes sidecar-arrive { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
   .arrived { animation: sidecar-arrive .26s cubic-bezier(.2, .7, .3, 1) backwards; }
-  @media (prefers-reduced-motion: reduce) { .arrived, .chapter-turn .cstream.live > .live-tail::before { animation: none; }
-    .shimmer { animation: none; background: none; -webkit-text-fill-color: currentColor; } .crow[data-out] .cgo { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .arrived { animation: none; } }
 `;

@@ -5,6 +5,8 @@ import { summarizeShell, shellArgvScript } from '../packages/core/src/actions';
 import { parseCodex } from '../packages/core/src/codex';
 import { resolveOutlineEvidence } from '../packages/core/src/outline';
 import { renderSidecar, renderInlineEvidence } from '../packages/vscode/src/render';
+import { groupSessionTurns } from '../packages/core/src/timeline';
+import { turnView } from '../packages/core/src/turn-view';
 const response = (payload: unknown) => ({ type: 'response_item', payload });
 const event = (payload: unknown) => ({ type: 'event_msg', payload });
 const call = (input: string, id = 'wrapper') => response({ type: 'custom_tool_call', name: 'exec', call_id: id, input });
@@ -35,9 +37,8 @@ test('exact native commands merge into their own inputs, preserve status, raw ar
   assert.deepEqual(rows.map(row => row.getAttribute('data-status')), ['failed', 'info']);
   // The native records arriving later must not rename the rows (live morph keys and selection).
   const keys = (d: Document) => [...d.querySelectorAll('.crow-item')].map(row => row.getAttribute('data-observation-key'));
-  // Existing rows keep their keys; the wrapper's extra output only appends a row.
-  assert.deepEqual(keys(document).slice(0, keys(initial).length), keys(initial));
-  assert.equal(keys(document).length, keys(initial).length + 1);
+  // Existing rows keep their keys; the wrapper's extra output is a record of the calls and takes no row.
+  assert.deepEqual(keys(document), keys(initial));
   assert.deepEqual(rows.map(row => row.dataset.itemId), [...initial.querySelectorAll<HTMLElement>('.crow[data-tool="Bash"]')].map(row => row.dataset.itemId));
   assert.equal(document.querySelector('.action-symbol'), null);
   const inline = new JSDOM(renderInlineEvidence(resolveOutlineEvidence(data, rows[0].dataset.itemId!)!)).window.document;
@@ -79,14 +80,14 @@ test('shared OUT keeps extra wrapper text but elides only an exact repeated nati
   const source = call('await tools.exec_command({cmd:"npm test"}); await tools.exec_command({cmd:"npm run build"});');
   for (const [output, count] of [['first\nsecond', 0], ['first\nsecond\nextra', 1]] as const) {
     const data = parse(source, native('npm test', 'first'), native('npm run build', 'second'), response({ type: 'custom_tool_call_output', call_id: 'wrapper', output }));
-    const document = doc(data);
-    assert.equal(document.querySelectorAll('.crow[data-tool="OUT"]').length, count);
+    const rows = turnView(groupSessionTurns(data)[0], false, 'codex').rows.filter(row => row.output);
+    assert.equal(rows.length, count);
     if (count) {
-      const host = document.querySelector<HTMLElement>('.crow[data-tool="OUT"]')!;
-      const inline = new JSDOM(renderInlineEvidence(resolveOutlineEvidence(data, host.dataset.itemId!)!)).window.document;
+      const inline = new JSDOM(renderInlineEvidence(resolveOutlineEvidence(data, rows[0].id)!)).window.document;
       assert.equal(inline.querySelector('.detail-state-line'), null);
       assert.match(inline.querySelector('[data-io="output"]')!.textContent!, /extra/);
-      assert.equal(host.querySelector('.clabel')!.textContent, '返回内容 · 3 行');
     }
+    // The panel shows it as the terminal does: no row of its own.
+    assert.equal(doc(data).querySelectorAll('.crow[data-tool="Output"], .crow[data-tool="OUT"]').length, 0);
   }
 });

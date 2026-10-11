@@ -37,10 +37,13 @@ test('native MCP pairs with regular input/output in either order, while hidden b
   }
 });
 
+/** A row that changed a file: Write, or Edit when it patched one, as in the terminal. */
+const CHANGE = '.crow:is([data-tool="Write"], [data-tool="Edit"])';
+
 test('a native patch mirror joins exactly one pending input; unrelated and ambiguous changes stay separate', () => {
   const input = (id: string) => r({ type: 'custom_tool_call', name: 'apply_patch', call_id: id, input: patch });
   const merged = parse(input('patch'), nativePatch());
-  const writes = (data: ReturnType<typeof parse>) => documentFor(data).querySelectorAll('.crow[data-tool="Write"]').length;
+  const writes = (data: ReturnType<typeof parse>) => documentFor(data).querySelectorAll(CHANGE).length;
   assert.equal(writes(merged), 1);
   assert.equal(merged.items.find(item => item.kind === 'file-change')!.sources.length, 2);
   assert.equal(writes(parse(input('patch'), nativePatch('-different\n+new'))), 2);
@@ -51,15 +54,15 @@ test('a mixed wrapper attaches the native patch to Write without assigning share
   const source = `await tools.apply_patch(${JSON.stringify(patch)}); await tools.exec_command({cmd:"npm test"});`;
   const data = parse(r({ type: 'custom_tool_call', name: 'exec', call_id: 'wrapper', input: source }), nativePatch(), r({ type: 'custom_tool_call_output', call_id: 'wrapper', output: 'SHARED_RESULT' }));
   const document = documentFor(data);
-  assert.equal(document.querySelectorAll('.crow[data-tool="Write"]').length, 1);
-  assert.equal(document.querySelectorAll('.crow[data-tool="OUT"]').length, 1, 'The shared result is its own row');
+  assert.equal(document.querySelectorAll(CHANGE).length, 1);
+  assert.equal(document.querySelectorAll('.crow').length, 2, 'The shared result is a record of the calls, with no row of its own');
   const host = document.querySelector<HTMLElement>('.crow[data-tool="Bash"]')!;
   const evidence = resolveOutlineEvidence(data, host.dataset.itemId!)!;
   const inline = renderInlineEvidence(evidence);
   assert.ok(inline.includes('npm test'));
   assert.ok(!inline.includes('SHARED_RESULT'));
   assert.ok(!inline.includes('data-io="output"'));
-  const button = document.querySelector<HTMLElement>('.crow[data-tool="Write"]')!;
+  const button = document.querySelector<HTMLElement>(CHANGE)!;
   const file = resolveOutlineEvidence(data, button.dataset.itemId!)!;
   assert.equal(file.item.sources.length, 3);
   assert.equal(file.item.detail!.blocks[0].text, '@@\n-old\n+new');
@@ -74,12 +77,12 @@ test('file details isolate the selected historical file and disambiguate identic
   const input = '*** Begin Patch\n*** Update File: /repo/one/src/a.ts\n@@\n-old_one\n+new_one\n*** Update File: /repo/two/src/a.ts\n@@\n-old_two\n+new_two\n*** End Patch';
   const data = parse(r({ type: 'custom_tool_call', name: 'apply_patch', call_id: 'files', input }));
   assert.deepEqual(shortFileLabels(['/repo/one/src/a.ts', '/repo/two/src/a.ts']), ['one/src/a.ts', 'two/src/a.ts']);
-  const document = documentFor(data), buttons = [...document.querySelectorAll<HTMLElement>('.crow[data-tool="Write"]')];
+  const document = documentFor(data), buttons = [...document.querySelectorAll<HTMLElement>(CHANGE)];
   assert.equal(buttons.length, 2, 'One row per file');
   assert.deepEqual(buttons.map(button => button.querySelector('.clabel')!.textContent), ['one/src/a.ts', 'two/src/a.ts']);
-  // The Changed list opens the same per-file records; nothing else is clickable.
-  assert.deepEqual([...document.querySelectorAll<HTMLElement>('button[data-item-id]')].map(button => button.dataset.itemId).sort(),
-    [...buttons, ...buttons].map(button => button.dataset.itemId).sort());
+  // The Changes list opens the same per-file records; nothing else is clickable.
+  const ids = new Set(buttons.map(button => button.dataset.itemId));
+  assert.ok([...document.querySelectorAll<HTMLElement>('button[data-item-id]')].every(button => ids.has(button.dataset.itemId)));
   const first = resolveOutlineEvidence(data, buttons[0].dataset.itemId!)!;
   assert.match(first.item.detail!.blocks[0].text!, /new_one/);
   assert.ok(!JSON.stringify(first).includes('new_two'));

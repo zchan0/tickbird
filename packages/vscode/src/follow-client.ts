@@ -6,12 +6,13 @@ export const followClient = `
   const paintFollowing = () => {
     if (!followButton) return;
     followButton.setAttribute('aria-pressed', String(following));
-    followButton.textContent = following ? '跟随 ↓' : '回到最新 ↓';
-    followButton.title = following ? '新记录自动滚动到当前回合末尾；点击暂停' : '回到最新记录并恢复自动滚动';
+    followButton.textContent = following ? '' : '已暂停跟随 ↓';
+    followButton.title = following ? '' : '回到最新一轮的末尾，恢复跟随';
     if (followLabel) followLabel.textContent = following ? '轮内按发生顺序' : '已暂停跟随';
   };
   const followPosition = () => {
     const edge = panels()[0]?.querySelector('.turn-content-end');
+    if (!panels()[0]?.hasAttribute('data-current')) return undefined;
     if (!timeline || !edge || timeline.clientHeight <= 0) return undefined;
     return Math.min(Math.max(0, timeline.scrollHeight - timeline.clientHeight),
       Math.max(0, timeline.scrollTop + edge.getBoundingClientRect().top - timeline.getBoundingClientRect().top - timeline.clientHeight + 16));
@@ -47,8 +48,12 @@ export const followClient = `
   let readerInput = 0;
   const readerScrolled = () => { readerInput = Date.now(); };
   if (followButton) {
+    // Following again goes back to the newest turn.
     followButton.addEventListener('click', () => {
-      following = !following; paintFollowing(); followLatest(); persist();
+      following = true; paintFollowing();
+      const newest = panels()[0];
+      if (newest) goTo(newest.dataset.turnPanel);
+      followLatest(); persist();
     });
     timeline.addEventListener('scroll', () => {
       if (Date.now() < gliding) return;

@@ -111,7 +111,6 @@ test('modeled block anchor offsets absorb a new turn above the reading viewport'
 test('paused observation preserves reading content and does not present an agent failure', async t => {
   const f = await fixture(t), panel = f.document.querySelector('[data-turn-panel="turn:t1"]');
   f.send(f.view.update(f.data, { ...health, state: 'paused', reason: 'source-changed' }));
-  assert.equal(f.document.querySelector('.observation-status')?.textContent, '已暂停');
   assert.match(f.document.querySelector('.observation-problem')!.textContent!, /来源发生替换或改写/);
   assert.equal(f.document.querySelector('[data-turn-panel="turn:t1"]'), panel);
   f.send({ type: 'workspaceChanged' }); assert.match(f.document.querySelector('.observation-problem')!.textContent!, /工作区已改变/);
@@ -152,7 +151,7 @@ test('live follow targets the newest turn tail for append, final answer and a ne
   assert.equal(timeline.scrollTop, 616);
   const turn = f.document.querySelector('[data-turn-panel="turn:t2"]')!;
   const order = [...turn.querySelectorAll('[data-observation-key]')].map(node => node.getAttribute('data-observation-key'));
-  assert.ok(order.indexOf('final') > order.indexOf('append'), 'The final answer remains after the actual steps');
+  assert.ok(order.indexOf('answer:turn:t2') > order.indexOf('say:append'), 'The final answer remains after the actual steps');
   // A late historical result must not switch the reader to that old turn.
   f.data.items.push(narrative('late-old', 't1')); f.update();
   assert.equal(timeline.scrollTop, 616);
@@ -190,8 +189,8 @@ test('reader scrolling pauses follow across updates and refresh; explicit return
   button.click();
   assert.equal(timeline.scrollTop, 616);
   assert.equal(f.state.autoFollow, true);
-  // Turn directory navigation is deliberate history reading even before scrolling.
-  f.document.querySelector<HTMLButtonElement>('button[data-turn-id="turn:t1"]')!.click();
+  // Going to an older turn, from 目录 or with ‹, is deliberate history reading even before scrolling.
+  f.document.querySelector<HTMLButtonElement>('.toc button[data-lens-turn-id="turn:t1"]')!.click();
   assert.equal(button.getAttribute('aria-pressed'), 'false');
 });
 
@@ -221,21 +220,20 @@ test('a burst is revealed one part at a time: the words, a beat, then each call;
   assert.ok(parseInt(tail.style.animationDelay, 10) > parseInt(later.style.animationDelay, 10), 'The loading line comes back last');
 });
 
-test('the toolbar reads the newest open turn: running while records come, quiet after a silence, nothing for a stale turn', async t => {
+test('the newest open turn ends in a spinner while records come, says how long it has been quiet after a silence, and nothing for a stale turn', async t => {
   const f = await fixture(t), { document } = f;
-  const status = document.querySelector('.observation-status')!;
   const panel = () => document.querySelector('[data-turn-panel="turn:t2"]')!;
-  assert.equal(status.textContent, '', 'No timestamps: nothing is claimed');
+  assert.ok(!panel().hasAttribute('data-fresh'), 'No timestamps: nothing is claimed');
   const current = f.data.items.find(item => item.id === 'current')!;
   current.timestamp = new Date(Date.now() - 5000).toISOString(); f.update();
-  assert.equal(status.textContent, '运行中');
   assert.ok(panel().hasAttribute('data-fresh') && !panel().hasAttribute('data-stale'));
-  assert.match(panel().querySelector('.live-tail')!.textContent!, /^Working · [5-9]s$/, 'Codex says Working; timed from the start of the turn, in the agents\' format');
+  const tail = () => panel().querySelector('.live-tail')!;
+  assert.ok(tail().querySelector('.cspin'), 'A spinner, as in the terminal');
+  assert.equal(tail().textContent!.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠿]/g, ''), '', 'No status word and no clock: the agent shows its own');
   current.timestamp = new Date(Date.now() - 20 * 60000).toISOString(); f.update();
-  assert.equal(status.textContent, '无新记录 · 20 分钟');
   assert.ok(panel().hasAttribute('data-stale'));
+  assert.equal(tail().textContent!.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠿]/g, ''), '无新记录 · 20 分钟');
   current.timestamp = new Date(Date.now() - 2 * 86400000).toISOString(); f.update();
-  assert.equal(status.textContent, '');
   assert.ok(!panel().hasAttribute('data-fresh'), 'A day-old open turn is not running');
 });
 
@@ -259,10 +257,10 @@ test('scrolling back down to the newest turn\'s end resumes following; landing t
 
 test('a fold the reader opens stays open across live updates and is kept in the saved state', async t => {
   const f = await fixture(t), { document, window } = f;
-  f.data.items.splice(3, 0, input('read-c'));
+  f.data.items.splice(3, 0, { ...narrative('t1-answer', 't1', '结论。'), kind: 'answer' });
   f.update();
   const fold = () => document.querySelector<HTMLDetailsElement>('[data-turn-panel="turn:t1"] details[data-fold]')!;
-  assert.ok(fold() && !fold().open, 'Three calls in an earlier turn fold by default');
+  assert.ok(fold() && !fold().open, 'An earlier turn\'s answer folds to one line by default');
   fold().open = true; fold().dispatchEvent(new window.Event('toggle'));
   assert.equal(JSON.stringify(f.state.openFolds), JSON.stringify([fold().dataset.fold]));
   f.data.items.push(narrative('newer', 't3')); f.update();
@@ -271,19 +269,17 @@ test('a fold the reader opens stays open across live updates and is kept in the 
 
 test('Claude Code\'s own idle or busy wins over the guess from silence', async t => {
   const f = await fixture(t), { document } = f;
-  const status = document.querySelector('.observation-status')!, panel = () => document.querySelector('[data-turn-panel="turn:t2"]')!;
+  const panel = () => document.querySelector('[data-turn-panel="turn:t2"]')!;
   const current = f.data.items.find(item => item.id === 'current')!;
   current.timestamp = new Date(Date.now() - 5000).toISOString();
   f.send(f.view.update(f.data, { ...health, agent: 'idle' }));
-  assert.equal(status.textContent, '', 'Interrupted: no running, no timer');
   assert.ok(!panel().hasAttribute('data-fresh') && panel().hasAttribute('data-idle'));
   current.timestamp = new Date(Date.now() - 20 * 60000).toISOString();
   f.send(f.view.update(f.data, { ...health, agent: 'busy' }));
-  assert.equal(status.textContent, '运行中', 'A long quiet tool is still running when the agent says so');
   assert.ok(panel().hasAttribute('data-fresh') && !panel().hasAttribute('data-stale') && !panel().hasAttribute('data-idle'));
 });
 
-test('when the followed turn ends, its answer is brought to the top to read; following then pauses', async t => {
+test('when the followed turn ends, the page stays at its end, the answer folded there; following goes on', async t => {
   const f = await fixture(t, { sessionId: 'codex:s', autoFollow: true, readingVersion: 2 }), { document, window } = f;
   const timeline = document.querySelector<HTMLElement>('.timeline')!, button = document.querySelector('[data-follow-toggle]')!;
   const scrolls: unknown[] = []; (timeline as any).scrollTo = (options: unknown) => scrolls.push(options);
@@ -292,6 +288,6 @@ test('when the followed turn ends, its answer is brought to the top to read; fol
   f.data.items.push({ ...narrative('answer', 't2', '最终的结论。'), kind: 'answer', title: '历史回答', timestamp: new Date().toISOString() });
   f.update();
   await new Promise(resolve => window.setTimeout(resolve, 1200));
-  assert.ok(scrolls.some(options => JSON.stringify(options).includes('"behavior":"smooth"')));
-  assert.equal(button.getAttribute('aria-pressed'), 'false', 'Reading the answer, not following the tail');
+  assert.ok(document.querySelector('[data-turn-panel="turn:t2"] details.fanswer:not([open])'), 'The answer, folded at the end');
+  assert.equal(button.getAttribute('aria-pressed'), 'true', 'Still following: the end is where the answer is');
 });

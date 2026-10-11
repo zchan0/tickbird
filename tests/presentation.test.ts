@@ -92,9 +92,8 @@ test('Output has a separate closed disclosure, never an action, and partial wrap
     { type: 'response_item', payload: { type: 'function_call_output', call_id: 'call', output: 'Script completed\nOutput:\n' + envelope('body') } },
   ].map(record => JSON.stringify(record)).join('\n') });
   const document = new JSDOM(renderSidecar({ projectName: 'fixture', session: data, nonce: 'fixture' })).window.document;
-  // The shared output is one row of its own, not an action and not copied onto the reads.
-  assert.equal(document.querySelectorAll('.crow[data-tool="OUT"]').length, 1);
-  assert.deepEqual([...document.querySelectorAll('.crow')].map(node => node.getAttribute('data-tool')), ['Read', 'Read', 'OUT']);
+  // The shared output is not an action and not copied onto the reads; as in the terminal, it takes no row of its own.
+  assert.deepEqual([...document.querySelectorAll('.crow')].map(node => node.getAttribute('data-tool')), ['Read', 'Read']);
   const tool = data.items.find(item => item.kind === 'tool')!; tool.status = 'running'; tool.result = 'partial'; tool.availability = 'partial';
   const group = outlineTurn(groupSessionTurns(data)[0]).nodes.find(node => node.kind === 'actions')!;
   assert.ok(group.kind === 'actions');
