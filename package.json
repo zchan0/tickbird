@@ -3,7 +3,7 @@
   "displayName": "Agent Sidecar",
   "description": "Read-only, project-scoped process evidence beside Codex and Claude Code.",
   "publisher": "zchan0",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "private": true,
   "engines": {
     "vscode": "^1.96.0",
@@ -54,9 +54,21 @@
     ],
     "menus": {
       "view/title": [
-        { "command": "agentSidecar.chooseSession", "when": "view == agentSidecar.observer", "group": "navigation@1" },
-        { "command": "agentSidecar.refresh", "when": "view == agentSidecar.observer", "group": "navigation@2" },
-        { "command": "agentSidecar.coverage", "when": "view == agentSidecar.observer", "group": "more@1" }
+        {
+          "command": "agentSidecar.chooseSession",
+          "when": "view == agentSidecar.observer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentSidecar.refresh",
+          "when": "view == agentSidecar.observer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agentSidecar.coverage",
+          "when": "view == agentSidecar.observer",
+          "group": "more@1"
+        }
       ]
     },
     "viewsContainers": {

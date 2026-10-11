@@ -1,21 +1,27 @@
-import { mkdtemp, mkdir, writeFile, readFile, access } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, access } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+// The newest installed copy of each Agent extension, as the developer window loads them; the command must still be public.
+const installed = join(homedir(), '.vscode', 'extensions');
 const agentExtensions = [
-  { id: 'openai.chatgpt', version: '26.901.22334', directory: 'openai.chatgpt-26.901.22334-darwin-arm64', command: 'chatgpt.newCodexPanel' },
-  { id: 'Anthropic.claude-code', version: '2.1.261', directory: 'anthropic.claude-code-2.1.261-darwin-arm64', command: 'claude-vscode.editor.open' },
+  { id: 'openai.chatgpt', command: 'chatgpt.newCodexPanel' },
+  { id: 'Anthropic.claude-code', command: 'claude-vscode.editor.open' },
 ];
+const found = [];
+for (const directory of await readdir(installed).catch(() => [])) {
+  try {
+    const manifest = JSON.parse(await readFile(join(installed, directory, 'package.json'), 'utf8'));
+    found.push({ path: join(installed, directory), id: `${manifest.publisher}.${manifest.name}`, version: manifest.version, commands: (manifest.contributes?.commands ?? []).map(value => value.command) });
+  } catch { /* An incomplete installation. */ }
+}
 for (const extension of agentExtensions) {
-  extension.path = join(homedir(), '.vscode', 'extensions', extension.directory);
-  const manifest = JSON.parse(await readFile(join(extension.path, 'package.json'), 'utf8'));
-  if (`${manifest.publisher}.${manifest.name}` !== extension.id || manifest.version !== extension.version ||
-      !manifest.contributes?.commands?.some(value => value.command === extension.command)) {
-    throw new Error(`Installed extension does not match the reviewed public entry: ${extension.id}`);
-  }
+  const latest = found.filter(item => item.id.toLowerCase() === extension.id.toLowerCase()).sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0];
+  if (!latest || !latest.commands.includes(extension.command)) throw new Error(`No installed ${extension.id} with the public command ${extension.command}`);
+  Object.assign(extension, { path: latest.path, version: latest.version });
 }
 await access(join(root, 'dist', 'tests', 'host', 'coexistence.js'));
 const runRoot = await mkdtemp(join(tmpdir(), 'sidecar-coexistence-'));
