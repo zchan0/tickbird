@@ -103,7 +103,7 @@ function changesHtml(files: ChangedFile[], turnKey: string): string {
   const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0), removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
   const partial = files.some(file => file.added === undefined);
   const names = shortFileLabels(files.map(file => file.path));
-  const rows = files.map((file, index) => `<li data-observation-key="${escapeHtml(file.id)}"><button type="button" class="cfile node-button" data-item-id="${escapeHtml(file.id)}" aria-pressed="false" title="${escapeHtml(file.path)}">`
+  const rows = files.map((file, index) => `<li data-observation-key="${escapeHtml(file.id)}"><button type="button" class="cfile node-button" data-item-id="${escapeHtml(file.id)}" data-path="${escapeHtml(file.path)}" aria-pressed="false" title="${escapeHtml(file.path)}">`
     + `<span class="cmark" data-mark="${file.mark}">${file.mark}</span><span class="cname">${escapeHtml(names[index] || base(file.path))}</span><span class="csize">${size(file.added, file.removed)}</span></button></li>`).join('');
   return `<details class="cfold cchanges" data-fold="changes:${escapeHtml(turnKey)}" data-observation-key="changes:${escapeHtml(turnKey)}"><summary>${label('Changes')}`
     + `<span class="fline"><span class="ftext">${files.length} 个文件 <span class="csize">${size(added, removed)}</span>${partial ? '<span class="cnote">等</span>' : ''}</span><span class="fchev" aria-hidden="true">▾</span></span></summary>`

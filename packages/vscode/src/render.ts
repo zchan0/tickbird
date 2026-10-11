@@ -30,7 +30,7 @@ export interface SidecarProjection { sessionKey: string; name: string; identity:
 export type TurnRenderCache = Map<string, { digest: string; html: string }>;
 export interface DetailRenderOptions { item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean; nonce: string; locale?: string;
   /** A change opens as its diff: the files as the harness recorded them, with their paths as shown. */
-  change?: { files: PatchFile[]; paths: string[]; title: string } }
+  change?: { files: PatchFile[]; paths: string[]; title: string; edit?: { index: number; total: number } } }
 
 const escapeHtml = (value: unknown): string => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -248,6 +248,7 @@ const styles = `
   .dl mark { color: inherit; border-radius: 2px; }
   .dadd mark { background: var(--add-word); } .ddel mark { background: var(--del-word); }
   .dgap .dt { color: var(--muted); }
+  .edit-steps { float: right; display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
   .output-preview { margin: 5px 0 14px 21px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 5px; min-width: 0; }
   .output-preview h3 { color: var(--muted); font-size: 10px; }
   .output-preview pre { padding: 0; border: 0; background: transparent; font-size: 11px; max-height: 5.25em; overflow: hidden; }
@@ -440,7 +441,7 @@ const script = `(() => {
   let focusId = typeof saved.focusId === 'string' ? saved.focusId : '';
   let focusTurnId = typeof saved.focusTurnId === 'string' ? saved.focusTurnId : '';
   let focusGroupId = typeof saved.focusGroupId === 'string' ? saved.focusGroupId : '';
-  const actions = ['chooseSession', 'refresh', 'coverage', 'keep', 'openFolder', 'resumeFollow', 'dismissHint'];
+  const actions = ['chooseSession', 'refresh', 'coverage', 'keep', 'openFolder', 'resumeFollow', 'dismissHint', 'olderEdit', 'newerEdit'];
   let focusAction = typeof saved.focusAction === 'string' && actions.includes(saved.focusAction) ? saved.focusAction : '';
   const nodes = () => [...document.querySelectorAll('button[data-item-id]')];
   const panels = () => [...document.querySelectorAll('[data-turn-panel]')];
@@ -596,6 +597,8 @@ const script = `(() => {
     else if (event.key === ']') { event.preventDefault(); step(-1); }
     else if (event.key === 't') { event.preventDefault(); if (toc && toc.hidden) openToc(); else closeToc(); }
     else if (event.key === 'Escape' && toc && !toc.hidden) { event.preventDefault(); closeToc(); timeline.focus({ preventScroll: true }); }
+    // In a change's detail: the file's change before or after this one in the turn.
+    else if ((event.key === '<' || event.key === '>') && document.querySelector('[data-action="olderEdit"]')) { event.preventDefault(); vscode.postMessage({ type: event.key === '<' ? 'olderEdit' : 'newerEdit' }); }
   });
   selectTurn();
   document.addEventListener('click', event => {
@@ -611,7 +614,8 @@ const script = `(() => {
       focusAction = '';
       select();
       persist();
-      vscode.postMessage({ type: 'openDetail', itemId: selectedId });
+      // A file in Changes says which file: its call may have changed several.
+      vscode.postMessage({ type: 'openDetail', itemId: selectedId, ...(target.dataset.path ? { path: target.dataset.path } : {}) });
       return;
     }
     const type = target.dataset.action;
@@ -1216,6 +1220,6 @@ export function renderDetail({ item, items, provider, kept, nonce, locale, chang
     : records
     ? `${records.map((record) => `<section class="evidence-record" data-source-item-id="${escapeHtml(record.id)}">${multiple ? `<header class="evidence-record-heading"><h2>${escapeHtml(describeDisplayAction(record).label)}</h2>${detailState(record)}</header>` : ''}${evidenceContent(record)}</section>`).join('')}`
     : evidenceContent(item));
-  const body = `<main class="detail" aria-label="过程证据详情"><header class="toolbar"><span class="detail-identity">${providerName(provider)}<span aria-hidden="true">·</span><span data-keep-status>${kept ? '已保留' : '临时预览'}</span></span><button type="button" class="quiet-button" data-action="keep"${kept ? ' disabled' : ''}>${kept ? '已保留' : '保留此页'}</button></header><section class="detail-heading"><h1>${escapeHtml(change ? change.title : reading ? reading.path.replace(/\\/g, '/').split('/').at(-1) || reading.path : title)}</h1>${multiple ? '' : change ? (item.status === 'failed' ? detailState(item) : '') : detailState(records?.[0] ?? item)}</section><div class="detail-content">${content}</div></main>`;
+  const body = `<main class="detail" aria-label="过程证据详情"><header class="toolbar"><span class="detail-identity">${providerName(provider)}<span aria-hidden="true">·</span><span data-keep-status>${kept ? '已保留' : '临时预览'}</span></span><button type="button" class="quiet-button" data-action="keep"${kept ? ' disabled' : ''}>${kept ? '已保留' : '保留此页'}</button></header><section class="detail-heading">${change?.edit ? `<div class="edit-steps"><button type="button" class="quiet-button" data-action="olderEdit" title="上一次修改 &lt;"${change.edit.index ? '' : ' disabled'}>‹</button><span>第 ${change.edit.index + 1} 次 / 共 ${change.edit.total} 次</span><button type="button" class="quiet-button" data-action="newerEdit" title="下一次修改 &gt;"${change.edit.index < change.edit.total - 1 ? '' : ' disabled'}>›</button></div>` : ''}<h1>${escapeHtml(change ? change.title : reading ? reading.path.replace(/\\/g, '/').split('/').at(-1) || reading.path : title)}</h1>${multiple ? '' : change ? (item.status === 'failed' ? detailState(item) : '') : detailState(records?.[0] ?? item)}</section><div class="detail-content">${content}</div></main>`;
   return documentHtml(title, body, nonce, item.sessionId, locale);
 }

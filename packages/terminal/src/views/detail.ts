@@ -6,7 +6,7 @@ import { describeDisplayAction, fileLanguage, fileReading, presentEvidence, reco
 import { chapterTurn, type ChapterRow } from '../../../core/src/chapters';
 import { outcomeWord } from '../../../core/src/turn-view';
 import { recordedToolInputs } from '../../../core/src/actions';
-import { diffRows } from '../../../core/src/call-target';
+import { diffRows, fileChanges } from '../../../core/src/call-target';
 import { plainText, type Line, type Span, type Style } from '../screen';
 import { textWidth } from '../width';
 import { hardWrap, highlightLines } from './code';
@@ -172,16 +172,6 @@ const outputLines = (contents: InputContent[], width: number, glyph: Glyph): Lin
 const section = (title: string): Line => [{ text: ' ' + title, style: { ...DIM, bold: true } }];
 const join2 = (blocks: Line[][]): Line[] => blocks.filter(block => block.length).flatMap((block, index) => index ? [[], ...block] : block);
 
-/** A call that may have changed a file: only these are looked up for the other changes to it. */
-const CHANGES = /^(Write|Edit|MultiEdit|NotebookEdit|apply_patch|edit_file|write_file)$/i;
-const mayChange = (row: ChapterRow): boolean => !row.output
-  && (CHANGES.test(row.tool) || row.items.some(item => item.kind === 'file-change'));
-
-/** Every change to `path` in the turn, in order, as (row, file) pairs. */
-function changesOf(path: string, rows: ChapterRow[], session: SessionData): Array<{ row: ChapterRow; file: PatchFile }> {
-  return rows.filter(mayChange).flatMap(row => recordedFiles(row.items, resolveOutlineEvidence(session, row.id, row.items[0])?.entry).filter(file => file.path === path).map(file => ({ row, file })));
-}
-
 export interface DetailInput {
   session: SessionData;
   group: TurnGroup;
@@ -222,7 +212,7 @@ export function detailDoc({ session, group, row, width, glyph, edit, background 
   if (files.length) {
     const rows = chapterTurn(group).segments.flatMap(segment => segment.kind === 'chapter' ? segment.chapter.rows : []);
     const path = files[0].path;
-    const changes = changesOf(path, rows, session);
+    const changes = fileChanges(session, rows, path);
     const own = Math.max(0, changes.findIndex(change => change.row.id === row.id));
     const index = Math.max(0, Math.min(changes.length - 1, edit ?? own));
     const current = changes[index] ?? { row, file: files[0] };

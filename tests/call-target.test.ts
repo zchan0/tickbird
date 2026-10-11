@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { parseClaude } from '../packages/core/src/claude';
 import { visibleTurnGroups } from '../packages/core/src/outline';
 import { turnView } from '../packages/core/src/turn-view';
-import { fileRead, findRow, rowChanges } from '../packages/core/src/call-target';
+import { fileChanges, fileRead, findRow, rowChanges, turnRows } from '../packages/core/src/call-target';
 import { renderDetail } from '../packages/vscode/src/render';
 
 const at = (second: number) => new Date(Date.UTC(2026, 9, 11, 1, 0, second)).toISOString();
@@ -48,4 +48,28 @@ test('an edit opens as its change, with the line numbers the harness recorded an
   const lines = [...document.querySelectorAll('.dl')].map(line => [line.className.replace('dl', '').trim(), line.querySelector('.dn')!.textContent, line.querySelector('.dt')!.textContent]);
   assert.deepEqual(lines, [['', '9', '// a'], ['ddel', '10', 'const a = 1;'], ['dadd', '10', 'const a = 2;'], ['', '11', 'const b = 2;']]);
   assert.deepEqual([...document.querySelectorAll('.dl mark')].map(mark => mark.textContent), ['1', '2'], 'Only the word that changed');
+});
+
+test('a file changed twice in a turn steps from one change to the other, as < > in the terminal', () => {
+  const data = parse([
+    rec('user', '改两次', 0),
+    call('e1', 'Edit', { file_path: '/fixture/src/a.ts', old_string: 'a = 1', new_string: 'a = 2' }, 1),
+    rec('user', [{ type: 'tool_result', tool_use_id: 'e1', content: 'ok' }], 2,
+      { toolUseResult: { type: 'update', filePath: '/fixture/src/a.ts', structuredPatch: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a = 1', '+a = 2'] }], originalFile: 'a = 1' } }),
+    call('e2', 'Edit', { file_path: '/fixture/src/a.ts', old_string: 'a = 2', new_string: 'a = 3' }, 3),
+    rec('user', [{ type: 'tool_result', tool_use_id: 'e2', content: 'ok' }], 4,
+      { toolUseResult: { type: 'update', filePath: '/fixture/src/a.ts', structuredPatch: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a = 2', '+a = 3'] }], originalFile: 'a = 2' } }),
+  ]);
+  const group = visibleTurnGroups(data)[0];
+  const steps = fileChanges(data, turnRows(group), '/fixture/src/a.ts');
+  assert.deepEqual(steps.map(step => step.file.lines.at(-1)), ['+a = 2', '+a = 3']);
+  // The turn's Changes line for the file opens its latest change.
+  const changed = turnView(group, false, 'claude').turn.files[0];
+  assert.equal(steps.findIndex(step => step.row.id === changed.id), 1);
+  const html = renderDetail({ item: steps[1].row.items[0], provider: 'claude', kept: false, nonce: 'n',
+    change: { files: [steps[1].file], paths: ['src/a.ts'], title: 'a.ts', edit: { index: 1, total: 2 } } });
+  const document = new JSDOM(html).window.document;
+  assert.match(document.querySelector('.edit-steps')!.textContent!, /第 2 次 \/ 共 2 次/);
+  assert.equal(document.querySelector<HTMLButtonElement>('[data-action="olderEdit"]')!.disabled, false);
+  assert.equal(document.querySelector<HTMLButtonElement>('[data-action="newerEdit"]')!.disabled, true, 'The latest change has none after it');
 });

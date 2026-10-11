@@ -53,6 +53,18 @@ export function rowChanges(session: SessionData, row: ChapterRow): PatchFile[] {
   return recordedFiles(row.items, evidence?.entry);
 }
 
+/** A call that may have changed a file: only these are looked up for the other changes to it. */
+const CHANGES = /^(Write|Edit|MultiEdit|NotebookEdit|apply_patch|edit_file|write_file)$/i;
+const mayChange = (row: ChapterRow): boolean => !row.output && (CHANGES.test(row.tool) || row.items.some(item => item.kind === 'file-change'));
+
+/** Every change to `path` among a turn's rows, in order, as (row, file) pairs: to step through with < >. */
+export function fileChanges(session: SessionData, rows: ChapterRow[], path: string): Array<{ row: ChapterRow; file: PatchFile }> {
+  return rows.filter(mayChange).flatMap(row => recordedFiles(row.items, resolveOutlineEvidence(session, row.id, row.items[0])?.entry).filter(file => file.path === path).map(file => ({ row, file })));
+}
+
+/** A turn's rows, in order. */
+export const turnRows = (group: TurnGroup): ChapterRow[] => chapterTurn(group).segments.flatMap(segment => segment.kind === 'chapter' ? segment.chapter.rows : []);
+
 export interface DiffRow { sign: ' ' | '+' | '-'; no?: number; text: string; words?: Array<[number, number]> }
 export type DiffPiece = DiffRow | { gap: string };
 

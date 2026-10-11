@@ -12,10 +12,12 @@ import { hasReadableEvidence, outlineCoverage, resolveOutlineEvidence } from '..
 import { currentSession, readSessionStates, sessionStateDirectory, type SessionState, type SessionStateCache } from '../../core/src/session-state';
 import { lastRecordAt, liveExtras as coreLiveExtras, type LiveExtras } from '../../core/src/live-extras';
 import { createSessionPickerMetadata, type SessionPickerEntry } from '../../core/src/session-picker';
-import { callLink, fileRead, findRow, recordedImage, rowChanges } from '../../core/src/call-target';
+import { callLink, fileChanges, fileRead, findRow, recordedImage, rowChanges, turnRows } from '../../core/src/call-target';
 import type { PatchFile } from '../../core/src/presentation';
 
-interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean; change?: { files: PatchFile[]; paths: string[]; title: string } }
+interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean;
+  /** A change shown as its diff: every change to the file in the turn, the one on screen, its path as shown. */
+  change?: { steps: PatchFile[]; index: number; path: string; title: string } }
 const observerType = 'agentSidecar.observer';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -129,7 +131,8 @@ export function activate(context: vscode.ExtensionContext) {
   }
   function renderEvidence(view: EvidenceView) {
     view.panel.title = `${view.kept ? '已保留' : '预览'} · ${view.change?.title ?? view.item.title}`;
-    view.panel.webview.html = renderDetail({ item: view.item, items: view.items, provider: view.provider, kept: view.kept, nonce: nonce(), locale: vscode.env?.language, ...(view.change ? { change: view.change } : {}) });
+    view.panel.webview.html = renderDetail({ item: view.item, items: view.items, provider: view.provider, kept: view.kept, nonce: nonce(), locale: vscode.env?.language, ...(view.change ? { change: { files: [view.change.steps[view.change.index]], paths: [view.change.path], title: view.change.title,
+      ...(view.change.steps.length > 1 ? { edit: { index: view.change.index, total: view.change.steps.length } } : {}) } } : {}) });
   }
   /**
    * Switching sessions closes the temporary preview, which belongs to the old
@@ -268,7 +271,7 @@ export function activate(context: vscode.ExtensionContext) {
     view.webview.onDidReceiveMessage((message: unknown) => {
       if (!message || typeof message !== 'object') return;
       if (observer !== view) return;
-      const value = message as { type?: unknown; itemId?: unknown; streamId?: unknown; sessionId?: unknown; requestId?: unknown };
+      const value = message as { type?: unknown; itemId?: unknown; path?: unknown; streamId?: unknown; sessionId?: unknown; requestId?: unknown };
       let action: Promise<unknown> | undefined;
       if (value.type === 'observerReady' && value.streamId === liveView?.streamId && liveView) publish(true);
       else if (value.type === 'chooseSession') action = chooseSession();
@@ -279,7 +282,7 @@ export function activate(context: vscode.ExtensionContext) {
       else if (value.type === 'resumeFollow') { follow = true; action = followCurrent(); }
       else if (value.type === 'dismissHint') action = dismissHint();
       else if (value.type === 'keep') { keepEvidence(); }
-      else if (value.type === 'openDetail' && typeof value.itemId === 'string') action = openDetail(value.itemId);
+      else if (value.type === 'openDetail' && typeof value.itemId === 'string') action = openDetail(value.itemId, typeof value.path === 'string' && value.path.length < 4096 ? value.path : undefined);
       else if (value.type === 'loadInlineEvidence' && session && value.sessionId === sessionKey(session) && typeof value.itemId === 'string' && typeof value.requestId === 'string' && value.requestId.length < 40) {
         const evidence = resolveOutlineEvidence(session, value.itemId);
         if (evidence) action = Promise.resolve(view.webview.postMessage({ type: 'inlineEvidence', sessionId: value.sessionId, itemId: value.itemId, requestId: value.requestId,
@@ -320,7 +323,8 @@ export function activate(context: vscode.ExtensionContext) {
     await vscode.window.showTextDocument(document, { ...options, selection: new vscode.Range(start, 0, end, document.lineAt(end).text.length) });
     return true;
   }
-  function openDetail(id: string): Promise<void> {
+  /** `path`: the file a line in Changes stands for, when its call changed several. */
+  function openDetail(id: string, path?: string): Promise<void> {
     const boundSession = session;
     const boundObserver = observer;
     // Capture before either the detail queue or a layout change can yield.
@@ -332,10 +336,17 @@ export function activate(context: vscode.ExtensionContext) {
     const link = found && callLink(boundSession, found.row);
     const target = image?.path ? { path: image.path } : link ? (/^https?:/.test(link.target) ? { url: link.target } : { path: link.target })
       : read ? { path: read.path, lines: { start: read.start ?? 1, count: read.count } } : undefined;
+    // A change opens as one file's diff, as in the terminal: this call's change to it, and the turn's other changes to it to step through.
     const files = found && !target ? rowChanges(boundSession, found.row) : [];
+    const shown = files.find(file => file.path === path)?.path ?? files[0]?.path;
     const root = boundSession ? boundSession.projectPath.replace(/\/$/, '') + '/' : '';
-    const change = files.length ? { files: structuredClone(files), paths: files.map(file => file.path.startsWith(root) ? file.path.slice(root.length) : file.path),
-      title: files.length === 1 ? basename(files[0].path) : `${files.length} 个文件` } : undefined;
+    let change: EvidenceView['change'];
+    if (found && boundSession && shown) {
+      const steps = fileChanges(boundSession, turnRows(found.group), shown);
+      const own = steps.findIndex(step => step.row.id === found.row.id);
+      change = { steps: structuredClone(steps.length ? steps.map(step => step.file) : files.filter(file => file.path === shown)), index: Math.max(0, own),
+        path: shown.startsWith(root) ? shown.slice(root.length) : shown, title: basename(shown) };
+    }
     const action = detailOpening.then(async () => {
       if (disposed || !boundSession || session !== boundSession || observer !== boundObserver) return;
       if (target && await openTarget(target)) return;
@@ -350,7 +361,13 @@ export function activate(context: vscode.ExtensionContext) {
         evidence.add(view);
         panel.onDidDispose(() => { evidence.delete(view); if (preview === view) preview = undefined; }, null, context.subscriptions);
         panel.webview.onDidReceiveMessage((message: unknown) => {
-          if (message && typeof message === 'object' && (message as { type?: unknown }).type === 'keep' && preview === view) keepEvidence();
+          const type = message && typeof message === 'object' ? (message as { type?: unknown }).type : undefined;
+          if (type === 'keep' && preview === view) keepEvidence();
+          // The file's change before or after this one in the turn, as < > in the terminal.
+          else if ((type === 'olderEdit' || type === 'newerEdit') && view.change) {
+            const index = Math.max(0, Math.min(view.change.steps.length - 1, view.change.index + (type === 'olderEdit' ? -1 : 1)));
+            if (index !== view.change.index) { view.change.index = index; renderEvidence(view); }
+          }
         }, null, context.subscriptions);
       } else { preview.item = structuredClone(item); preview.items = items ? structuredClone(items) : undefined; preview.provider = boundSession.provider; preview.change = change; preview.panel.reveal(column, true); }
       renderEvidence(preview);
