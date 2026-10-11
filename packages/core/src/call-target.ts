@@ -34,7 +34,7 @@ const sources = (session: SessionData, row: ChapterRow) => {
 };
 
 /** The one file a call read, where it starts and how many lines: to open the file itself there. */
-export function fileRead(session: SessionData, row: ChapterRow): { path: string; start?: number; count: number } | undefined {
+export function fileRead(session: SessionData, row: ChapterRow): { path: string; start?: number; count: number; lines: string[] } | undefined {
   if (row.output) return undefined;
   const { records } = sources(session, row);
   const reads = records.filter(record => !record.commandInput || !records.some(parent => parent.id === record.commandInput!.itemId)).map(parent => {
@@ -43,7 +43,23 @@ export function fileRead(session: SessionData, row: ChapterRow): { path: string;
   });
   const first = reads[0];
   if (!first || reads.some(reading => !reading || reading.path !== first.path)) return undefined;
-  return { path: absolute(first.path, session), ...(first.start !== undefined ? { start: first.start } : {}), count: first.lines.length };
+  return { path: absolute(first.path, session), ...(first.start !== undefined ? { start: first.start } : {}), count: first.lines.length, lines: first.lines };
+}
+
+/**
+ * Where the lines a call read are in the file as it is now (1-based): where
+ * they were, if they are still there; else the first place they all are, in
+ * order. Nothing when the file no longer has them: then the file of now would
+ * show other lines, and the record of the time is what to open.
+ */
+export function locateLines(current: string[], read: string[], start = 1): number | undefined {
+  // A long read is matched by its first lines; blank lines alone say nothing.
+  const wanted = read.slice(0, 40).map(line => line.trimEnd());
+  if (!wanted.some(line => line.trim())) return start;
+  const at = (from: number) => wanted.every((line, index) => (current[from + index] ?? '').trimEnd() === line);
+  if (at(start - 1)) return start;
+  for (let from = 0; from + wanted.length <= current.length; from++) if (at(from)) return from + 1;
+  return undefined;
 }
 
 /** What a call changed, as the harness recorded it where it did (real line numbers and context), else as the call asked. */

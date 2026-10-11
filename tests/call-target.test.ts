@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { parseClaude } from '../packages/core/src/claude';
 import { visibleTurnGroups } from '../packages/core/src/outline';
 import { turnView } from '../packages/core/src/turn-view';
-import { fileChanges, fileRead, findRow, rowChanges, turnRows } from '../packages/core/src/call-target';
+import { fileChanges, fileRead, findRow, locateLines, rowChanges, turnRows } from '../packages/core/src/call-target';
 import { renderDetail } from '../packages/vscode/src/render';
 
 const at = (second: number) => new Date(Date.UTC(2026, 9, 11, 1, 0, second)).toISOString();
@@ -28,7 +28,7 @@ const rows = (data: ReturnType<typeof session>) => turnView(visibleTurnGroups(da
 test('a read opens as the file itself, at the lines it read', () => {
   const data = session();
   const read = rows(data).find(row => row.tool === 'Read')!;
-  assert.deepEqual(fileRead(data, read), { path: '/fixture/src/a.ts', start: 10, count: 2 });
+  assert.deepEqual(fileRead(data, read), { path: '/fixture/src/a.ts', start: 10, count: 2, lines: ['const a = 1;', 'const b = 2;'] });
   assert.deepEqual(rowChanges(data, read), [], 'A read changes nothing');
 });
 
@@ -72,4 +72,11 @@ test('a file changed twice in a turn steps from one change to the other, as < > 
   assert.match(document.querySelector('.edit-steps')!.textContent!, /第 2 次 \/ 共 2 次/);
   assert.equal(document.querySelector<HTMLButtonElement>('[data-action="olderEdit"]')!.disabled, false);
   assert.equal(document.querySelector<HTMLButtonElement>('[data-action="newerEdit"]')!.disabled, true, 'The latest change has none after it');
+});
+
+test('the lines a call read are found where they are now, or not at all', () => {
+  const read = ['const a = 1;', 'const b = 2;'];
+  assert.equal(locateLines(['x', 'const a = 1;', 'const b = 2;'], read, 2), 2, 'Still where they were');
+  assert.equal(locateLines(['// new', 'x', 'y', 'const a = 1;', 'const b = 2;'], read, 2), 4, 'Moved down by lines added above');
+  assert.equal(locateLines(['const a = 2;', 'const b = 2;'], read, 1), undefined, 'Changed since: open the record of the time');
 });

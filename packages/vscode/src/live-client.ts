@@ -44,7 +44,7 @@ export const liveClient = `
       part.addEventListener('animationend', done);
     };
     const stagger = nodes => {
-      const parts = new Set();
+      const parts = new Set(), holders = new Set();
       for (const node of nodes) {
         // The turn map and lens only change their ticks; the reading column carries the motion.
         if (!node.isConnected || !timeline.contains(node)) continue;
@@ -54,6 +54,9 @@ export const liveClient = `
           // Calls folded away arrive as their one fold line.
           const fold = part.closest('details:not([open])');
           parts.add(fold && timeline.contains(fold) ? fold : part);
+          // A new block of calls, or a new tool's run in one, comes in with its first call: its band and the
+          // tool's name are not there before the words above them, as they would be if only the rows faded in.
+          for (const holder of [part.closest('.ccalls'), part.closest('.crun')]) if (holder && node.contains(holder)) holders.add(holder);
         }
       }
       const ordered = [...parts].filter(part => !part.matches('.live-tail'))
@@ -63,9 +66,14 @@ export const liveClient = `
       const now = performance.now(), step = Math.max(50, Math.min(ROW, 1600 / Math.max(1, ordered.length)));
       let at = Math.max(now, revealAt), last = at - FADE;
       if (at - now > BACKLOG) at = now + BACKLOG;
+      const delays = new Map();
       for (const part of ordered) {
-        reveal(part, at - now); last = at;
+        reveal(part, at - now); delays.set(part, at); last = at;
         at += words(part) ? WORDS : step;
+      }
+      for (const holder of holders) {
+        const first = ordered.find(part => holder.contains(part));
+        if (first) reveal(holder, delays.get(first) - now);
       }
       revealAt = at;
       // The loading line always comes back last, once what arrived above it has settled.

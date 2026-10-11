@@ -211,6 +211,9 @@ test('a burst is revealed one part at a time: the words, a beat, then each call;
   const delays = arrived.map(node => parseInt(node.style.animationDelay, 10));
   assert.ok(delays.every((delay, index) => index === 0 || delay > delays[index - 1]), 'One after another');
   assert.ok(delays[2] - delays[1] > delays[3] - delays[2], 'Words get a longer beat than a call row');
+  // The band and the tool's name come in with the first call, after the words: not before them.
+  const band = arrived[2].closest<HTMLElement>('.ccalls')!;
+  assert.ok(band.classList.contains('arrived') && parseInt(band.style.animationDelay, 10) === delays[2] && delays[2] > delays[1]);
   f.data.items.push(input('read-e')); Object.assign(f.data.items.at(-1)!, { turnId: 't2', timestamp: now });
   f.update();
   assert.ok(arrived.every(node => node.isConnected && node.classList.contains('arrived') && node.style.animationDelay), 'Still waiting or fading after the next morph');

@@ -30,7 +30,9 @@ export interface SidecarProjection { sessionKey: string; name: string; identity:
 export type TurnRenderCache = Map<string, { digest: string; html: string }>;
 export interface DetailRenderOptions { item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean; nonce: string; locale?: string;
   /** A change opens as its diff: the files as the harness recorded them, with their paths as shown. */
-  change?: { files: PatchFile[]; paths: string[]; title: string; edit?: { index: number; total: number } } }
+  change?: { files: PatchFile[]; paths: string[]; title: string; edit?: { index: number; total: number } };
+  /** The call the page is about, named as its line in the panel names it; its failure word, if it failed. */
+  call?: { tool: string; label: string; word?: string } }
 
 const escapeHtml = (value: unknown): string => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -248,6 +250,9 @@ const styles = `
   .dl mark { color: inherit; border-radius: 2px; }
   .dadd mark { background: var(--add-word); } .ddel mark { background: var(--del-word); }
   .dgap .dt { color: var(--muted); }
+  .detail-meta { margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .detail-meta b { color: var(--vscode-foreground); font-weight: 600; }
+  .detail-bad { color: var(--vscode-errorForeground); }
   .edit-steps { float: right; display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
   .output-preview { margin: 5px 0 14px 21px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 5px; min-width: 0; }
   .output-preview h3 { color: var(--muted); font-size: 10px; }
@@ -1128,6 +1133,19 @@ function diffHtml(file: PatchFile): string {
   return `<div class="patch cdiff dg-${Math.min(digits, 7)}">${rows}</div>`;
 }
 
+/**
+ * Under a call's name, as the terminal's detail header says it: the tool, a
+ * failure in red, the lines a read covered, or that nothing came back. Record
+ * states (完成, 部分可读) stay in the sources below: they describe the record,
+ * not the call.
+ */
+function callMeta(call: { tool: string; word?: string }, records: TimelineItem[], reading?: FileReading): string {
+  const outputs = records.some(record => presentEvidence(record).outputs.length);
+  const range = reading ? reading.start !== undefined ? `第 ${reading.start}–${reading.start + reading.lines.length - 1} 行` : `${reading.lines.length} 行` : '';
+  const empty = reading || outputs ? '' : records.some(record => record.status === 'running') ? '还没有返回' : '没有记录返回内容';
+  return `<div class="detail-meta"><b>${escapeHtml(call.tool)}</b>${call.word ? ` · <span class="detail-bad">${escapeHtml(call.word)}</span>` : ''}${range ? ` · ${range}` : ''}${empty ? ` · ${empty}` : ''}</div>`;
+}
+
 function detailState(item: TimelineItem, includeStatus = true): string {
   const status = includeStatus ? statusNames[item.status] : '';
   const result = item.result === 'not-observed' ? '尚未取得返回' : item.result === 'empty' ? '已取得空返回'
@@ -1150,8 +1168,8 @@ function evidenceSources(item: TimelineItem, includeOutput = false): string {
 
 function evidenceContent(item: TimelineItem): string {
   const presentation = presentEvidence(item);
-  const input = presentation.calls.some(call => call.contents.length) ? `<section class="io-section" data-io="input"><h2>Input</h2>${presentation.calls.map(call => `<div class="invocation-input">${presentation.calls.length > 1 ? `<h3>${escapeHtml(call.name)}</h3>` : ''}${call.contents.map(renderInputContent).join('')}</div>`).join('')}</section>` : '';
-  const output = !item.id.startsWith('write-file:') && presentation.outputs.length ? `<section class="io-section" data-io="output"><h2>Output</h2>${presentation.outputs.flatMap(block => toolOutputContents(item, block.text ?? '')).map(renderInputContent).join('')}</section>` : '';
+  const input = presentation.calls.some(call => call.contents.length) ? `<section class="io-section" data-io="input"><h2>输入</h2>${presentation.calls.map(call => `<div class="invocation-input">${presentation.calls.length > 1 ? `<h3>${escapeHtml(call.name)}</h3>` : ''}${call.contents.map(renderInputContent).join('')}</div>`).join('')}</section>` : '';
+  const output = !item.id.startsWith('write-file:') && presentation.outputs.length ? `<section class="io-section" data-io="output"><h2>返回</h2>${presentation.outputs.flatMap(block => toolOutputContents(item, block.text ?? '')).map(renderInputContent).join('')}</section>` : '';
   return `${input}${output}${presentation.other.map(block => renderBlock(block, item)).join('')}${evidenceSources(item)}`;
 }
 
@@ -1203,7 +1221,7 @@ function renderFileReading(reading: FileReading, records: TimelineItem[]): strin
     + `${renderFile(reading.lines, reading.start, reading.language)}</section>${records.map(record => evidenceSources(record)).join('')}`;
 }
 
-export function renderDetail({ item, items, provider, kept, nonce, locale, change }: DetailRenderOptions): string {
+export function renderDetail({ item, items, provider, kept, nonce, locale, change, call }: DetailRenderOptions): string {
   const records = items?.length ? items : undefined;
   // Each read keeps its own output. A call and its native execution record are one
   // read, and the native record carries the clean output.
@@ -1229,6 +1247,6 @@ export function renderDetail({ item, items, provider, kept, nonce, locale, chang
     : records
     ? `${records.map((record) => `<section class="evidence-record" data-source-item-id="${escapeHtml(record.id)}">${multiple ? `<header class="evidence-record-heading"><h2>${escapeHtml(describeDisplayAction(record).label)}</h2>${detailState(record)}</header>` : ''}${evidenceContent(record)}</section>`).join('')}`
     : evidenceContent(item));
-  const body = `<main class="detail" aria-label="过程证据详情"><header class="toolbar"><span class="detail-identity">${providerName(provider)}<span aria-hidden="true">·</span><span data-keep-status>${kept ? '已保留' : '临时预览'}</span></span><button type="button" class="quiet-button" data-action="keep"${kept ? ' disabled' : ''}>${kept ? '已保留' : '保留此页'}</button></header><section class="detail-heading">${change?.edit ? `<div class="edit-steps"><button type="button" class="quiet-button" data-action="olderEdit" title="上一次修改 &lt;"${change.edit.index ? '' : ' disabled'}>‹</button><span>第 ${change.edit.index + 1} 次 / 共 ${change.edit.total} 次</span><button type="button" class="quiet-button" data-action="newerEdit" title="下一次修改 &gt;"${change.edit.index < change.edit.total - 1 ? '' : ' disabled'}>›</button></div>` : ''}<h1>${escapeHtml(change ? change.title : reading ? reading.path.replace(/\\/g, '/').split('/').at(-1) || reading.path : title)}</h1>${multiple ? '' : change ? (item.status === 'failed' ? detailState(item) : '') : detailState(records?.[0] ?? item)}</section><div class="detail-content">${content}</div></main>`;
+  const body = `<main class="detail" aria-label="过程证据详情"><header class="toolbar"><span class="detail-identity">${providerName(provider)}<span aria-hidden="true">·</span><span data-keep-status>${kept ? '已保留' : '临时预览'}</span></span><button type="button" class="quiet-button" data-action="keep"${kept ? ' disabled' : ''}>${kept ? '已保留' : '保留此页'}</button></header><section class="detail-heading">${change?.edit ? `<div class="edit-steps"><button type="button" class="quiet-button" data-action="olderEdit" title="上一次修改 &lt;"${change.edit.index ? '' : ' disabled'}>‹</button><span>第 ${change.edit.index + 1} 次 / 共 ${change.edit.total} 次</span><button type="button" class="quiet-button" data-action="newerEdit" title="下一次修改 &gt;"${change.edit.index < change.edit.total - 1 ? '' : ' disabled'}>›</button></div>` : ''}<h1>${escapeHtml(change ? change.title : reading ? reading.path.replace(/\\/g, '/').split('/').at(-1) || reading.path : call ? call.label : title)}</h1>${change ? (item.status === 'failed' ? detailState(item) : '') : call ? callMeta(call, all, reading) : multiple ? '' : detailState(records?.[0] ?? item)}</section><div class="detail-content">${content}</div></main>`;
   return documentHtml(title, body, nonce, item.sessionId, locale);
 }

@@ -1134,8 +1134,8 @@ test('parsed Codex Web and Extension source titles and FileChange filenames neve
     }
   }
   const authored = detailRegions(renderDetail({ item: parsed.items[3], provider: 'codex', kept: false, nonce })).primary;
-  assert.match(authored, /data-io="input"><h2>Input<\/h2>/);
-  assert.match(authored, /data-io="output"><h2>Output<\/h2>/);
+  assert.match(authored, /data-io="input"><h2>输入<\/h2>/);
+  assert.match(authored, /data-io="output"><h2>返回<\/h2>/);
   assert.ok(authored.includes('ORIGINAL COMMAND CONTENT'));
   assert.equal(JSON.stringify(parsed), snapshot, 'Presentation does not rewrite labels or content in parsed source records');
 });

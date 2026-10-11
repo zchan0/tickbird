@@ -22,6 +22,8 @@ export class Motion {
   private calls = new Map<string, number>();
   private batch = 0;
   private now = 0;
+  /** When the words now typing are all out: the calls under them wait for it. */
+  private typed = -Infinity;
 
   /** Starts a page drawn at `now`. */
   begin(now: number): void { this.now = now; this.batch = 0; this.busy = false; }
@@ -31,11 +33,15 @@ export class Motion {
     const seen = this.words.get(key);
     if (!seen) {
       this.words.set(key, this.live ? { length, from: 0, at: this.now } : { length, from: length, at: -Infinity });
+      if (this.live && length) this.typed = Math.max(this.typed, this.now + SAY_MS);
       return this.reveal(key, length);
     }
     const shown = (words: Words) => Math.min(words.length, words.from + Math.floor((words.length - words.from) * Math.min(1, (this.now - words.at) / SAY_MS)));
     // Words that grow (the hook sends long ones in pieces) go on typing from where they are.
-    if (length > seen.length) this.words.set(key, { length, from: this.live ? shown(seen) : length, at: this.now });
+    if (length > seen.length) {
+      this.words.set(key, { length, from: this.live ? shown(seen) : length, at: this.now });
+      if (this.live) this.typed = Math.max(this.typed, this.now + SAY_MS);
+    }
     else if (length < seen.length) this.words.set(key, { length, from: length, at: -Infinity });
     const count = shown(this.words.get(key)!);
     if (count < length) this.busy = true;
@@ -46,7 +52,8 @@ export class Motion {
   shows(key: string): boolean {
     let at = this.calls.get(key);
     if (at === undefined) {
-      at = this.live ? this.now + this.batch++ * STAGGER_MS : -Infinity;
+      // After the words above them are out, then one after another: a call never comes before what explains it.
+      at = this.live ? Math.max(this.now, this.typed) + this.batch++ * STAGGER_MS : -Infinity;
       this.calls.set(key, at);
     }
     if (at > this.now) { this.busy = true; return false; }
