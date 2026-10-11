@@ -13,7 +13,7 @@ import { InputParser, type InputEvent } from '../packages/terminal/src/input';
 import { plainText, spans, type Line } from '../packages/terminal/src/screen';
 import { contentsEntries, contentsLines } from '../packages/terminal/src/views/contents';
 import { columnWidths, inlineSpans, prose, wrapSpans } from '../packages/terminal/src/views/prose';
-import { exploreText } from '../packages/core/src/command-line';
+import { commandEffects, exploreText } from '../packages/core/src/command-line';
 import { Motion, SAY_MS } from '../packages/terminal/src/motion';
 import { liveExtras } from '../packages/core/src/live-extras';
 import type { SessionState } from '../packages/core/src/session-state';
@@ -945,4 +945,34 @@ test('a prompt reads as it was typed: no list indents; the folded answer runs it
   assert.ok(words.length >= 3);
   assert.ok(words.every(line => /^┃ \S/.test(line)), words.join('\n'));
   assert.equal(lines.at(-1), '  核对过了： 竖线连上了 标签换了 ▾');
+});
+
+test('a command says what it changes and does, read through all of it', () => {
+  const effects = (command: string) => { const found = commandEffects(command, '/p', '/h'); return found && { text: found.text, more: found.more, files: found.files.map(file => (file.deleted ? '-' : '') + file.path) }; };
+  // A script's writes, by the name bound to the path; staging folds into the commit; the rest is counted.
+  assert.deepEqual(effects("python3 - <<'EOF'\np='docs/TODO.md'; s=open(p).read()\nopen(p,'w').write(s)\nEOF\ngit add -A docs && git commit -q -F - <<'EOF'\nDocs: done\nEOF\ngit log --oneline -1"),
+    { text: 'edits TODO.md · git commit', more: 1, files: ['docs/TODO.md'] });
+  // A write through a helper's parameter: every file the script names.
+  assert.deepEqual(effects("python3 - <<'EOF'\ndef edit(p, pairs):\n    open(p,'w').write(open(p).read())\nedit('src/a.ts',[])\nedit('tests/b.test.ts',[])\nEOF")?.text, 'edits a.ts, b.test.ts');
+  // A write to a file it is handed: that file, not the paths its text mentions.
+  assert.deepEqual(effects("python3 - \"page.html\" <<'EOF'\nimport sys\np=sys.argv[1]\nX=['docs/STATUS.md']\nopen(p,'w').write('')\nEOF")?.files, ['page.html']);
+  assert.deepEqual(effects("sed -i '' 's/a/b/' tests/x.test.ts; npm run build 2>&1 | grep -i error | head"), { text: 'edits x.test.ts · npm run build', more: 0, files: ['tests/x.test.ts'] });
+  assert.deepEqual(effects("cp /h/.zshrc /h/.zshrc.bak && printf 'x' >> /h/.zshrc && tail -3 /h/.zshrc"), { text: 'edits .zshrc.bak, .zshrc', more: 1, files: ['~/.zshrc.bak', '~/.zshrc'] });
+  assert.deepEqual(effects('npm run install:terminal 2>&1 | tee local/install.txt | head -8')?.text, 'npm run install:terminal · edits install.txt');
+  assert.deepEqual(effects('rm -rf build/tmp && echo ok > build/flag.txt')?.text, 'deletes tmp · edits flag.txt');
+  // A > inside a quoted program is not the shell's; output sent to /dev/null or a descriptor writes nothing.
+  assert.equal(effects(`node -e 'if (a > b) console.log(1)' 2>&1 >/dev/null`), undefined);
+  assert.equal(effects('git status --short; ls'), undefined);
+});
+
+test('a described command that changes files says so after its description; one that only runs keeps its words', () => {
+  const session = parse([rec('user', '提交吧', 0),
+    call('x1', 'Bash', { command: "python3 - <<'EOF'\np='docs/TODO.md'; s=open(p).read()\nopen(p,'w').write(s)\nEOF\ngit add -A && git commit -qm done && git log -1", description: 'Commit item 8' }, 1), result('x1', 2),
+    call('x2', 'Bash', { command: 'npm test 2>&1 | tail -3', description: 'Run the tests' }, 3), result('x2', 4),
+    said('提交了。', 5, true), done(6, 6000)]);
+  const lines = text(turnBody(ctxOf(modelOf(session, { width: 62 }), 0)));
+  assert.ok(lines.some(line => line.trimEnd() === '  ├ Commit item 8 · edits TODO.md · git commit +1'), lines.join('\n'));
+  assert.ok(lines.some(line => line.trimEnd() === '  └ Run the tests'));
+  // The file goes into the turn's changes, without line counts.
+  assert.ok(lines.some(line => line.trimEnd() === '  1 个文件 等 ▾'), lines.join('\n'));
 });

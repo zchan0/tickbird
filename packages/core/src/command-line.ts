@@ -105,7 +105,9 @@ export function scriptHint(source: string, given: string[] = []): string {
     const name = match[2].split('/').at(-1)!;
     if (!names.includes(name)) names.push(name);
   }
-  if (names.length) return `${WRITES.test(source) ? 'edits ' : ''}${names.slice(0, 2).join(', ')}${names.length > 2 ? ', …' : ''}`;
+  const writes = scriptWrites(source, given).map(path => path.split('/').at(-1)!);
+  if (writes.length) return `edits ${writes.slice(0, 2).join(', ')}${writes.length > 2 ? ', …' : ''}`;
+  if (names.length) return `${names.slice(0, 2).join(', ')}${names.length > 2 ? ', …' : ''}`;
   const url = URL_LITERAL.exec(source);
   if (url) return url[1];
   const statement = source.split('\n').map(line => line.trim()).find(line => line
@@ -194,6 +196,34 @@ function inlineScript(part: string): string {
 const shortQuotes = (text: string): string => text
   .replace(/'([^']{41,})'/g, (_, inner: string) => `'${inner.slice(0, 32).trimEnd()}…'`)
   .replace(/"((?:[^"\\]|\\.){41,})"/g, (_, inner: string) => `"${inner.slice(0, 32).trimEnd()}…"`);
+
+/**
+ * The files a script writes, by its own text. A write to a name bound to a
+ * path (p = 'docs/TODO.md' … open(p, 'w')) or to a path itself names that
+ * file; a write through anything else (sys.argv, a helper's parameter) goes
+ * to the files the script is handed, or else to every file it names.
+ */
+export function scriptWrites(source: string, given: string[] = []): string[] {
+  if (!WRITES.test(source)) return [];
+  const bound = new Map<string, string>();
+  for (const match of source.matchAll(/\b([A-Za-z_]\w*)\s*=\s*(?:Path\(\s*)?(['"])([^'"\n]+\.\w{1,6})\2/g)) bound.set(match[1], match[3]);
+  const written: string[] = [];
+  let unknown = false;
+  const target = (value: string) => {
+    const literal = /^(['"])(.+)\1$/.exec(value.trim());
+    const path = literal ? literal[2] : bound.get(value.trim());
+    if (path) { if (!written.includes(path)) written.push(path); } else unknown = true;
+  };
+  for (const match of source.matchAll(/\bopen\(\s*([^,()]+?)\s*,\s*(?:mode\s*=\s*)?['"][wax]/g)) target(match[1]);
+  for (const match of source.matchAll(/(?:\b([A-Za-z_]\w*)|Path\(\s*(['"][^'"]+['"])\s*\))\.write_(?:text|bytes)\(/g)) target(match[1] ?? match[2]);
+  for (const match of source.matchAll(/\b(?:writeFileSync|appendFileSync|writeFile|appendFile)\(\s*([^,()]+?)\s*,/g)) target(match[1]);
+  if (!unknown && written.length) return written;
+  // A write it does not name goes to a file it is handed, if it is handed any; else to one it names.
+  if (given.length) return [...new Set([...written, ...given])];
+  const named: string[] = [];
+  for (const match of source.matchAll(PATH_LITERAL)) if (!named.includes(match[2])) named.push(match[2]);
+  return [...new Set([...written, ...named])];
+}
 
 interface Job { run: CommandPiece[]; head: string }
 
@@ -314,6 +344,103 @@ export function exploreText(command: string, project = '', home = process.env.HO
   const files = [...new Set(looks.slice(0, same).flatMap(look => look.read!.files))];
   return { tool, text: shorten(files.join(', '), project, home), more: looks.length - same };
 }
+
+export interface Effects {
+  /** Files the command writes or deletes, as it names them (relative to where it runs, or ~). */
+  files: Array<{ path: string; deleted?: boolean }>;
+  /** What the line says: "edits TODO.md · git commit". */
+  text: string;
+  /** The other commands it runs. */
+  more: number;
+}
+
+/** Text inside quotes, blanked: a > or a | in a quoted program or pattern is not the shell's. */
+const unquoted = (text: string): string => text.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, match => match[0] + ' '.repeat(Math.max(0, match.length - 2)) + match[0]);
+const quotesOff = (word: string): string => word.replace(/^(['"])(.*)\1$/, '$2');
+/** Where a command sends its output: > file and >> file, not a descriptor or /dev/null. */
+function redirects(text: string): string[] {
+  const plain = unquoted(text), out: string[] = [];
+  for (const match of plain.matchAll(/(?:^|[\s;&|)])\d?>>?\s*([^\s;&|<>()]+)/g)) {
+    const at = match.index! + match[0].length - match[1].length;
+    const target = quotesOff(text.slice(at, at + match[1].length));
+    if (!/^&|^\/dev\//.test(target)) out.push(target);
+  }
+  return out;
+}
+/** A command that runs the project's checks or builds it: worth naming even when it changes no file we can name. */
+const ACTION = /^(git\s+(-C\s+\S+\s+)?(commit|push|tag|checkout|switch|reset|restore|stash|apply|merge|rebase|cherry-pick|pull|rm|mv)\b|(npm|pnpm|yarn|bun)\s+(test|t|install|i|ci|add|run\s+[\w:.-]+)|node\s+--test|pytest|cargo\s+(test|build)|go\s+(test|build)|swift\s+(test|build)|xcodebuild|make\b|tsc\b)/;
+const actionName = (head: string): string => {
+  const words = head.split(/\s+/);
+  if (words[0] === 'git') { const at = words[1] === '-C' ? 3 : 1; return `git ${words[at]}`; }
+  if (/^(npm|pnpm|yarn|bun)$/.test(words[0])) return words[1] === 'run' ? `${words[0]} run ${words[2]}` : `${words[0]} ${words[1]}`;
+  return words.slice(0, 2).join(' ');
+};
+
+/**
+ * What a command changes and does, read through every command it runs: the
+ * files it writes (a script's writes, sed -i, perl -pi, > and >>, tee, cp,
+ * mv, touch) or deletes (rm), and what is worth naming besides (git commit,
+ * tests, builds), in the order it does them; how many other commands it runs.
+ * Nothing when it changes nothing and does nothing worth naming.
+ */
+export function commandEffects(command: string, project = '', home = process.env.HOME ?? ''): Effects | undefined {
+  const files: Effects['files'] = [];
+  const parts: string[] = [];
+  let more = 0;
+  const wrote = (path: string, deleted = false) => { if (path && !files.some(file => file.path === path)) files.push({ path, ...(deleted ? { deleted } : {}) }); };
+  const jobs = jobsOf(command);
+  const commits = jobs.some(job => /^git\s+(-C\s+\S+\s+)?commit\b/.test(job.head));
+  for (const job of jobs) {
+    if (FILLER.test(job.head) && !job.run.some(piece => redirects(piece.text).length)) continue;
+    // Staging is part of the commit that follows it.
+    if (commits && /^git\s+(-C\s+\S+\s+)?add\b/.test(job.head)) continue;
+    const before = files.length;
+    const whole = job.run.map(piece => piece.text).join(' | ');
+    const words = words_(job.head), name = (words[0] ?? '').split('/').at(-1)!, args = words.slice(1);
+    const plain = args.filter(word => !word.startsWith('-'));
+    // A script: the files it writes, by its own text.
+    const body = job.run.find(piece => piece.body !== undefined)?.body;
+    const inline = /^(\S+)((?:\s+-(?![ec]\s)\S+)*)\s+(-[ec]|--eval)\s+(["'])([\s\S]*)\4/.exec(job.head);
+    if (INTERPRETER.test(name) && (body !== undefined || inline)) {
+      const given = args.map(quotesOff).filter(word => !word.startsWith('-') && /\.\w{1,6}$/.test(word));
+      for (const path of scriptWrites(body ?? inline![5], given)) wrote(path);
+    }
+    if (name === 'sed' && args.some(word => /^-[a-zA-Z]*i|^--in-place/.test(word))) {
+      // sed -i '' 's/a/b/' file …: the files follow the script, which is the first plain word (BSD's '' suffix aside).
+      const rest = plain.filter(word => word !== "''" && word !== '""');
+      for (const path of rest.slice(1)) wrote(quotesOff(path));
+    }
+    if (name === 'perl' && args.some(word => /^-[a-z]*p[a-z]*i|^-[a-z]*i/.test(word))) for (const path of plain.slice(1)) wrote(quotesOff(path));
+    if (name === 'tee') for (const path of plain) wrote(quotesOff(path));
+    for (const piece of job.run.slice(1)) { const w = words_(piece.text.trim()); if ((w[0] ?? '') === 'tee') for (const path of w.slice(1).filter(word => !word.startsWith('-'))) wrote(quotesOff(path)); }
+    if ((name === 'cp' || name === 'mv' || name === 'install') && plain.length >= 2) wrote(quotesOff(plain.at(-1)!));
+    if (name === 'touch') for (const path of plain) wrote(quotesOff(path));
+    if (name === 'rm') for (const path of plain) wrote(quotesOff(path), true);
+    for (const path of redirects(whole)) wrote(path);
+    const changed = files.slice(before);
+    // What it runs comes first, then what it wrote: npm run install … | tee install.txt.
+    if (ACTION.test(job.head)) {
+      const action = actionName(job.head);
+      if (!parts.includes(action)) parts.push(action);
+    }
+    if (changed.length) {
+      const names = (list: typeof changed) => [...new Set(list.map(file => base(file.path)))];
+      const edits = names(changed.filter(file => !file.deleted)), gone = names(changed.filter(file => file.deleted));
+      const list = (names: string[]) => names.slice(0, 2).join(', ') + (names.length > 2 ? ', …' : '');
+      // A job that only changes more of the same kind joins the last part: edits a, b rather than edits a · edits b.
+      const last = parts.at(-1);
+      if (edits.length) { if (last?.startsWith('edits ') && !last.includes('…')) parts[parts.length - 1] = 'edits ' + list([...new Set([...last.slice(6).split(', '), ...edits])]); else parts.push('edits ' + list(edits)); }
+      if (gone.length) parts.push('deletes ' + list(gone));
+    } else if (!ACTION.test(job.head)) more++;
+  }
+  if (!parts.length) return undefined;
+  return { files: files.map(file => ({ ...file, path: shortenPath(file.path, project, home) })), text: parts.join(' · '), more };
+}
+const shortenPath = (path: string, project: string, home: string): string => {
+  if (project && path.startsWith(project.replace(/\/$/, '') + '/')) return path.slice(project.replace(/\/$/, '').length + 1);
+  return home && path.startsWith(home + '/') ? '~/' + path.slice(home.length + 1) : path;
+};
+const words_ = (text: string): string[] => text.match(/'[^']*'|"(?:[^"\\]|\\.)*"|\S+/g) ?? [];
 
 /**
  * A command as it reads best: the first command that does the work, with the

@@ -4,6 +4,7 @@ import { actionRowSections, outlineTurn, hasReadableEvidence, type ActionRow, ty
 import { actionPresentation } from './actions';
 import { describeDisplayAction, fileEvidenceId, recordedFiles, shortFileLabels, type PatchFile } from './presentation';
 import { commandOutcome, exitReason, type OutcomeKind } from './outcome';
+import { commandEffects } from './command-line';
 
 /**
  * A chapter-level reading of one turn. The agent's own commentary heads each
@@ -116,6 +117,13 @@ function chapterRows(node: Extract<OutlineNode, { kind: 'actions' }>): ChapterRo
   });
 }
 
+/**
+ * A path a command or a fragment names that is no file of the work: one
+ * under a temporary folder (the agent's scratch files), or behind a shell
+ * variable the record cannot expand. A Write or an Edit always counts.
+ */
+const scratch = (path: string): boolean => /\$|^\/(private\/)?(tmp|var\/folders)\/|\/scratchpad\//.test(path);
+
 /** The lines a recorded change adds and removes: a whole new file is all added. */
 function lineCounts(file: PatchFile): { added: number; removed: number } {
   let added = 0, removed = 0;
@@ -134,18 +142,37 @@ function lineCounts(file: PatchFile): { added: number; removed: number } {
  */
 function changedFiles(nodes: OutlineNode[]): ChangedFile[] {
   const byPath = new Map<string, ChangedFile>();
+  // A command names a file as it runs (docs/TODO.md, ~/x); a record, by its full path. They are one file when one path ends the other.
+  const known = (path: string): ChangedFile | undefined => {
+    if (byPath.has(path)) return byPath.get(path);
+    const tail = (value: string) => value.replace(/^~\//, '/').replace(/^\.\//, '/').replace(/^(?!\/)/, '/');
+    for (const file of byPath.values()) if (file.path.endsWith(tail(path)) || path.endsWith(tail(file.path))) return file;
+    return undefined;
+  };
   for (const node of nodes) {
     if (node.kind !== 'actions') continue;
     for (const row of actionRowSections(node).flatMap(section => section.rows)) {
+      // A command changes files too: those it names (a script's writes, sed -i, > file…), without line counts.
+      const args = invocationArgs(row);
+      const command = typeof args.cmd === 'string' ? args.cmd : typeof args.command === 'string' ? args.command : undefined;
+      if (command !== undefined && row.description.toolName !== 'Write' && row.description.toolName !== 'Edit') {
+        for (const file of commandEffects(command, '', '')?.files ?? []) {
+          if (scratch(file.path)) continue;
+          const existing = known(file.path);
+          if (existing) { if (file.deleted) existing.mark = 'D'; continue; }
+          byPath.set(file.path, { id: row.id, path: file.path, mark: file.deleted ? 'D' : 'M', count: 1 });
+        }
+        continue;
+      }
       const writes = row.items.every(item => item.kind === 'file-change') || row.description.toolName === 'Write' || row.description.toolName === 'Edit';
       if (!writes) continue;
       if (row.items.length && row.items.every(item => item.title === '记录中的文件片段')) {
-        for (const item of row.items) if (item.summary && !byPath.has(item.summary)) byPath.set(item.summary, { id: row.id, path: item.summary, mark: 'M', count: 1 });
+        for (const item of row.items) if (item.summary && !scratch(item.summary) && !known(item.summary)) byPath.set(item.summary, { id: row.id, path: item.summary, mark: 'M', count: 1 });
         continue;
       }
       recordedFiles(row.items, row.description).forEach((file: PatchFile, index) => {
         const counts = lineCounts(file);
-        const existing = byPath.get(file.path);
+        const existing = known(file.path);
         // The latest record opens: that is the state the turn left the file in.
         if (existing) {
           existing.count++; existing.id = fileEvidenceId(row.id, index, file.path);

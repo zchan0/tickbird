@@ -10,7 +10,7 @@ import { textWidth } from '../width';
 import { inlineSpans, prose, wrapSpans } from './prose';
 import { recordedFiles, shortFileLabels } from '../../../core/src/presentation';
 import { resolveOutlineEvidence } from '../../../core/src/outline';
-import { commandText, exploreText } from '../../../core/src/command-line';
+import { commandEffects, commandText, exploreText } from '../../../core/src/command-line';
 import { toolView } from '../../../core/src/tool-view';
 import type { SessionCall } from '../../../core/src/session-state';
 import { spinnerAt, type Motion } from '../motion';
@@ -251,9 +251,13 @@ const isChange = (chapterRow: ChapterRow): boolean => !chapterRow.output
 function callText(chapterRow: ChapterRow, ctx: PageContext): { text: string; more: number; command?: boolean } {
   const command = chapterRow.command;
   if (command !== undefined && (SHELL.test(chapterRow.tool) || EXPLORE.test(chapterRow.tool))) {
-    if (chapterRow.description) return { text: chapterRow.description, more: 0 };
+    // What the command changes and does is read from all of it. The agent's words for it come first; when the
+    // command changes files, which its words may leave out, what it changes and does follows them.
+    const effects = commandEffects(command, ctx.session.projectPath);
+    if (chapterRow.description) return effects?.files.length ? { text: `${chapterRow.description} · ${effects.text}`, more: effects.more } : { text: chapterRow.description, more: 0 };
     const explored = exploreText(command, ctx.session.projectPath);
     if (explored) return { text: explored.text, more: explored.more, command: true };
+    if (effects) return { text: effects.text, more: effects.more };
     const shown = commandText(command, ctx.session.projectPath);
     return { text: shown.text || chapterRow.tool, more: shown.more, command: true };
   }
