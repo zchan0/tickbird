@@ -7,7 +7,7 @@ import { turnView } from '../packages/core/src/turn-view';
 import type { SessionData } from '../packages/core/src/model';
 import type { LiveExtras } from '../packages/core/src/live-extras';
 import { SYMBOLS } from '../packages/terminal/src/caps';
-import { fitKeys, frame, initialState, key, openDetail, pointerGone, pointerRest, update, windowTitle, type AppState, type Model } from '../packages/terminal/src/app';
+import { fitKeys, frame, initialState, key, layout, openDetail, pointerGone, pointerRest, update, windowTitle, type AppState, type Model } from '../packages/terminal/src/app';
 import { changedWords, diffLines, fileLines } from '../packages/terminal/src/views/detail';
 import { InputParser, type InputEvent } from '../packages/terminal/src/input';
 import { plainText, spans, type Line } from '../packages/terminal/src/screen';
@@ -409,14 +409,38 @@ test('the pointer brings up the call under it; one click opens it', () => {
   assert.deepEqual([state.mode, state.call], ['detail', 1]);
 });
 
-test('following an open turn keeps its end on screen; when it ends, the page goes back to its start', () => {
+test('following an open turn keeps its end on screen, and stays at the end when the turn ends', () => {
   const open = modelOf(parse([...FIRST, ...SECOND]), { height: 5 });
   let state = update(update(initialState(), modelOf(parse(FIRST), { height: 8 })), open);
   assert.ok(state.scroll > 0);
   const closed = modelOf(parse([...FIRST, ...SECOND, result('t5', 23), said('没有别的了。', 24, true), done(25, 5000)]), { height: 8, now: Date.parse(at(26)) });
   state = update(state, closed);
-  assert.deepEqual([state.index, state.scroll, state.follow], [1, 0, true]);
-  assert.ok(text(frame(state, closed)).some(line => line.startsWith('┃ 再加一个回归测试')));
+  // The answer is what comes last: the page stays at the end, where it is.
+  assert.ok(state.scroll > 0 && state.follow && state.index === 1);
+  assert.ok(text(frame(state, closed)).some(line => line.trim() === 'Final Answer'), text(frame(state, closed)).join('\n'));
+});
+
+test('an opened answer that does not fit goes to the top; one that fits leaves the page still; folding keeps the label where it was', () => {
+  const long = Array.from({ length: 30 }, (_, i) => `第 ${i + 1} 段说明。`).join('\n\n');
+  const model = modelOf(parse([...FIRST.slice(0, -2), said(long, 13, true), done(14, 14_000)]), { height: 12 });
+  let state = update(initialState(), model);
+  for (let i = 0; i < 10; i++) state = key(state, keyOf('pagedown'), model);
+  const answer = layout(state, model).targets.findIndex(target => target.answer);
+  state = { ...state, call: answer };
+  const before = text(frame(state, model)).findIndex(line => line.trim() === 'Final Answer');
+  state = key(state, keyOf('enter'), model);
+  assert.equal(state.answerOpen, true);
+  assert.equal(state.follow, false, 'Reading the answer pauses following');
+  // The label is the first line under the header.
+  assert.equal(text(frame(state, model))[2].trim(), 'Final Answer');
+  state = key(state, keyOf('enter'), model);
+  assert.equal(state.answerOpen, false);
+  assert.equal(text(frame(state, model)).findIndex(line => line.trim() === 'Final Answer'), before);
+  // A short answer fits where it is: opening it moves nothing.
+  const short = modelOf(parse(FIRST), { height: 40 });
+  let still = update(initialState(), short);
+  still = { ...still, call: layout(still, short).targets.findIndex(target => target.answer) };
+  assert.equal(key(still, keyOf('enter'), short).scroll, still.scroll);
 });
 test('details: a call shows its input and return; a read shows the file; a change shows the diff; [ ] move between calls', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]));

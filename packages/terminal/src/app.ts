@@ -156,8 +156,9 @@ const latestLive = (model: Model): boolean => {
 
 /**
  * Applies a new snapshot: follows the newest turn, or notes that one started.
- * Following an open turn keeps its end on screen; when it ends, the page goes
- * back to its start, where the steps begin: the answer is in the agent's pane.
+ * Following an open turn keeps its end on screen, and it stays there when the
+ * turn ends: its answer is what comes last. A turn that arrives finished
+ * starts at its start, where the steps begin.
  */
 export function update(state: AppState, model: Model): AppState {
   const total = model.groups.length;
@@ -171,7 +172,7 @@ export function update(state: AppState, model: Model): AppState {
     next.index = last;
     delete next.notice;
     const end = bottom(next, model);
-    next.scroll = live ? end : arrived || state.wasLive ? 0 : Math.min(state.scroll, end);
+    next.scroll = live || (state.wasLive && !arrived) ? end : arrived ? 0 : Math.min(state.scroll, end);
     return settle(next, state);
   }
   // A new turn while the reader is on the newest one, scrolled back in it: they sent it, so it is
@@ -225,6 +226,21 @@ function showTurn(state: AppState, model: Model, index: number): AppState {
   delete next.call; delete next.detail; delete next.answerOpen;
   if (target === last) { delete next.notice; return update({ ...next, follow: true }, model); }
   return next;
+}
+
+/**
+ * Opens or folds the closing answer. Opened, its label goes to the top when
+ * the answer does not fit below it on screen, so it reads without scrolling;
+ * one that fits leaves the page still. Folded, the label stays where it was on
+ * screen. Either way the reader is reading: following pauses until the end.
+ */
+function toggleAnswer(state: AppState, model: Model, target: CallTarget, scrollBefore: number): AppState {
+  const next: AppState = { ...state, answerOpen: !state.answerOpen, follow: false };
+  const end = bottom(next, model);
+  const row = target.line - scrollBefore;
+  if (!next.answerOpen) return settle({ ...next, scroll: Math.max(0, Math.min(end, target.line - row)) }, state);
+  // The answer is the last thing on the page: it fits when the page's end is on screen.
+  return settle({ ...next, scroll: end <= scrollBefore ? scrollBefore : Math.min(target.line, end) }, state);
 }
 
 /** Selects a call and keeps its lines on screen. Selecting stops following: the reader is reading. */
@@ -330,7 +346,7 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
       const at = targetAt(state, model, event.y, event.x, targets);
       if (at < 0) return state;
       const selected = selectCall(state, model, at, targets);
-      if (targets[at].answer) return { ...selected, answerOpen: !state.answerOpen };
+      if (targets[at].answer) return toggleAnswer(selected, model, targets[at], state.scroll);
       const image = openTarget(model, targets[at]);
       if (image) { const { call: _, ...rest } = selected; return { ...rest, effect: image }; }
       return { ...selected, mode: 'detail', detail: { scroll: 0, clicked: true } };
@@ -376,7 +392,7 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
     }
     case 'enter': {
       if (state.call === undefined) return state;
-      if (targets()[state.call]?.answer) return { ...state, answerOpen: !state.answerOpen };
+      if (targets()[state.call]?.answer) return toggleAnswer(state, model, targets()[state.call], state.scroll);
       const image = openTarget(model, targets()[state.call]);
       if (image) return { ...state, effect: image };
       return { ...state, mode: 'detail', detail: { scroll: 0 } };
