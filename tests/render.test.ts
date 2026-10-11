@@ -370,23 +370,9 @@ test('unsupported notices and partial or unknown evidence states are not hidden 
   assert.doesNotMatch(html, /状态未核实/);
 });
 
-test('refresh preserves the reader-chosen turn index position independently from process scroll', () => {
-  const before = scriptFixture({ turnCount: 45 });
-  before.scroll(275);
-  before.scrollMap(144);
-  assert.equal(before.state?.mapScrollTop, 144);
-  const refreshed = scriptFixture({ turnCount: 45, state: before.state });
-  assert.equal(refreshed.turnMap.scrollTop, 144, 'Refresh does not force the index back to the latest turn');
-  assert.equal(refreshed.timeline.scrollTop, 275);
-  assert.equal(refreshed.document.scrollingElement.scrollTop, 880);
-  assert.equal(refreshed.panels.at(-1)!.hidden, false);
-  before.scrollMap(0);
-  assert.equal(scriptFixture({ turnCount: 45, state: before.state }).turnMap.scrollTop, 0, 'A saved zero is not treated as missing');
-});
-
 test('turn selection, expansion and scroll state are scoped to the bound session, including provider', () => {
   const codex = scriptFixture();
-  codex.click(codex.nav[0]);
+  codex.click(codex.lensNav[0]);
   codex.backgrounds[0].open = true;
   codex.backgrounds[0].listeners.get('toggle')!();
   codex.scroll(210);
@@ -411,7 +397,6 @@ test('attached context is folded by default and background expansion plus keyboa
   before.focus(before.summaries[1]);
   assert.deepEqual(before.state?.expandedActionIds, ['background:turn:turn-2']);
   assert.equal(before.state?.focusGroupId, 'background:turn:turn-2');
-  assert.equal(before.state?.focusTurnId, '');
   const refreshed = scriptFixture({ state: before.state });
   assert.deepEqual(refreshed.backgrounds.map(group => group.open), [false, true]);
   assert.deepEqual(refreshed.focused, [{ dataset: { actionGroup: 'background:turn:turn-2' }, preventScroll: true }]);
@@ -769,17 +754,16 @@ test('truly empty ended turns disappear from the page and 目录 without renumbe
 
 test('refresh cannot resurrect a filtered empty turn and still restores a surviving reading anchor', () => {
   const before = scriptFixture({ turnCount: 3 });
-  before.click(before.nav[1]);
+  before.click(before.lensNav[1]);
   before.scroll(1120);
   const removed = scriptFixture({ turnCount: 3, hiddenTurns: [2], state: before.state });
   assert.ok(!removed.panels.some(panel => panel.dataset.turnPanel === 'turn:turn-2'));
   assert.ok(!removed.nav.some(button => button.dataset.turnId === 'turn:turn-2'));
   assert.ok(!removed.lensNav.some(button => button.dataset.lensTurnId === 'turn:turn-2'));
   assert.notEqual(removed.state?.selectedTurnId, 'turn:turn-2');
-  assert.equal(removed.state?.focusTurnId, '', 'A filtered turn cannot later regain a stale saved focus');
   assert.deepEqual(removed.focused, []);
   const surviving = scriptFixture({ turnCount: 3 });
-  surviving.click(surviving.nav[2]);
+  surviving.click(surviving.lensNav[2]);
   surviving.scroll(2140);
   const refreshed = scriptFixture({ turnCount: 3, hiddenTurns: [2], state: surviving.state });
   assert.equal(refreshed.timeline.scrollTop, 2140, 'The surviving turn, where the reader was in it');
@@ -1298,7 +1282,6 @@ test('webview script parses, preserves per-session scroll and focus, and sends n
   assert.match(source, /readingVersion: 3/);
   assert.match(source, /preventScroll: true/);
   assert.equal((source.match(/type: 'viewport'/g) ?? []).length, 0, 'A sidebar view has no editor width to calibrate');
-  assert.match(source, /addEventListener\('resize', hideLens\)/, 'Resize only dismisses a transient lens; viewport reporting remains one-shot');
   assert.ok(!source.includes('fetch('));
   assert.ok(!source.includes('window.open'));
 });
@@ -1329,7 +1312,7 @@ test('refresh restoration does not focus any control when the webview is not foc
     const fixture = scriptFixture({ focused: false, state: { sessionId: 'codex:session-1', readingVersion: 3, ...target, scrollTop: 220 } });
     assert.deepEqual(fixture.focused, []);
     assert.equal(fixture.timeline.scrollTop, 220);
-    assert.deepEqual([...fixture.windowHandlers.keys()].sort(), ['message', 'resize'], 'Only transient-lens dismissal is added; no global focus watcher is installed');
+    assert.deepEqual([...fixture.windowHandlers.keys()].sort(), ['message'], 'No global focus or resize watcher is installed');
   }
 });
 

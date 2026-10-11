@@ -25,7 +25,6 @@ export class LiveView {
       health: { ...health }, name: next.name, identity: next.identity,
       order: next.turns.map(turn => turn.key),
       turns: next.turns.filter(turn => reset || before.get(turn.key) !== turn.html),
-      ...(reset || previous.map !== next.map ? { map: next.map } : {}),
       ...(reset || previous.lens !== next.lens ? { lens: next.lens } : {}),
       ...(reset || previous.warnings !== next.warnings ? { warnings: next.warnings } : {}),
       ...(reset || previous.empty !== next.empty ? { empty: next.empty } : {}),

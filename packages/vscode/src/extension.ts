@@ -403,7 +403,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Metadata ledger only. Never copy raw tool output, instructions, or image bytes into reports.
     coverageDocuments.set(uri.toString(), JSON.stringify({ provider: snapshot.provider, sessionId: snapshot.id,
       warnings: snapshot.warnings, coverage: snapshot.coverage,
-      presentation: { note: '解析覆盖与呈现去向分开记录；同一会话的回合连续排列，左侧目录用于定位，动作详情按原始来源逐条核对。', items: outlineCoverage(snapshot) } }, null, 2));
+      presentation: { note: '解析覆盖与呈现去向分开记录；面板一页一轮，目录用于定位，调用详情按原始来源逐条核对。', items: outlineCoverage(snapshot) } }, null, 2));
     coverageChanged.fire(uri);
     return uri;
   }

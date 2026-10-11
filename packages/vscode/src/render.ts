@@ -1,11 +1,10 @@
 import { renderChapterTurn, chapterStyles, type LiveExtras } from './chapter-view';
-import type { EvidenceBlock, ItemKind, Provider, SessionData, TimelineItem } from '../../core/src/model';
+import type { EvidenceBlock, Provider, SessionData, TimelineItem } from '../../core/src/model';
 import type { TurnGroup } from '../../core/src/timeline';
-import { actionRowSections, outlineTurn, visibleTurnGroups, type OutlineNode, type OutlineEvidence } from '../../core/src/outline';
+import { visibleTurnGroups, type OutlineEvidence } from '../../core/src/outline';
 import { actionPresentation, describeAction, recordedToolInputs, type ActionEntry } from '../../core/src/actions';
 import { renderMarkdown, renderUserText } from './markdown';
 import { plainPasted } from '../../core/src/pasted';
-import { sourceTimestamp } from '../../core/src/jsonl';
 import { liveClient } from './live-client';
 import { followClient } from './follow-client';
 import { inlineClient } from './inline-client';
@@ -26,7 +25,7 @@ export interface SidecarRenderOptions {
   /** Suggest installing the integration. */
   integrationHint?: boolean;
 }
-export interface SidecarProjection { sessionKey: string; name: string; identity: string; map: string; lens: string; warnings: string; empty: string; turns: Array<{ key: string; html: string }> }
+export interface SidecarProjection { sessionKey: string; name: string; identity: string; lens: string; warnings: string; empty: string; turns: Array<{ key: string; html: string }> }
 export type TurnRenderCache = Map<string, { digest: string; html: string }>;
 export interface DetailRenderOptions { item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean; nonce: string; locale?: string;
   /** A change opens as its diff: the files as the harness recorded them, with their paths as shown. */
@@ -38,10 +37,6 @@ const escapeHtml = (value: unknown): string => String(value ?? '').replace(/[&<>
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[character]!));
 
-const kindNames: Record<ItemKind, string> = {
-  request: '用户提问', message: '过程说明', tool: '工具记录', answer: '回答记录',
-  context: '相关背景', notice: '记录说明', question: '提问与回复', subagent: '子任务', 'file-change': '文件变化',
-};
 const statusNames: Record<TimelineItem['status'], string> = {
   info: '', running: '进行中', completed: '已完成', failed: '失败', unknown: '',
 };
@@ -439,20 +434,16 @@ const script = `(() => {
   const vscode = acquireVsCodeApi();
   const sidecar = document.querySelector('.sidecar');
   const timeline = document.querySelector('.timeline');
-  const turnMap = document.querySelector('.turn-map');
-  const turnLens = document.querySelector('.turn-lens');
   const sessionId = document.body.dataset.sessionId || '';
   const previous = vscode.getState();
   const saved = previous && previous.sessionId === sessionId ? previous : {};
   let selectedId = typeof saved.selectedId === 'string' ? saved.selectedId : '';
   let focusId = typeof saved.focusId === 'string' ? saved.focusId : '';
-  let focusTurnId = typeof saved.focusTurnId === 'string' ? saved.focusTurnId : '';
   let focusGroupId = typeof saved.focusGroupId === 'string' ? saved.focusGroupId : '';
   const actions = ['chooseSession', 'refresh', 'coverage', 'keep', 'openFolder', 'resumeFollow', 'dismissHint', 'olderEdit', 'newerEdit'];
   let focusAction = typeof saved.focusAction === 'string' && actions.includes(saved.focusAction) ? saved.focusAction : '';
   const nodes = () => [...document.querySelectorAll('button[data-item-id]')];
   const panels = () => [...document.querySelectorAll('[data-turn-panel]')];
-  const turns = () => [...document.querySelectorAll('button[data-turn-id]')];
   const lensTurns = () => [...document.querySelectorAll('.toc button[data-lens-turn-id]')];
   const groups = () => [...document.querySelectorAll('details[data-action-group]')];
   const summaries = () => [...document.querySelectorAll('summary[data-action-group]')];
@@ -460,7 +451,6 @@ const script = `(() => {
   // a previous selection/focus to a different set of source records.
   if (selectedId && !nodes().some(button => button.dataset.itemId === selectedId)) selectedId = '';
   if (focusId && !nodes().some(button => button.dataset.itemId === focusId)) focusId = '';
-  if (focusTurnId && !turns().some(button => button.dataset.turnId === focusTurnId)) focusTurnId = '';
   if (focusGroupId && !summaries().some(summary => summary.dataset.actionGroup === focusGroupId)) focusGroupId = '';
   const initialPanel = panels()[0];
   let selectedTurnId = panels().some(panel => panel.dataset.turnPanel === saved.selectedTurnId)
@@ -473,77 +463,23 @@ const script = `(() => {
   ${inlineClient}
   const persist = () => {
     vscode.setState({ sessionId, selectedId, focusId, focusAction, scrollTop: timeline ? timeline.scrollTop : 0,
-      readingVersion: 3, selectedTurnId, focusTurnId, focusGroupId, autoFollow: following,
-      mapScrollTop: turnMap ? turnMap.scrollTop : 0,
+      readingVersion: 3, selectedTurnId, focusGroupId, autoFollow: following,
       expandedTextIds: [...expandedTexts],
       expandedInlineSections: [...expandedInlineSections],
       openFolds: [...openFolds],
       expandedActionIds: groups().filter(group => group.open).map(group => group.dataset.actionGroup) });
   };
   const select = () => nodes().forEach(node => node.setAttribute('aria-pressed', String(node.dataset.itemId === selectedId)));
-  const selectTurn = () => {
-    turns().forEach(button => button.setAttribute('aria-pressed', String(button.dataset.turnId === selectedTurnId)));
-    lensTurns().forEach(button => button.setAttribute('aria-pressed', String(button.dataset.lensTurnId === selectedTurnId)));
-  };
-  let lensAnchor;
-  let returningFromLens = false;
-  const hideLens = () => {
-    if (turnLens) turnLens.hidden = true;
-    turns().forEach(button => button.setAttribute('aria-expanded', 'false'));
-  };
-  const showLens = mark => {
-    if (!turnLens || returningFromLens) return;
-    const marks = turns();
-    const index = marks.indexOf(mark);
-    if (index < 0) return;
-    lensAnchor = mark;
-    lensTurns().forEach(button => { button.hidden = button.dataset.lensTurnId !== mark.dataset.turnId; });
-    marks.forEach(button => button.setAttribute('aria-expanded', String(button === mark)));
-    turnLens.hidden = false;
-    const rect = mark.getBoundingClientRect();
-    const left = Math.max(8, Math.min(rect.right, window.innerWidth - turnLens.offsetWidth - 8));
-    const top = Math.max(8, Math.min(rect.top + rect.height / 2 - turnLens.offsetHeight / 2, window.innerHeight - turnLens.offsetHeight - 8));
-    turnLens.style.left = left + 'px';
-    turnLens.style.top = top + 'px';
-  };
-  const inTurnNavigation = target => target instanceof Element && Boolean(target.closest('.turn-map, .turn-lens'));
-  document.addEventListener('mouseover', event => {
-    const mark = event.target instanceof Element ? event.target.closest('button[data-turn-id]') : null;
-    if (mark) showLens(mark);
-  });
-  document.addEventListener('mouseout', event => {
-    if (inTurnNavigation(event.target) && !inTurnNavigation(event.relatedTarget)) hideLens();
-  });
+  const selectTurn = () => lensTurns().forEach(button => button.setAttribute('aria-pressed', String(button.dataset.lensTurnId === selectedTurnId)));
+  // In 目录, the arrows go from turn to turn.
   document.addEventListener('keydown', event => {
     const target = event.target instanceof Element ? event.target.closest('button') : null;
-    if (event.key === 'Escape' && turnLens && !turnLens.hidden) {
-      event.preventDefault();
-      hideLens();
-      if (target && target.dataset.lensTurnId && lensAnchor) {
-        returningFromLens = true;
-        lensAnchor.focus({ preventScroll: true });
-        returningFromLens = false;
-      }
-    } else if (target && target.dataset.turnId && event.key === 'ArrowRight') {
-      event.preventDefault(); showLens(target);
-      const entry = lensTurns().find(button => button.dataset.lensTurnId === target.dataset.turnId);
-      if (entry) entry.focus({ preventScroll: true });
-    } else if (target && target.dataset.lensTurnId && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
-      const entries = lensTurns().filter(button => !button.hidden);
-      const next = entries[entries.indexOf(target) + (event.key === 'ArrowDown' ? 1 : -1)];
-      event.preventDefault();
-      if (next) next.focus({ preventScroll: true });
-    }
+    if (!target || !target.dataset.lensTurnId || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    const entries = lensTurns(), next = entries[entries.indexOf(target) + (event.key === 'ArrowDown' ? 1 : -1)];
+    event.preventDefault();
+    if (next) next.focus({ preventScroll: true });
   });
-  const revealMark = () => {
-    const mark = turns().find(button => button.dataset.turnId === selectedTurnId);
-    if (!mark || !turnMap) return;
-    if (mark.offsetTop < turnMap.scrollTop) turnMap.scrollTop = mark.offsetTop;
-    else if (mark.offsetTop + mark.offsetHeight > turnMap.scrollTop + turnMap.clientHeight)
-      turnMap.scrollTop = mark.offsetTop + mark.offsetHeight - turnMap.clientHeight;
-  };
   // One turn to a page, as in the terminal: which turn is the reader's choice, not where the page is scrolled.
-  const trackReading = () => {};
   const pageHead = document.querySelector('.ph-turn');
   const toc = document.querySelector('.toc');
   const newTurn = document.querySelector('.new-turn');
@@ -618,12 +554,11 @@ const script = `(() => {
   document.addEventListener('click', event => {
     const target = event.target instanceof Element ? event.target.closest('button') : null;
     if (!target || target.disabled) return;
-    const turnId = target.dataset.turnId || target.dataset.lensTurnId;
+    const turnId = target.dataset.lensTurnId;
     if (turnId) { focusAction = ''; focusGroupId = ''; goTo(turnId); return; }
     if (target.dataset.itemId) {
       selectedId = target.dataset.itemId;
       focusId = selectedId;
-      focusTurnId = '';
       focusGroupId = '';
       focusAction = '';
       select();
@@ -635,16 +570,13 @@ const script = `(() => {
     const type = target.dataset.action;
     if (actions.includes(type)) {
       focusId = '';
-      focusTurnId = '';
       focusGroupId = '';
       focusAction = type;
       persist();
       vscode.postMessage({ type });
     }
   });
-  if (timeline) timeline.addEventListener('scroll', () => { hideLens(); trackReading(); persist(); }, { passive: true });
-  if (turnMap) turnMap.addEventListener('scroll', () => { hideLens(); persist(); }, { passive: true });
-  window.addEventListener('resize', hideLens);
+  if (timeline) timeline.addEventListener('scroll', persist, { passive: true });
   const boundGroups = new WeakSet();
   const bindGroups = () => groups().forEach(group => { if (!boundGroups.has(group)) { boundGroups.add(group); group.addEventListener('toggle', persist); } });
   bindGroups();
@@ -655,30 +587,19 @@ const script = `(() => {
       if (target.dataset.itemId) {
         focusId = target.dataset.itemId;
         focusAction = '';
-        focusTurnId = '';
-        focusGroupId = '';
-      } else if (target.dataset.turnId) {
-        showLens(target);
-        focusTurnId = target.dataset.turnId;
-        focusId = '';
-        focusAction = '';
         focusGroupId = '';
       } else if (target.dataset.lensTurnId) {
-        // Preview focus is transient; only an explicit click changes the turn.
+        // Moving through 目录 is not choosing: only a click changes the turn.
         return;
       } else if (target.dataset.actionGroup) {
         focusGroupId = target.dataset.actionGroup;
-        focusId = ''; focusTurnId = ''; focusAction = '';
+        focusId = ''; focusAction = '';
       } else if (actions.includes(target.dataset.action)) {
         focusId = '';
-        focusTurnId = '';
         focusGroupId = '';
         focusAction = target.dataset.action;
       } else return;
       persist();
-    });
-    sidecar.addEventListener('focusout', event => {
-      if (inTurnNavigation(event.target) && !inTurnNavigation(event.relatedTarget)) hideLens();
     });
   }
   window.addEventListener('message', event => {
@@ -723,19 +644,12 @@ const script = `(() => {
       if (following) { timeline.scrollTop = timeline.scrollHeight; followLatest(); }
       else timeline.scrollTop = saved.readingVersion === 3 && Number.isFinite(saved.scrollTop) ? saved.scrollTop : 0;
     }
-    if (turnMap) {
-      if (Number.isFinite(saved.mapScrollTop)) turnMap.scrollTop = saved.mapScrollTop;
-      else revealMark();
-    }
     const focus = focusAction && sidecar
       ? [...sidecar.querySelectorAll('button[data-action]')].find(button => button.dataset.action === focusAction)
-      : focusTurnId ? turns().find(button => button.dataset.turnId === focusTurnId)
       : focusGroupId ? summaries().find(summary => summary.dataset.actionGroup === focusGroupId)
       : nodes().find(node => node.dataset.itemId === focusId);
     if (focus && !focus.disabled && !focus.closest('[hidden]') && !(focus.dataset.itemId && focus.closest('details:not([open])')) && document.hasFocus()) {
-      returningFromLens = true;
       focus.focus({ preventScroll: true });
-      returningFromLens = false;
     }
     if (timeline) {
       // Also preserve a reader who has not scrolled or clicked yet: a refresh
@@ -749,10 +663,6 @@ const script = `(() => {
       if (!panels().some(panel => panel.dataset.turnPanel === selectedTurnId)) selectedTurnId = panels()[0]?.dataset.turnPanel || '';
       select(); showTurn();
       loadOpenInline();
-      if (turnLens && !turnLens.hidden && lensAnchor) {
-        const mark = turns().find(button => button.dataset.turnId === lensAnchor.dataset.turnId);
-        if (mark) showLens(mark); else hideLens();
-      }
     });
     loadOpenInline();
   };
@@ -794,31 +704,6 @@ function renderNarrative(item: TimelineItem): string {
   return `<li class="narrative${answer ? ' final-answer' : ''}" data-text-id="${escapeHtml(item.id)}" data-observation-key="${escapeHtml(item.id)}" data-status="${escapeHtml(item.status)}">${answer ? '<div class="answer-label">最终回答</div>' : ''}${item.status === 'failed' ? '<span class="availability">失败</span>' : ''}<div class="${answer ? 'answer-prose' : 'narrative-preview'}">${renderMarkdown(publicBody(item))}</div>${answer ? '' : '<button type="button" class="narrative-more" data-toggle-text aria-expanded="false" hidden>展开全文 ⌄</button>'}${item.availability === 'partial' || item.availability === 'unavailable' ? `<span class="availability">${escapeHtml(availabilityNames[item.availability])}</span>` : ''}${attachments}</li>`;
 }
 
-
-function renderActions(group: Extract<OutlineNode, { kind: 'actions' }>): string {
-  const sections = actionRowSections(group).flatMap(section => {
-    if (section.kind !== 'folded-actions') return [section];
-    // A folded directory contains one concrete tool only. Keep source order;
-    // non-adjacent tools must never be reordered merely to share a disclosure.
-    const runs: typeof section[] = [];
-    for (const row of section.rows) {
-      const name = row.description.toolName || actionPresentation(row.description).type;
-      const previous = runs.at(-1);
-      if (previous && (previous.rows[0].description.toolName || actionPresentation(previous.rows[0].description).type) === name) previous.rows.push(row);
-      else runs.push({ ...section, id: `${section.id}:${row.id}`, rows: [row] });
-    }
-    return runs.length === 1 ? [{ ...runs[0], id: section.id }] : runs;
-  }).map(section => {
-    const rows = section.rows.map(row => {
-      if (row.role !== 'output') return renderActionRow(row.id, row.description, row.items, row.count, section.kind === 'result');
-      const output = presentEvidence(row.items[0]).outputs.map(block => block.text ?? '').join('\n');
-      if (!output.trim()) return '';
-      return `<li class="shared-output" data-observation-key="${escapeHtml(row.id)}"><details class="tool-disclosure output-disclosure" data-action-group="output:${escapeHtml(row.id)}"><summary data-action-group="output:${escapeHtml(row.id)}" aria-label="展开共享返回" title="这组调用有返回内容，展开查看"><span class="output-label">OUT</span><span class="output-excerpt">${escapeHtml(output.trim().split(/\r?\n/).find(line => line.trim())?.slice(0, 96) || "返回内容")}</span><span class="output-lines">${output.split(/\r?\n/).length} 行</span>${disclosureArrow()}</summary>${inlineBody(row.id, row.items, renderIoPreview('OUT', output, row.id))}</details></li>`;
-    }).join('');
-    return rows;
-  }).join('');
-  return `<li><ol class="action-sections" aria-label="动作与证据">${sections}</ol></li>`;
-}
 
 function timelineDot(): string {
   return '<span class="timeline-dot" aria-hidden="true"></span>';
@@ -937,10 +822,6 @@ function renderTurn(group: TurnGroup, session: SessionData, locale?: string, lat
   }, { latest, session, extras });
 }
 
-function toolbarIcon(action: string, label: string, path: string): string {
-  return `<button type="button" class="icon-button" data-action="${action}" aria-label="${label}" title="${label}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="${path}"/></svg></button>`;
-}
-
 function requestFirstSentence(group: TurnGroup): string {
   // These are source words, never a generated title or inferred task summary.
   const request = plainPasted(group.request).trim();
@@ -953,13 +834,6 @@ export function projectSidecar({ projectName, session, locale, live }: Pick<Side
   const groups = session ? visibleTurnGroups(session).reverse() : [];
   const turns = groups.filter(group => group.turnId);
   const selected = groups[0];
-  const map = groups.map(group => {
-    const actionCount = group.items.filter(item => ['tool', 'file-change', 'subagent'].includes(item.kind)).length;
-    const weight = actionCount < 3 ? 1 : actionCount < 10 ? 2 : actionCount < 30 ? 3 : 4;
-    const label = group.turnId ? `第 ${group.ordinal} 轮` : '未归属回合的记录';
-    const title = `${label}${group.request ? ' · ' + plainPasted(group.request) : ''}`;
-    return `<button type="button" class="turn-mark" data-turn-id="${escapeHtml(group.key)}" data-weight="${weight}" aria-label="${escapeHtml(title)}" aria-controls="turn-lens" aria-expanded="false" aria-pressed="${group === selected}"><span class="turn-tick" aria-hidden="true"></span></button>`;
-  }).join('');
   const lens = groups.map(group => {
     const label = group.turnId ? `第 ${group.ordinal} 轮` : '未归属';
     const requestItem = group.items.find(item => item.kind === 'request');
@@ -977,7 +851,7 @@ export function projectSidecar({ projectName, session, locale, live }: Pick<Side
     : '<div class="empty"><h2>选择要观察的会话</h2><p>点标题栏的切换按钮选一个会话；开着接入时，会自动跟随这个窗口里正在进行的会话。</p></div>';
   const keys = new Set(groups.map(group => group.key));
   if (cache) for (const key of cache.keys()) if (!keys.has(key)) cache.delete(key);
-  return { sessionKey: session ? `${session.provider}:${session.id}` : '', name, identity, map, lens, warnings, empty,
+  return { sessionKey: session ? `${session.provider}:${session.id}` : '', name, identity, lens, warnings, empty,
     turns: groups.map(group => {
       // Exact public model invalidation, including late output to an old turn.
       // Retain only a digest, not another copy of all evidence bodies.
@@ -995,7 +869,7 @@ export function renderSidecar({ projectName, session, nonce, streamId = '', loca
   const p = projection ?? projectSidecar({ projectName, session, locale, live });
   const nav = (action: string, label: string, glyph: string) => `<button type="button" class="icon-button ph-nav" data-nav="${action}" aria-label="${label}" title="${label}">${glyph}</button>`;
   const body = `<main class="sidecar" data-observation-stream="${escapeHtml(streamId)}" aria-label="Sidecar 过程观察">
-    <div class="integration-hint"${integrationHint ? '' : ' hidden'}><span>装上 Agent Sidecar 接入后，可以自动跟随当前会话，并显示「等你批准」。</span><button type="button" data-action="dismissHint">不再提示</button></div>
+    <div class="integration-hint"${integrationHint ? '' : ' hidden'}><span>装上 Agent Sidecar 接入后，可以自动跟随当前会话，Agent 等你批准时会显示出来。</span><button type="button" data-action="dismissHint">不再提示</button></div>
     <div class="integration-hint follow-session"${followPaused ? '' : ' hidden'}><span>自动跟随已暂停：你选了另一个会话。</span><button type="button" data-action="resumeFollow">跟随当前会话</button></div>
     <div class="observation-problem" hidden></div>
     <header class="page-head"><span class="ph-turn"></span><span class="ph-aside">${streamId ? '<button type="button" class="ph-follow" data-follow-toggle aria-pressed="true"></button>' : ''}${nav('older', '上一轮 [', '‹')}${nav('newer', '下一轮 ]', '›')}${nav('toc', '目录 t', '☰')}</span></header>

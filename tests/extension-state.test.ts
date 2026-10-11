@@ -586,7 +586,7 @@ test('coverage opens in the editor area for either provider without touching the
     await host.command('agentSidecar.coverage');
     assert.deepEqual(host.warnings, []);
     assert.equal(host.documents.size, 1);
-    assert.match([...host.documents.values()][0].text, /回合连续排列/);
+    assert.match([...host.documents.values()][0].text, /一页一轮/);
     assert.ok(![...host.documents.values()][0].text.includes('正文只显示选中回合'));
     assert.equal(host.api.preview, undefined);
     assert.deepEqual(host.layoutWrites, []);

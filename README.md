@@ -32,7 +32,7 @@ npm run install:vscode
 2. 把本仓库登记为 Claude Code 的本地插件市场（`.claude-plugin/marketplace.json`），装上插件 `sidecar-state@agent-sidecar`。新开的会话生效，`/plugin` 里可以停用。
 3. 把本仓库登记为 Codex 的本地插件市场（`.agents/plugins/marketplace.json`），装上同一个接入。**还要在 Codex CLI 里执行一次 `/hooks`，按 `t` 信任它的 hook**，否则 Codex 会静默跳过。
 
-装进 Claude Code 和 Codex 的是插件 `sidecar-state`：一组只写会话状态的 hook，VS Code 版靠它自动跟随会话、显示「等你批准」，终端版也用它。终端版另外还会装一个 `sidecar-split`，只负责在 kitty、tmux 里自动开栏；只装 VS Code 版时不会装它。
+装进 Claude Code 和 Codex 的是插件 `sidecar-state`：一组只写会话状态的 hook，VS Code 版靠它自动跟随会话、在 Agent 等你批准时显示 Needs approval，终端版也用它。终端版另外还会装一个 `sidecar-split`，只负责在 kitty、tmux 里自动开栏；只装 VS Code 版时不会装它。
 
 ### 安装终端版（私有）
 
