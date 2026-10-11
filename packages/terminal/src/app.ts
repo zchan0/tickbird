@@ -50,6 +50,8 @@ export interface AppState {
   seen: number;
   /** The closing answer of the turn on screen is opened in full. */
   answerOpen?: boolean;
+  /** The turn's changes on screen are listed a file a line. */
+  changesOpen?: boolean;
   /** The newest turn was still open at the last update, to see it end. */
   wasLive?: boolean;
   /** The screen cell under the mouse pointer, to bring up the call there. */
@@ -81,7 +83,7 @@ const bodyHeight = (state: AppState, model: Model) => Math.max(1, model.height -
 
 const pageContext = (state: AppState, model: Model): PageContext => ({
   session: model.session, groups: model.groups, index: state.index, status: model.status,
-  extras: model.extras, caps: model.caps, width: model.width, now: model.now, ...(state.answerOpen ? { answerOpen: true } : {}),
+  extras: model.extras, caps: model.caps, width: model.width, now: model.now, ...(state.answerOpen ? { answerOpen: true } : {}), ...(state.changesOpen ? { changesOpen: true } : {}),
 });
 
 /**
@@ -92,7 +94,7 @@ const pageContext = (state: AppState, model: Model): PageContext => ({
  */
 const LAYOUTS = new WeakMap<TurnGroup[], { key: string; value: ReturnType<typeof turnLayout> }>();
 export function layout(state: AppState, model: Model): ReturnType<typeof turnLayout> {
-  const key = JSON.stringify([state.index, model.width, Boolean(state.answerOpen), model.status, model.extras, model.caps.background ?? null, model.caps.symbols]);
+  const key = JSON.stringify([state.index, model.width, Boolean(state.answerOpen), Boolean(state.changesOpen), model.status, model.extras, model.caps.background ?? null, model.caps.symbols]);
   const kept = LAYOUTS.get(model.groups);
   if (kept?.key === key) return kept.value;
   const value = turnLayout(pageContext(state, model));
@@ -167,7 +169,7 @@ export function update(state: AppState, model: Model): AppState {
   const next: AppState = { ...state, seen: total, wasLive: live };
   if (next.message && next.message.until <= model.now) delete next.message;
   if (state.follow) {
-    if (next.index !== last) { delete next.answerOpen; delete next.call; }
+    if (next.index !== last) { delete next.answerOpen; delete next.changesOpen; delete next.call; }
     const arrived = next.index !== last || state.seen === 0;
     next.index = last;
     delete next.notice;
@@ -223,7 +225,7 @@ function showTurn(state: AppState, model: Model, index: number): AppState {
   const last = model.groups.length - 1;
   const target = Math.max(0, Math.min(last, index));
   const next: AppState = { ...state, mode: 'turn', index: target, scroll: 0, follow: false };
-  delete next.call; delete next.detail; delete next.answerOpen;
+  delete next.call; delete next.detail; delete next.answerOpen; delete next.changesOpen;
   if (target === last) { delete next.notice; return update({ ...next, follow: true }, model); }
   return next;
 }
@@ -347,6 +349,7 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
       if (at < 0) return state;
       const selected = selectCall(state, model, at, targets);
       if (targets[at].answer) return toggleAnswer(selected, model, targets[at], state.scroll);
+      if (targets[at].changes) return { ...selected, changesOpen: !state.changesOpen };
       const image = openTarget(model, targets[at]);
       if (image) { const { call: _, ...rest } = selected; return { ...rest, effect: image }; }
       return { ...selected, mode: 'detail', detail: { scroll: 0, clicked: true } };
@@ -393,6 +396,7 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
     case 'enter': {
       if (state.call === undefined) return state;
       if (targets()[state.call]?.answer) return toggleAnswer(state, model, targets()[state.call], state.scroll);
+      if (targets()[state.call]?.changes) return { ...state, changesOpen: !state.changesOpen };
       const image = openTarget(model, targets()[state.call]);
       if (image) return { ...state, effect: image };
       return { ...state, mode: 'detail', detail: { scroll: 0 } };
@@ -501,7 +505,7 @@ export function frame(state: AppState, model: Model): Line[] {
   // The header says what a key does now: open what is selected, pick up following again, find the keys.
   const paused = !state.follow && state.index === model.groups.length - 1;
   const what = selected ?? pointed;
-  const aside = fitKeys([what ? (what.answer ? (state.answerOpen ? '⏎ 收起' : '⏎ 展开') : openHint(model, what)) : '', paused ? '已暂停跟随 · G' : '', '? 按键'], Math.max(0, width - 30));
+  const aside = fitKeys([what ? (what.answer ? (state.answerOpen ? '⏎ 收起' : '⏎ 展开') : what.changes ? (state.changesOpen ? '⏎ 收起' : '⏎ 展开') : openHint(model, what)) : '', paused ? '已暂停跟随 · G' : '', '? 按键'], Math.max(0, width - 30));
   lines.push(...headerLines(ctx, aside ? [dim(aside)] : []), []);
   const on = (target: CallTarget | undefined, at: number) => target !== undefined && at >= target.line && at < target.line + target.height;
   const visible = page.slice(state.scroll, state.scroll + bodyHeight(state, model)).map((line, index) => {

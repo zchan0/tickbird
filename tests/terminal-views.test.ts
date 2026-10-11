@@ -77,14 +77,13 @@ test('every line of the page, the header and 目录 fits the pane, from 30 to 12
   }
 });
 
-test('a finished turn: the request as title, its changes, each step\'s words, its calls as a tree under them, the answer after its label', () => {
+test('a finished turn: the request as title, each step\'s words, its calls as a tree under them, the answer after its label, then its changes', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]));
   const body = turnBody(ctxOf(model, 0));
   const lines = text(body);
   assert.deepEqual(lines.map(line => line.trimEnd()), [
     '  Prompt',
     '┃ 先看看测试为什么失败，再修好它',
-    '  改动  M width.test.ts',
     '',
     '  先跑一遍测试，看失败在哪一步。',
     '',
@@ -101,21 +100,26 @@ test('a finished turn: the request as title, its changes, each step\'s words, it
     '',
     '  Final Answer',
     '  修好了：assert.equal 的两个参数写反了。 ▾',
+    '',
+    '  Changes',
+    '  1 个文件  +1 -1 ▾',
   ]);
   // The prompt under its label, a blue bar beside it; the words in the body colour; the tool names bold in the body colour, to see what was used;
   // what each call worked on grey, all alike, and the tree grey.
   assert.deepEqual(spans(body[0]).find(span => span.text.includes('Prompt'))?.style, { fg: 'blue', bold: true });
   assert.equal(spans(body[1]).find(span => span.text === '┃')?.style?.fg, 'blue');
-  assert.ok(spans(body[4]).filter(span => span.text.includes('先跑')).every(span => !span.style?.dim));
-  assert.ok(spans(body[6]).some(span => span.text === 'Bash' && !span.style?.dim && span.style?.bold));
-  assert.ok(spans(body[7]).some(span => span.text.includes('├') && span.style?.dim));
-  assert.ok(spans(body[8]).some(span => span.text === 'Run only the width tests' && span.style?.dim));
-  assert.ok(spans(body[10]).filter(span => span.text.trim()).every(span => span.style?.dim));
-  assert.ok(spans(body[7]).some(span => span.text === 'exit 1' && span.style?.fg === 'red'));
-  assert.ok(spans(body[15]).some(span => span.text === 'width.test.ts' && span.style?.dim));
-  assert.ok(spans(body[15]).some(span => span.text === '+1' && span.style?.fg === 'green'));
+  assert.ok(spans(body[3]).filter(span => span.text.includes('先跑')).every(span => !span.style?.dim));
+  assert.ok(spans(body[5]).some(span => span.text === 'Bash' && !span.style?.dim && span.style?.bold));
+  assert.ok(spans(body[6]).some(span => span.text.includes('├') && span.style?.dim));
+  assert.ok(spans(body[7]).some(span => span.text === 'Run only the width tests' && span.style?.dim));
+  assert.ok(spans(body[9]).filter(span => span.text.trim()).every(span => span.style?.dim));
+  assert.ok(spans(body[6]).some(span => span.text === 'exit 1' && span.style?.fg === 'red'));
+  assert.ok(spans(body[14]).some(span => span.text === 'width.test.ts' && span.style?.dim));
+  assert.ok(spans(body[14]).some(span => span.text === '+1' && span.style?.fg === 'green'));
   // The answer's label on a line of its own, over the answer, as the prompt's is.
-  assert.deepEqual(spans(body[17]).find(span => span.text.includes('Final Answer'))?.style, { fg: 'green', bold: true });
+  assert.deepEqual(spans(body[16]).find(span => span.text.includes('Final Answer'))?.style, { fg: 'green', bold: true });
+  // Then what the turn changed, under a label of the same kind, folded to one line.
+  assert.deepEqual(spans(body[19]).find(span => span.text.includes('Changes'))?.style, { fg: 'default', bold: true });
   assert.ok(!lines.some(line => /→|✻|●|[$≡±]|calls/.test(line)));
 });
 
@@ -245,6 +249,27 @@ test('waiting for an approval replaces the status line, marks the call and chang
   assert.equal(sessionStatus(latest, model.extras, model.now, { busy: true, state: 'busy' }).kind, 'running');
   assert.equal(sessionStatus(latest, model.extras, model.now, { busy: true, state: 'waiting' }).kind, 'waiting');
   assert.equal(windowTitle(model), '⏸ 等你批准 — Sidecar · Claude Code');
+});
+
+test('the turn\'s changes fold to one line and open to a line a file; a file a script changed has no counts', () => {
+  const fragment = { type: 'attachment', uuid: `u${++uuid}`, timestamp: at(9), sessionId: 'cl', cwd: '/fixture', attachment: { type: 'edited_text_file', filename: '/fixture/docs/STATUS.md', snippet: '1\tok' } };
+  const model = modelOf(parse([...FIRST.slice(0, -2), fragment, said('修好了。', 13, true), done(14, 14_000)]), { height: 40 });
+  let state = update(initialState(), model);
+  let lines = text(frame(state, model));
+  assert.ok(lines.some(line => /^  2 个文件  \+1 -1 等 ▾/.test(line)), lines.join('\n'));
+  // ⏎ on the folded line lists the files: one with its lines, the script's without any.
+  const changes = layout(state, model).targets.findIndex(target => target.changes);
+  state = key({ ...state, call: changes }, keyOf('enter'), model);
+  assert.equal(state.changesOpen, true);
+  lines = text(frame(state, model));
+  assert.ok(lines.some(line => /^  M width\.test\.ts +\+1 -1$/.test(line.trimEnd())), lines.join('\n'));
+  assert.ok(lines.some(line => line.trimEnd() === '  M STATUS.md'), lines.join('\n'));
+  assert.ok(!lines.some(line => line.includes('脚本')));
+  // A file's line opens the diff of its latest change.
+  const file = layout(state, model).targets.findIndex(target => target.row && target.line > layout(state, model).targets[changes].line);
+  const opened = key({ ...state, call: file }, keyOf('enter'), model);
+  assert.equal(opened.mode, 'detail');
+  assert.equal(openDetail(opened, model)?.kind, 'diff');
 });
 
 test('a file the turn made is marked A, one it replaced M', () => {

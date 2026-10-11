@@ -41,7 +41,12 @@ export type TurnSegment =
   | { kind: 'chapter'; chapter: Chapter }
   | { kind: 'answer'; item: TimelineItem }
   | { kind: 'interjection'; item: TimelineItem };
-export interface ChangedFile { id: string; path: string; mark: 'A' | 'M' | 'D'; count: number }
+/**
+ * A file the turn changed: `id` opens its latest record. `added` and `removed`
+ * are the lines its records change; absent when the turn only learned that it
+ * changed (a script wrote it, and the agent was shown the file again).
+ */
+export interface ChangedFile { id: string; path: string; mark: 'A' | 'M' | 'D'; count: number; added?: number; removed?: number }
 export interface ChapterTurn {
   request?: TimelineItem;
   /** Phase markers and pending-review notices: kept for the coverage ledger, never shown in the turn. */
@@ -111,7 +116,22 @@ function chapterRows(node: Extract<OutlineNode, { kind: 'actions' }>): ChapterRo
   });
 }
 
-/** Paths written this turn, first-seen order, with how often each was touched. */
+/** The lines a recorded change adds and removes: a whole new file is all added. */
+function lineCounts(file: PatchFile): { added: number; removed: number } {
+  let added = 0, removed = 0;
+  for (const line of file.lines) {
+    if (file.operation === 'write' || file.operation === 'add' && !/^[+\- ]/.test(line)) added++;
+    else if (line.startsWith('+') && !line.startsWith('+++')) added++;
+    else if (line.startsWith('-') && !line.startsWith('---')) removed++;
+  }
+  return { added, removed };
+}
+
+/**
+ * Paths changed this turn, first-seen order, with how often each was touched
+ * and the lines changed. A file the agent was shown again because it changed
+ * outside its own edits (by a script it ran) counts too, without line counts.
+ */
 function changedFiles(nodes: OutlineNode[]): ChangedFile[] {
   const byPath = new Map<string, ChangedFile>();
   for (const node of nodes) {
@@ -119,14 +139,25 @@ function changedFiles(nodes: OutlineNode[]): ChangedFile[] {
     for (const row of actionRowSections(node).flatMap(section => section.rows)) {
       const writes = row.items.every(item => item.kind === 'file-change') || row.description.toolName === 'Write' || row.description.toolName === 'Edit';
       if (!writes) continue;
+      if (row.items.length && row.items.every(item => item.title === '记录中的文件片段')) {
+        for (const item of row.items) if (item.summary && !byPath.has(item.summary)) byPath.set(item.summary, { id: row.id, path: item.summary, mark: 'M', count: 1 });
+        continue;
+      }
       recordedFiles(row.items, row.description).forEach((file: PatchFile, index) => {
+        const counts = lineCounts(file);
         const existing = byPath.get(file.path);
         // The latest record opens: that is the state the turn left the file in.
-        if (existing) { existing.count++; existing.id = fileEvidenceId(row.id, index, file.path); if (file.operation === 'delete') existing.mark = 'D'; return; }
+        if (existing) {
+          existing.count++; existing.id = fileEvidenceId(row.id, index, file.path);
+          if (file.operation === 'delete') existing.mark = 'D';
+          // A file first known from a fragment gets its counts once a record has them.
+          existing.added = (existing.added ?? 0) + counts.added; existing.removed = (existing.removed ?? 0) + counts.removed;
+          return;
+        }
         // A file the turn made is new however often it is written after.
         const made = file.operation === 'add' || row.items.some(item => item.fileOperation === 'create');
         byPath.set(file.path, { id: fileEvidenceId(row.id, index, file.path), path: file.path, count: 1,
-          mark: made ? 'A' : file.operation === 'delete' ? 'D' : 'M' });
+          mark: made ? 'A' : file.operation === 'delete' ? 'D' : 'M', ...counts });
       });
     }
   }

@@ -8,7 +8,7 @@ import { symbol, type Capabilities } from '../caps';
 import { cutLine, plainText, row, spans, type Color, type Line, type Span, type Style } from '../screen';
 import { textWidth } from '../width';
 import { inlineSpans, prose, wrapSpans } from './prose';
-import { recordedFiles } from '../../../core/src/presentation';
+import { recordedFiles, shortFileLabels } from '../../../core/src/presentation';
 import { resolveOutlineEvidence } from '../../../core/src/outline';
 import { commandText, exploreText } from '../../../core/src/command-line';
 import { toolView } from '../../../core/src/tool-view';
@@ -91,6 +91,8 @@ export interface PageContext {
   now: number;
   /** The closing answer is opened in full. */
   answerOpen?: boolean;
+  /** The turn's changes are listed a file a line. */
+  changesOpen?: boolean;
 }
 
 /**
@@ -177,22 +179,44 @@ function promptLines(text: string, ctx: PageContext): Line[] {
 
 const base = (path: string) => path.replace(/\\/g, '/').split('/').at(-1) || path;
 
-/** The files the turn changed, under the request. */
-function changedLine(view: TurnView, ctx: PageContext): Line[] {
+/**
+ * The files the turn changed, after its answer, under a Changes label: folded,
+ * how many and the lines changed in all ("等" when some files have no
+ * counts, being known only from a script's fragment); opened, a line each,
+ * its mark, its name and its lines, each opening the file's latest change.
+ */
+function changesLines(view: TurnView, ctx: PageContext): Line[] {
   const files = view.turn.files;
   if (!files.length) return [];
-  const spans: Span[] = [{ text: ' '.repeat(MARGIN) }, { text: '改动', style: DIM }];
-  let used = MARGIN + 4, shown = 0;
-  for (const file of files) {
-    const piece = `  ${file.mark} ${base(file.path)}`;
-    const rest = files.length - shown - 1;
-    // Keep room for the "+N" of the files that do not fit.
-    if (used + textWidth(piece) + (rest ? 4 : 0) > ctx.width - 1) break;
-    spans.push({ text: '  ' }, { text: file.mark, style: file.mark === 'A' ? { fg: 'green' } : file.mark === 'D' ? { fg: 'red' } : DIM }, { text: ' ' + base(file.path) });
-    used += textWidth(piece); shown++;
+  const lead: Span = { text: ' '.repeat(MARGIN) };
+  const head = heading('Changes', 'default');
+  CHANGES.add(head);
+  const sizes = (added?: number, removed?: number): Span[] => [
+    ...(added ? [{ text: `+${added}`, style: { fg: 'green' } as Style }] : []), ...(added && removed ? [{ text: ' ' }] : []),
+    ...(removed ? [{ text: `-${removed}`, style: { fg: 'red' } as Style }] : []),
+  ];
+  const open: Span = { text: ' ' + symbol(ctx.caps, '▾'), style: { dim: true, bold: true } };
+  if (!ctx.changesOpen) {
+    const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0), removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
+    const partial = files.some(file => file.added === undefined);
+    const line = cutLine([lead, { text: `${files.length} 个文件` }, ...(added || removed ? [{ text: '  ' }, ...sizes(added, removed)] : []), ...(partial ? [{ text: ' 等', style: DIM }] : []), open], ctx.width);
+    CHANGES.add(line);
+    return [head, line];
   }
-  if (shown < files.length) spans.push({ text: `  +${files.length - shown}`, style: DIM });
-  return [cutLine(spans, ctx.width)];
+  const names = shortFileLabels(files.map(file => file.path));
+  const lines: Line[] = [head];
+  files.forEach((file, index) => {
+    const size = sizes(file.added, file.removed);
+    const room = ctx.width - MARGIN - 2 - textWidth(plainText(size)) - 2;
+    const name = textWidth(names[index]) > room ? cutLine([{ text: names[index] }], room)[0] : { text: names[index] };
+    const gap = Math.max(1, ctx.width - 1 - MARGIN - 2 - textWidth(plainText([name])) - textWidth(plainText(size)));
+    const row = view.rows.find(candidate => candidate.id === file.id);
+    const line: Span[] = [lead, { text: file.mark, style: file.mark === 'A' ? { fg: 'green' } : file.mark === 'D' ? { fg: 'red' } : DIM }, { text: ' ' },
+      { ...name, ...(row ? { style: owned({}, row.id) } : {}) }, { text: ' '.repeat(gap) }, ...size];
+    if (row?.openable) TARGETS.set(line as object, [{ row, height: 1 }]);
+    lines.push(line);
+  });
+  return lines;
 }
 
 const SHELL = /^(Bash|exec_command|shell|local_shell|BashOutput|KillShell|Terminal|Script)$/i;
@@ -333,6 +357,8 @@ interface LineTarget { row: ChapterRow; height: number; from?: number; to?: numb
 const TARGETS = new WeakMap<object, LineTarget[]>();
 /** The closing answer's first line, with how many lines a click on it takes. */
 const ANSWER = new WeakMap<object, number>();
+/** The Changes label and its folded line: a click on either opens or folds the list. */
+const CHANGES = new WeakSet<object>();
 
 /** What shows on the right of a call: a failure in red, a call still out, the size of a change. */
 function callEnd(chapterRow: ChapterRow, ctx: PageContext, live: boolean, asking: boolean): Span[] {
@@ -503,7 +529,7 @@ export function markSelected(line: Line, owner?: string): Line {
 }
 
 /** A call or the answer on the page: its first line, how many lines it takes, and its cells when it shares the line. */
-export interface CallTarget { line: number; height: number; row?: ChapterRow; answer?: boolean; from?: number; to?: number }
+export interface CallTarget { line: number; height: number; row?: ChapterRow; answer?: boolean; changes?: boolean; from?: number; to?: number }
 
 /** The page and where each call row and the answer are on it, for selecting and opening them. */
 export function turnLayout(ctx: PageContext): { lines: Line[]; targets: CallTarget[] } {
@@ -514,6 +540,8 @@ export function turnLayout(ctx: PageContext): { lines: Line[]; targets: CallTarg
     for (const target of TARGETS.get(line) ?? []) targets.push({ line: index, ...target });
     const answer = ANSWER.get(line);
     if (answer) targets.push({ line: index, height: answer, answer: true });
+    // The label and the folded line are one target: whichever is clicked opens the list.
+    if (CHANGES.has(line) && !targets.at(-1)?.changes) targets.push({ line: index, height: ctx.changesOpen ? 1 : 2, changes: true });
   });
   return { lines, targets };
 }
@@ -532,11 +560,13 @@ export function turnBody(ctx: PageContext): Line[] {
   const going = latest && (ctx.status.kind === 'running' || waitingOn);
   // A finished turn's closing answer folds to one line; an open turn shows everything so far.
   const closed = !(latest && (view.live || waitingOn));
-  const blocks: Line[][] = [[...promptLines(requestText(view.turn.request, group), ctx), ...changedLine(view, ctx)]];
+  const blocks: Line[][] = [promptLines(requestText(view.turn.request, group), ctx)];
   for (const segment of closed ? view.process : view.turn.segments) blocks.push(...segmentBlocks(segment, view, ctx, waitingOn));
   // On screen in the agent, not yet in the transcript: set as the words will be, so nothing changes when the record arrives.
   if (latest && ctx.extras.draft && going) blocks.push(wordLines(ctx.extras.draft, ctx));
   if (latest && ctx.extras.calls?.length && going) blocks.push(callLines(ctx.extras.calls.map(announcedRow), view, ctx, waitingOn));
   blocks.push(tailLines(view, latest, ctx));
+  // What the turn changed, once it is over.
+  if (closed) blocks.push(changesLines(view, ctx));
   return blocks.filter(block => block.length).flatMap((block, index) => index ? [[], ...block] : block);
 }
