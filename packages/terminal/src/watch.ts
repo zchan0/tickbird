@@ -6,6 +6,7 @@ import { discoverSessions } from '../../core/src/sessions';
 import { openLiveSession, type LiveSession } from '../../core/src/live-session';
 import { readSessionStates, sessionStateDirectory, type SessionState, type SessionStateCache } from '../../core/src/session-state';
 import { liveExtras } from '../../core/src/live-extras';
+import { Motion, SPIN_MS } from './motion';
 import { visibleTurnGroups } from '../../core/src/outline';
 import type { turnView } from '../../core/src/turn-view';
 import type { Capabilities } from './caps';
@@ -100,6 +101,10 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
   let live: LiveSession | undefined;
   let pausedRetry = 0;
   let app: AppState = initialState();
+  // What is new on the page: the first page of a session is drawn still, what comes after moves in.
+  let motion = new Motion();
+  let frames = 0;
+  let moving: NodeJS.Timeout | undefined;
   let title = '';
   let timer: NodeJS.Timeout | undefined;
   /** The session to show: the one named, the agent's current one, or (undefined) the directory's newest. */
@@ -126,7 +131,7 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
     const extras = liveExtras(session, state);
     const agentState = live.health.agent;
     const status = sessionStatus(latest, extras, Date.now(), { busy: agentState === 'busy' || agentState === 'waiting', ended: state?.phase === 'ended', ...(agentState ? { state: agentState } : {}) });
-    return { session, groups, status, extras, caps, now: Date.now(), width: screen.width, height: screen.height, focusAgent: Boolean(focus) };
+    return { session, groups, status, extras, caps, now: Date.now(), width: screen.width, height: screen.height, focusAgent: Boolean(focus), motion, frame: frames };
   };
   const waitingLines = (message: string): Line[] => {
     const lines: Line[] = [row([{ text: ' Sidecar', style: { bold: true } }], '', screen.width), [], ...prose(message, screen.width - 1, { indent: 3, style: { dim: true } })];
@@ -140,6 +145,9 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
     if (!current) { screen.render(waitingLines(waitingMessage())); return; }
     app = update(app, current);
     screen.render(frame(app, current));
+    // Something still coming in or turning: the next frame soon, and only then.
+    if (motion.busy && !moving) moving = setTimeout(() => { moving = undefined; frames++; draw(); }, SPIN_MS);
+    motion.live = true;
     const next = windowTitle(current);
     if (next !== title) { title = next; out.write(SET_TITLE(title)); }
   };
@@ -224,7 +232,7 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
         const current = agentSession(states, agent);
         if (current && current.session !== target) {
           target = current.session;
-          if (live) { void live.close(); live = undefined; app = initialState(); }
+          if (live) { void live.close(); live = undefined; app = initialState(); motion = new Motion(); }
         }
         if (!target) return;
       }

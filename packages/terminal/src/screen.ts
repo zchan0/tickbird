@@ -14,6 +14,8 @@ export interface Style {
   link?: string;
   /** A background mixed from the terminal's own, where it reported one: a band, never a palette colour. */
   bgRgb?: readonly [number, number, number];
+  /** An exact text colour, for the one mark the palette has no colour for; `fg` stays as the fallback. */
+  fgRgb?: readonly [number, number, number];
 }
 
 export interface Span { text: string; style?: Style }
@@ -40,6 +42,7 @@ export function sgr(style: Style = {}): string {
   if (style.inverse) codes.push('7');
   if (style.strike) codes.push('9');
   if (grey) codes.push('90');
+  else if (style.fgRgb) codes.push(`38;2;${style.fgRgb.join(';')}`);
   else if (style.fg && style.fg !== 'default') codes.push(colorCode(style.fg, 30));
   if (style.bgRgb) codes.push(`48;2;${style.bgRgb.join(';')}`);
   else if (style.bg && style.bg !== 'default') codes.push(colorCode(style.bg, 40));

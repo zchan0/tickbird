@@ -14,6 +14,7 @@ import { plainText, spans, type Line } from '../packages/terminal/src/screen';
 import { contentsEntries, contentsLines } from '../packages/terminal/src/views/contents';
 import { columnWidths, inlineSpans, prose, wrapSpans } from '../packages/terminal/src/views/prose';
 import { exploreText } from '../packages/core/src/command-line';
+import { Motion, SAY_MS } from '../packages/terminal/src/motion';
 import { liveExtras } from '../packages/core/src/live-extras';
 import type { SessionState } from '../packages/core/src/session-state';
 import { commandText, headerLines, runningClock, sessionStatus, turnBody, type PageContext } from '../packages/terminal/src/views/turn-page';
@@ -218,8 +219,9 @@ test('the running turn shows no agent word or clock and no end; a call still out
   const body = turnBody(ctxOf(model, 1));
   const lines = text(body);
   assert.equal(lines.at(-2)!.trimEnd(), '  Search');
-  assert.match(lines.at(-1)!, /^  └ Search for reversed assertions … *$/);
-  assert.equal(spans(body.at(-1)!).find(span => span.text === '…')?.style?.fg, 'yellow');
+  // A call still out turns in its tree cell, in gold; nothing at its end.
+  assert.match(lines.at(-1)!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Search for reversed assertions *$/);
+  assert.equal(spans(body.at(-1)!).find(span => /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/.test(span.text))?.style?.fg, 'yellow');
   assert.ok(!lines.some(line => line.includes('答复')));
   const header = text(headerLines(ctxOf(model, 1)));
   assert.equal(header.length, 1);
@@ -242,7 +244,7 @@ test('waiting for an approval replaces the status line, marks the call and chang
   assert.equal(lines.at(-3), '  Needs approval');
   assert.match(lines.at(-2)!, /^ {2}Bash · grep -rn "assert/);
   assert.equal(lines.at(-1), '  在 Claude Code 里选择批准或拒绝。');
-  assert.match(lines.at(-5)!, /^  └ Search for reversed assertions \? *$/);
+  assert.match(lines.at(-5)!, /^  \? Search for reversed assertions *$/);
   assert.match(text(headerLines(ctxOf(model, 1)))[0], / Needs approval *$/);
   // Claude Code says when it stops waiting: an approved command that runs for a while is no longer waiting on you.
   const groups = model.groups, latest = turnView(groups.at(-1)!, true, 'claude');
@@ -272,6 +274,34 @@ test('the turn\'s changes fold to one line and open to a line a file; a file a s
   assert.equal(openDetail(opened, model)?.kind, 'diff');
 });
 
+test('on the running turn new words type out and a running call turns in gold; an older turn never moves', () => {
+  const model = modelOf(parse([...FIRST, ...SECOND]), { now: Date.parse(at(30)) });
+  const motion = new Motion();
+  // First page: everything simply there.
+  let lines = text(turnBody({ ...ctxOf(model, 1), motion }));
+  assert.ok(lines.some(line => line.includes('先找出所有类似的断言。')));
+  motion.live = true;
+  // The hook's early words arrive: typed from nothing, whole after SAY_MS.
+  const draft = '找到 3 处写反的断言，接下来逐个修正。';
+  const at0 = { ...ctxOf({ ...model, extras: { draft } }, 1), motion };
+  lines = text(turnBody(at0));
+  assert.ok(!lines.some(line => line.includes('找到')), lines.join('\n'));
+  assert.equal(motion.busy, true);
+  lines = text(turnBody({ ...at0, now: at0.now + SAY_MS / 2 }));
+  assert.ok(lines.some(line => line.includes('找到') && !line.includes('修正')), lines.join('\n'));
+  lines = text(turnBody({ ...at0, now: at0.now + SAY_MS }));
+  assert.ok(lines.some(line => line.includes('接下来逐个修正。')));
+  // The running call's mark is gold where the terminal reports its colours.
+  const coloured = turnBody({ ...ctxOf(model, 1), motion, caps: { ...ONE_CELL, background: { r: 24, g: 25, b: 28, dark: true } } });
+  const mark = coloured.flatMap(line => spans(line)).find(span => /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/.test(span.text));
+  assert.deepEqual(mark?.style?.fgRgb, [201, 164, 92]);
+  // The first turn, drawn now for the first time, is simply there.
+  const older = new Motion();
+  older.live = true;
+  lines = text(turnBody({ ...ctxOf(model, 0), motion: older }));
+  assert.ok(lines.some(line => line.includes('先跑一遍测试')) && !older.busy);
+});
+
 test('a file the turn made is marked A, one it replaced M', () => {
   const written = (id: string, type: string, second: number, patch: unknown[] = []) => rec('user', [{ type: 'tool_result', tool_use_id: id, content: 'ok' }], second,
     { toolUseResult: { type, filePath: `/fixture/${id}.md`, content: 'a\nb', structuredPatch: patch, originalFile: type === 'create' ? null : 'a' } });
@@ -296,7 +326,7 @@ test('a call on screen but not yet in the transcript shows as it will, once', ()
   assert.deepEqual(extras.calls?.map(call => call.input.description), ['Run the regression test']);
   const lines = text(turnBody(ctxOf(modelOf(session, { extras, now: Date.parse(at(24)) }), 1)));
   assert.equal(lines.filter(line => line.includes('Search for reversed assertions')).length, 1, lines.join('\n'));
-  assert.match(lines.find(line => line.includes('Run the regression test'))!, /^  └ Run the regression test … *$/);
+  assert.match(lines.find(line => line.includes('Run the regression test'))!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Run the regression test *$/);
 });
 
 test('text on screen but not yet in the transcript shows as the words will, so nothing changes when the record arrives', () => {

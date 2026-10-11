@@ -13,6 +13,7 @@ import { resolveOutlineEvidence } from '../../../core/src/outline';
 import { commandText, exploreText } from '../../../core/src/command-line';
 import { toolView } from '../../../core/src/tool-view';
 import type { SessionCall } from '../../../core/src/session-state';
+import { spinnerAt, type Motion } from '../motion';
 
 export { commandText };
 
@@ -77,6 +78,9 @@ export function viewOf(group: TurnGroup, latest: boolean, provider: Provider): T
 }
 
 const DIM: Style = { dim: true };
+/** The running mark's dark gold, apart from the yellow of a selected line; the palette's yellow where exact colour is unknown. */
+const GOLD = [201, 164, 92] as const;
+const gold = (ctx: PageContext): Style => ({ fg: 'yellow', ...(ctx.caps.background ? { fgRgb: GOLD } : {}) });
 const YELLOW: Style = { fg: 'yellow' };
 
 export interface PageContext {
@@ -93,6 +97,8 @@ export interface PageContext {
   answerOpen?: boolean;
   /** The turn's changes are listed a file a line. */
   changesOpen?: boolean;
+  /** What is new on the page and how far it has come in; without it, everything is simply there. */
+  motion?: Motion;
 }
 
 /**
@@ -365,7 +371,8 @@ function callEnd(chapterRow: ChapterRow, ctx: PageContext, live: boolean, asking
   const call = rowView(chapterRow, live);
   if (call.word) return [{ text: call.word, style: { fg: 'red' } }];
   if (call.empty) return [{ text: 'no match', style: DIM }];
-  if (call.out) return [{ text: asking ? '?' : symbol(ctx.caps, '…'), style: YELLOW }];
+  // A call still out is marked in its tree cell (see callLines), not at its end.
+  if (call.out) return [];
   if (isChange(chapterRow)) {
     const size = changeSize(chapterRow, ctx);
     if (size) return [...(size.added ? [{ text: `+${size.added}`, style: { fg: 'green' } as Style }] : []), ...(size.added && size.removed ? [{ text: ' ' }] : []), ...(size.removed ? [{ text: `-${size.removed}`, style: { fg: 'red' } as Style }] : [])];
@@ -393,7 +400,16 @@ function withTail(line: Span[], tail: Span[], room: number): Span[] {
  * marks what needs it: a failure, a call still out, a change's size.
  */
 function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean): Line[] {
-  const rows = steps(all);
+  // Calls that arrive together come in one after another. The key is what the line says, the same for the
+  // hook's early copy and the transcript's record; a repeat of the same line is told apart by its count.
+  const said = new Map<string, number>();
+  const rows = steps(all).filter(chapterRow => {
+    if (!ctx.motion) return true;
+    const key = `c:${toolName(chapterRow, ctx)}\u0000${callText(chapterRow, ctx).text}`;
+    const count = said.get(key) ?? 0;
+    said.set(key, count + 1);
+    return ctx.motion.shows(`${key}\u0000${count}`);
+  });
   const tint = bandColor(ctx.caps.background);
   const live = view.live || waitingOn;
   const names = rows.map(chapterRow => toolName(chapterRow, ctx));
@@ -415,7 +431,13 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
     push([{ text: lead }, { text: names[at], style: TOOL }], []);
     run.forEach((chapterRow, index) => {
       const end = index === run.length - 1;
-      const branch: Span = { text: lead + symbol(ctx.caps, end ? '└' : '├') + ' ', style: DIM };
+      // A call still out turns in its tree cell, in gold; one waiting on you shows ? there. Done, it is the tree again.
+      const out = rowView(chapterRow, live).out;
+      const asking = waitingOn && chapterRow === rows.at(-1);
+      if (out && !asking) ctx.motion?.turning();
+      const branch: Span[] = out
+        ? [{ text: lead }, { text: asking ? '?' : symbol(ctx.caps, spinnerAt(ctx.now)), style: gold(ctx) }, { text: ' ' }]
+        : [{ text: lead + symbol(ctx.caps, end ? '└' : '├') + ' ', style: DIM }];
       const through: Span = { text: lead + (end ? ' ' : symbol(ctx.caps, '│')) + ' ', style: DIM };
       const shown = callText(chapterRow, ctx);
       // The tool's name stands out; what the call worked on reads a step back, in grey.
@@ -432,7 +454,7 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
         parts[lastPart] = textWidth(plainText(parts[lastPart]) + plainText(tail)) <= room ? [...parts[lastPart], ...tail] : withTail(parts[lastPart], tail, room);
         wrapped = parts;
       }
-      wrapped.forEach((part, piece) => push([piece ? through : branch, ...part], piece === 0 && chapterRow.openable ? [{ row: chapterRow, height: wrapped.length }] : []));
+      wrapped.forEach((part, piece) => push([...(piece ? [through] : branch), ...part], piece === 0 && chapterRow.openable ? [{ row: chapterRow, height: wrapped.length }] : []));
       for (const choice of rowView(chapterRow, live).choices ?? []) {
         const chosen = choice.chosen.length ? choice.chosen.map(value => `${symbol(ctx.caps, '✓')} ${value}`).join('  ') : choice.waiting ? '等待你的选择' : '';
         if (chosen) push(cutLine([through, ...(choice.header ? [{ text: choice.header + '  ', style: DIM }] : []), { text: chosen, style: choice.chosen.length ? { bold: true } : DIM }], ctx.width), []);
@@ -461,8 +483,33 @@ function withLead(line: Line, lead: Span[]): Span[] {
 }
 
 /** The agent's words, in the body colour: they say why the calls under them ran. */
-const wordLines = (source: string, ctx: PageContext, style: Style = {}, indent = MARGIN): Span[][] =>
-  prose(source, ctx.width - 1, { glyph: ch => symbol(ctx.caps, ch), indent, style });
+const wordLines = (source: string, ctx: PageContext, style: Style = {}, indent = MARGIN): Span[][] => {
+  const lines = prose(source, ctx.width - 1, { glyph: ch => symbol(ctx.caps, ch), indent, style });
+  if (!ctx.motion) return lines;
+  // New words type out: laid out whole first, so a word never jumps to the next line as it is typed.
+  // The key is the words' own start, the same for the hook's early copy and the transcript's record.
+  const total = lines.reduce((sum, line) => sum + [...plainText(line).trimStart()].length, 0);
+  let left = ctx.motion.reveal('w:' + source.replace(/\s+/g, ' ').trim().slice(0, 80), total);
+  if (left >= total) return lines;
+  const shown: Span[][] = [];
+  for (const line of lines) {
+    if (left <= 0) break;
+    const out: Span[] = [];
+    let leading = true;
+    for (const span of line) {
+      // A line's indent is not typed: it is the column the words start in.
+      if (leading && !span.text.trim()) { out.push(span); continue; }
+      leading = false;
+      const chars = [...span.text];
+      if (chars.length <= left) { out.push(span); left -= chars.length; continue; }
+      if (left > 0) out.push({ ...span, text: chars.slice(0, left).join('') });
+      left = 0;
+      break;
+    }
+    shown.push(out);
+  }
+  return shown;
+};
 
 /** A segment as blocks, one blank line apart: the agent's words, then the band of its calls. */
 function segmentBlocks(segment: TurnSegment, view: TurnView, ctx: PageContext, waitingOn: boolean): Line[][] {
@@ -558,6 +605,13 @@ export function turnBody(ctx: PageContext): Line[] {
   const view = viewOf(group, latest, ctx.session.provider);
   const waitingOn = latest && ctx.status.kind === 'waiting';
   const going = latest && (ctx.status.kind === 'running' || waitingOn);
+  // Only the newest turn, while it runs, moves; anything else drawn is simply there, now and later.
+  const motion = ctx.motion;
+  if (motion) {
+    motion.begin(ctx.now);
+    // Drawn still, what is on it counts as seen: going back to it later moves nothing.
+    if (!going && motion.live) { motion.live = false; try { return turnBody(ctx); } finally { motion.live = true; } }
+  }
   // A finished turn's closing answer folds to one line; an open turn shows everything so far.
   const closed = !(latest && (view.live || waitingOn));
   const blocks: Line[][] = [promptLines(requestText(view.turn.request, group), ctx)];

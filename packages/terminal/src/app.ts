@@ -8,6 +8,7 @@ import { contentsEntries, contentsLines, contentsOffset, ENTRY_LINES } from './v
 import { callLink, detailDoc, recordedImage, type DetailDoc, type RecordedImage } from './views/detail';
 import { wrapSpans } from './views/prose';
 import { textWidth } from './width';
+import type { Motion } from './motion';
 import { MARGIN, label, headerLines, markSelected, viewOf, providerName, turnLayout, type CallTarget, type PageContext, type SessionStatus } from './views/turn-page';
 
 /**
@@ -26,6 +27,9 @@ export interface Model {
   height: number;
   /** The split adapter told the pane how to focus the agent: `a` does it. */
   focusAgent?: boolean;
+  /** What is new on the page, and a count that moves on with each frame while something moves. */
+  motion?: Motion;
+  frame?: number;
 }
 
 export type Effect = { kind: 'open'; path: string; line?: number } | { kind: 'copy'; text: string; what: string } | { kind: 'focus' } | { kind: 'view'; image: RecordedImage } | { kind: 'link'; link: { target: string; name: string } };
@@ -83,7 +87,7 @@ const bodyHeight = (state: AppState, model: Model) => Math.max(1, model.height -
 
 const pageContext = (state: AppState, model: Model): PageContext => ({
   session: model.session, groups: model.groups, index: state.index, status: model.status,
-  extras: model.extras, caps: model.caps, width: model.width, now: model.now, ...(state.answerOpen ? { answerOpen: true } : {}), ...(state.changesOpen ? { changesOpen: true } : {}),
+  extras: model.extras, caps: model.caps, width: model.width, now: model.now, ...(state.answerOpen ? { answerOpen: true } : {}), ...(state.changesOpen ? { changesOpen: true } : {}), ...(model.motion ? { motion: model.motion } : {}),
 });
 
 /**
@@ -94,7 +98,7 @@ const pageContext = (state: AppState, model: Model): PageContext => ({
  */
 const LAYOUTS = new WeakMap<TurnGroup[], { key: string; value: ReturnType<typeof turnLayout> }>();
 export function layout(state: AppState, model: Model): ReturnType<typeof turnLayout> {
-  const key = JSON.stringify([state.index, model.width, Boolean(state.answerOpen), Boolean(state.changesOpen), model.status, model.extras, model.caps.background ?? null, model.caps.symbols]);
+  const key = JSON.stringify([state.index, model.width, Boolean(state.answerOpen), Boolean(state.changesOpen), model.frame ?? 0, model.status, model.extras, model.caps.background ?? null, model.caps.symbols]);
   const kept = LAYOUTS.get(model.groups);
   if (kept?.key === key) return kept.value;
   const value = turnLayout(pageContext(state, model));
