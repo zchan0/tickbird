@@ -8,11 +8,9 @@ import { symbol, type Capabilities } from '../caps';
 import { cutLine, plainText, row, spans, type Color, type Line, type Span, type Style } from '../screen';
 import { textWidth } from '../width';
 import { inlineSpans, prose, wrapSpans } from './prose';
-import { recordedFiles, shortFileLabels } from '../../../core/src/presentation';
-import { resolveOutlineEvidence } from '../../../core/src/outline';
-import { commandEffects, commandText, exploreText } from '../../../core/src/command-line';
-import { toolView } from '../../../core/src/tool-view';
-import type { SessionCall } from '../../../core/src/session-state';
+import { shortFileLabels } from '../../../core/src/presentation';
+import { commandText } from '../../../core/src/command-line';
+import { announcedRow, callEnd as endOf, callSteps, callText as wordsOf, callTool } from '../../../core/src/call-line';
 import { spinnerAt, type Motion } from '../motion';
 
 export { commandText };
@@ -183,7 +181,6 @@ function promptLines(text: string, ctx: PageContext): Line[] {
   return [heading('Prompt', 'blue'), ...words];
 }
 
-const base = (path: string) => path.replace(/\\/g, '/').split('/').at(-1) || path;
 
 /**
  * The files the turn changed, after its answer, under a Changes label: folded,
@@ -225,114 +222,6 @@ function changesLines(view: TurnView, ctx: PageContext): Line[] {
   return lines;
 }
 
-const SHELL = /^(Bash|exec_command|shell|local_shell|BashOutput|KillShell|Terminal|Script)$/i;
-
-/**
- * The tool, by the name the agent gives it: Bash, Read, Write. A write that
- * patched a file is an Edit; an MCP tool goes by its own last name.
- */
-function toolName(chapterRow: ChapterRow, ctx: PageContext): string {
-  if (chapterRow.output) return 'Output';
-  const tool = chapterRow.tool;
-  if (/^Write$/i.test(tool) && changeSize(chapterRow, ctx)?.edited) return 'Edit';
-  if (/^mcp__/.test(tool)) return tool.split('__').at(-1) || tool;
-  return tool;
-}
-
-/** Edits and writes are what the turn leaves behind: their names read in the body colour, their size on the right. */
-const isChange = (chapterRow: ChapterRow): boolean => !chapterRow.output
-  && (/^(Write|Edit|MultiEdit|apply_patch|NotebookEdit)$/i.test(chapterRow.tool) || (chapterRow.items.length > 0 && chapterRow.items.every(item => item.kind === 'file-change')));
-
-/**
- * The words of a call's line: the agent's own description of a command, or
- * the command itself as it reads best, and how many more commands it runs;
- * for other calls, their summary, its first part where it has several.
- */
-function callText(chapterRow: ChapterRow, ctx: PageContext): { text: string; more: number; command?: boolean } {
-  const command = chapterRow.command;
-  if (command !== undefined && (SHELL.test(chapterRow.tool) || EXPLORE.test(chapterRow.tool))) {
-    // What the command changes and does is read from all of it. The agent's words for it come first; when the
-    // command changes files, which its words may leave out, what it changes and does follows them.
-    const effects = commandEffects(command, ctx.session.projectPath);
-    if (chapterRow.description) return effects?.files.length ? { text: `${chapterRow.description} · ${effects.text}`, more: effects.more } : { text: chapterRow.description, more: 0 };
-    const explored = exploreText(command, ctx.session.projectPath);
-    if (explored) return { text: explored.text, more: explored.more, command: true };
-    if (effects) return { text: effects.text, more: effects.more };
-    const shown = commandText(command, ctx.session.projectPath);
-    return { text: shown.text || chapterRow.tool, more: shown.more, command: true };
-  }
-  // A search's queries are joined by ；: the first one reads, the rest are counted.
-  const parts = WEB.test(chapterRow.tool) ? chapterRow.label.split('；') : [chapterRow.label];
-  const label = parts[0].replace(/^文件变化 · /, '');
-  // What was searched or fetched reads like a command: as it was given, on one line.
-  return { text: label.replace(/\s+/g, ' ').trim() || chapterRow.tool, more: parts.length - 1, ...(WEB.test(chapterRow.tool) ? { command: true } : {}) };
-}
-
-const WEB = /^(WebSearch|WebFetch|WEB|Web)$/;
-/** A command that only looked at files, named for the look: its words are worked out from the command. */
-const EXPLORE = /^(Read|Search|List)$/;
-/** The sources a web search returned, recorded apart from the call. */
-const isSources = (chapterRow: ChapterRow): boolean => chapterRow.items.length > 0 && chapterRow.items.every(item => item.title === 'Web 来源');
-
-/**
- * The calls as steps. A shared output and the sources of a search the row
- * before already made are records of a step, not steps: they open from the
- * call, and take no line of their own. Sources with no call before them are
- * the search itself. A file shown again after it changed is no step at all.
- */
-function steps(rows: ChapterRow[]): ChapterRow[] {
-  const kept: ChapterRow[] = [];
-  for (const chapterRow of rows) {
-    if (chapterRow.output || isFragment(chapterRow)) continue;
-    if (isSources(chapterRow)) {
-      if (kept.length && WEB.test(kept.at(-1)!.tool)) continue;
-      kept.push({ ...chapterRow, tool: 'WebSearch', label: chapterRow.items[0].summary.replace(/\s*\.\.\.$/, '') });
-      continue;
-    }
-    kept.push(chapterRow);
-  }
-  return kept;
-}
-
-/**
- * A call the agent shows as running, from its hook, before the transcript has
- * it: drawn as its record will be, so nothing moves when the record comes.
- */
-function announcedRow(call: SessionCall, index: number): ChapterRow {
-  const view = toolView(call.tool, call.input);
-  const command = call.input.command;
-  return { id: `announced:${index}:${call.at}`, tool: view.name, label: view.label, count: 1, items: [], running: true, pending: true, output: false, openable: false,
-    ...(command !== undefined ? { command } : {}), ...(call.input.description ? { description: call.input.description } : {}) };
-}
-
-/**
- * A file the agent was shown again because it changed outside its own edits
- * (by a script it ran, or by someone else): a record of the file, not a call.
- */
-const isFragment = (chapterRow: ChapterRow): boolean => chapterRow.items.length > 0 && chapterRow.items.every(item => item.title === '记录中的文件片段');
-
-/** Lines added and removed by a recorded change, and whether it wrote a new file. */
-const SIZES = new WeakMap<ChapterRow, { added: number; removed: number; edited: boolean } | undefined>();
-function changeSize(chapterRow: ChapterRow, ctx: PageContext): { added: number; removed: number; edited: boolean } | undefined {
-  if (SIZES.has(chapterRow)) return SIZES.get(chapterRow);
-  const size = measureChange(chapterRow, ctx);
-  SIZES.set(chapterRow, size);
-  return size;
-}
-function measureChange(chapterRow: ChapterRow, ctx: PageContext): { added: number; removed: number; edited: boolean } | undefined {
-  if (!chapterRow.items.length) return undefined;
-  const all = recordedFiles(chapterRow.items, resolveOutlineEvidence(ctx.session, chapterRow.id, chapterRow.items[0])?.entry);
-  const files = all.length > 1 ? all.filter(file => base(file.path) === base(chapterRow.label)) : all;
-  if (!files.length) return undefined;
-  let added = 0, removed = 0;
-  for (const file of files) for (const line of file.lines) {
-    if (file.operation === 'write') added++;
-    else if (line.startsWith('+') && !line.startsWith('+++')) added++;
-    else if (line.startsWith('-') && !line.startsWith('---')) removed++;
-  }
-  return { added, removed, edited: files.some(file => file.operation === 'update' || file.operation === 'delete') };
-}
-
 /**
  * The band behind a run of calls: the terminal's own background moved a
  * little toward its text. Unknown background, no band.
@@ -371,17 +260,13 @@ const ANSWER = new WeakMap<object, number>();
 const CHANGES = new WeakSet<object>();
 
 /** What shows on the right of a call: a failure in red, a call still out, the size of a change. */
-function callEnd(chapterRow: ChapterRow, ctx: PageContext, live: boolean, asking: boolean): Span[] {
-  const call = rowView(chapterRow, live);
-  if (call.word) return [{ text: call.word, style: { fg: 'red' } }];
-  if (call.empty) return [{ text: 'no match', style: DIM }];
-  // A call still out is marked in its tree cell (see callLines), not at its end.
-  if (call.out) return [];
-  if (isChange(chapterRow)) {
-    const size = changeSize(chapterRow, ctx);
-    if (size) return [...(size.added ? [{ text: `+${size.added}`, style: { fg: 'green' } as Style }] : []), ...(size.added && size.removed ? [{ text: ' ' }] : []), ...(size.removed ? [{ text: `-${size.removed}`, style: { fg: 'red' } as Style }] : [])];
-  }
-  return call.note ? [{ text: call.note, style: DIM }] : [];
+function callEnd(chapterRow: ChapterRow, ctx: PageContext, live: boolean): Span[] {
+  const end = endOf(chapterRow, ctx.session, live);
+  if (!end) return [];
+  if (end.kind === 'failed') return [{ text: end.word, style: { fg: 'red' } }];
+  if (end.kind === 'empty') return [{ text: 'no match', style: DIM }];
+  if (end.kind === 'note') return [{ text: end.text, style: DIM }];
+  return [...(end.added ? [{ text: `+${end.added}`, style: { fg: 'green' } as Style }] : []), ...(end.added && end.removed ? [{ text: ' ' }] : []), ...(end.removed ? [{ text: `-${end.removed}`, style: { fg: 'red' } as Style }] : [])];
 }
 
 /** A run's tool name, on a line of its own above its calls. */
@@ -407,16 +292,16 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
   // Calls that arrive together come in one after another. The key is what the line says, the same for the
   // hook's early copy and the transcript's record; a repeat of the same line is told apart by its count.
   const said = new Map<string, number>();
-  const rows = steps(all).filter(chapterRow => {
+  const rows = callSteps(all).filter(chapterRow => {
     if (!ctx.motion) return true;
-    const key = `c:${toolName(chapterRow, ctx)}\u0000${callText(chapterRow, ctx).text}`;
+    const key = `c:${callTool(chapterRow, ctx.session)}\u0000${wordsOf(chapterRow, ctx.session).text}`;
     const count = said.get(key) ?? 0;
     said.set(key, count + 1);
     return ctx.motion.shows(`${key}\u0000${count}`);
   });
   const tint = bandColor(ctx.caps.background);
   const live = view.live || waitingOn;
-  const names = rows.map(chapterRow => toolName(chapterRow, ctx));
+  const names = rows.map(chapterRow => callTool(chapterRow, ctx.session));
   const lead = ' '.repeat(MARGIN);
   // As much room on the right as on the left.
   const room = Math.max(8, ctx.width - MARGIN - 2 - MARGIN);
@@ -443,11 +328,11 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
         ? [{ text: lead }, { text: asking ? '?' : symbol(ctx.caps, spinnerAt(ctx.now)), style: gold(ctx) }, { text: ' ' }]
         : [{ text: lead + symbol(ctx.caps, end ? '└' : '├') + ' ', style: DIM }];
       const through: Span = { text: lead + (end ? ' ' : symbol(ctx.caps, '│')) + ' ', style: DIM };
-      const shown = callText(chapterRow, ctx);
+      const shown = wordsOf(chapterRow, ctx.session);
       // The tool's name stands out; what the call worked on reads a step back, in grey.
       const style = owned(DIM, chapterRow.id);
       const label = shown.text + (chapterRow.count > 1 ? ` · ${chapterRow.count} 次` : '');
-      const outcome = callEnd(chapterRow, ctx, live, waitingOn && chapterRow === rows.at(-1));
+      const outcome = callEnd(chapterRow, ctx, live);
       const tail: Span[] = [...(shown.more ? [{ text: ` +${shown.more}`, style: owned({ dim: true, bold: true }, chapterRow.id) }] : []), ...(outcome.length ? [{ text: ' ' }, ...outcome] : [])];
       let wrapped: Span[][];
       if (shown.command) wrapped = [withTail([{ text: label, style }], tail, room)];
