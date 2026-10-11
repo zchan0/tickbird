@@ -200,6 +200,20 @@ test('a script reads by what it works on; reads by their files and lines', () =>
   assert.deepEqual(commandText(`jq -c '{type, timestamp, p: (.payload | del(.encrypted_content) | tostring)}' f.jsonl`), { text: `jq -c '{type, timestamp, p: (.payload |…' f.jsonl`, more: 0 });
 });
 
+test('a running turn with no call out turns at its end, where the answer will come', () => {
+  const model = modelOf(parse([...FIRST, ...SECOND, result('t5', 23)]));
+  assert.equal(model.status.kind, 'running');
+  const body = turnBody(ctxOf(model, 1));
+  const lines = text(body);
+  // The call is done: its tree is back. A blank line, then the spinner alone, in gold.
+  assert.match(lines.at(-3)!, /^  └ Search for reversed assertions/);
+  assert.equal(lines.at(-2), '');
+  assert.match(lines.at(-1)!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
+  assert.equal(spans(body.at(-1)!).find(span => /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/.test(span.text))?.style?.fg, 'yellow');
+  // One spinner on the page at a time: while a call turns, the end is empty.
+  const out = text(turnBody(ctxOf(modelOf(parse([...FIRST, ...SECOND])), 1)));
+  assert.equal(out.filter(line => /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(line)).length, 1);
+});
 test('a long call label wraps to two lines at most, the second under the tree', () => {
   const session = parse([
     rec('user', '跑一下', 0),

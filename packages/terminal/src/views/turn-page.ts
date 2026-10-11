@@ -438,7 +438,7 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
       // A call still out turns in its tree cell, in gold; one waiting on you shows ? there. Done, it is the tree again.
       const out = rowView(chapterRow, live).out;
       const asking = waitingOn && chapterRow === rows.at(-1);
-      if (out && !asking) ctx.motion?.turning();
+      if (out && !asking) { ctx.motion?.turning(); turningDrawn = true; }
       const branch: Span[] = out
         ? [{ text: lead }, { text: asking ? '?' : symbol(ctx.caps, spinnerAt(ctx.now)), style: gold(ctx) }, { text: ' ' }]
         : [{ text: lead + symbol(ctx.caps, end ? '└' : '├') + ' ', style: DIM }];
@@ -547,7 +547,14 @@ function answerLines(view: TurnView, ctx: PageContext): Line[] {
   return [head, [...cutLine([...lead, ...inlineSpans(flat)], ctx.width - 2 - MARGIN), open]];
 }
 
-/** The end of the turn: waiting on you, no word for a while, or the answer it closed with. While it runs, nothing. */
+/** Set while a page is drawn: a call on it turns. */
+let turningDrawn = false;
+
+/**
+ * The end of the turn: waiting on you, no word for a while, or the answer it
+ * closed with. While it runs and no call on the page turns, the agent works out
+ * its next step: the spinner turns here, where the answer will come.
+ */
 function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
   const status = ctx.status;
   const lead: Span = { text: ' '.repeat(MARGIN) };
@@ -560,7 +567,11 @@ function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
       cutLine([lead, { text: `在 ${providerName(ctx.session.provider)} 里选择批准或拒绝。`, style: DIM }], ctx.width),
     ];
   }
-  if (latest && status.kind === 'running') return [];
+  if (latest && status.kind === 'running') {
+    if (turningDrawn) return [];
+    ctx.motion?.turning();
+    return [[lead, { text: symbol(ctx.caps, spinnerAt(ctx.now)), style: gold(ctx) }]];
+  }
   if (view.live && latest) return [[lead, { text: `无新记录${status.kind === 'quiet' && status.lastAt ? ` · 最后一条 ${clock(status.lastAt)}` : ''}`, style: DIM }]];
   if (!view.turn.segments.length) return [];
   return answerLines(view, ctx);
@@ -609,6 +620,7 @@ export function turnBody(ctx: PageContext): Line[] {
   const view = viewOf(group, latest, ctx.session.provider);
   const waitingOn = latest && ctx.status.kind === 'waiting';
   const going = latest && (ctx.status.kind === 'running' || waitingOn);
+  turningDrawn = false;
   // Only the newest turn, while it runs, moves; anything else drawn is simply there, now and later.
   const motion = ctx.motion;
   if (motion) {
