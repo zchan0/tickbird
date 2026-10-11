@@ -102,11 +102,14 @@
 
 ## P2
 
-### 10. VS Code 面板按终端 v4 的设计更新
+### 10. VS Code 面板按终端 v4 的设计更新（已完成）
 
-终端 v4 已定的结论搬到 VS Code webview：树杈排法、Claude Code 式 diff、统一灰色的调用内容、`Prompt` / `Final Answer` / `New turn` 标签、Final Answer 折叠、点开调用直接打开对象。
+设计稿 v8 https://claude.ai/artifact/VeGkRKtRZXVJzmCjFXHevu，用户选 F1、N1、标题放视图标题栏（2026-10-11）。
 
-放在 P2 的原因：第 1、4 项（core）两个版本共用，第 5–8 项还在改终端的交互。等这些定了一次搬过去，避免改两遍。先出 VS Code 版设计稿，再开发。
+- 调用的一行（工具名、文字、行尾）移到 `packages/core/src/call-line.ts`，两个版本共用（7c4e660）。
+- 面板（9e575fa）：树杈、统一灰色、标签、过程不收起、Final Answer 和 Changes 各收成一行放末尾、两种转圈；一页一轮，‹ › / [ ] 翻轮，☰ / t 开目录，读旧一轮时新一轮在底部提示 New turn；切换会话、刷新、覆盖记录移到视图标题栏，会话名放标题栏说明位（只用 Agent 保存的名字）。
+- 点开调用：Read 直接打开文件并选中读的行；图片和链接用 VS Code 或浏览器打开；改动打开 Claude Code 式 diff 详情页（真实行号、改动词更亮）。文件已不在时退回记录详情。
+- 删掉的旧测试：回合刻度、悬停预览、连续滚动、旧工具栏（共 17 个）。
 
 ## 不做
 

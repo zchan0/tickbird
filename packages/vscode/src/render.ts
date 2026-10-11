@@ -12,6 +12,8 @@ import { inlineClient } from './inline-client';
 import { createHash } from 'node:crypto';
 import { describeDisplayAction, presentEvidence, parsePatch, publicLabels, toolOutputContents, invocationInput, recordedFiles, fileEvidenceId, shortFileLabels, fileReading, type FileReading, type InputContent } from '../../core/src/presentation';
 import { renderCode, renderFile } from './code';
+import { diffRows } from '../../core/src/call-target';
+import type { PatchFile } from '../../core/src/presentation';
 import { uiLabel } from './labels';
 import { publicBody, publicBodyLabels } from '../../core/src/turn-view';
 
@@ -26,7 +28,9 @@ export interface SidecarRenderOptions {
 }
 export interface SidecarProjection { sessionKey: string; name: string; identity: string; map: string; lens: string; warnings: string; empty: string; turns: Array<{ key: string; html: string }> }
 export type TurnRenderCache = Map<string, { digest: string; html: string }>;
-export interface DetailRenderOptions { item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean; nonce: string; locale?: string }
+export interface DetailRenderOptions { item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean; nonce: string; locale?: string;
+  /** A change opens as its diff: the files as the harness recorded them, with their paths as shown. */
+  change?: { files: PatchFile[]; paths: string[]; title: string } }
 
 const escapeHtml = (value: unknown): string => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -230,7 +234,20 @@ const styles = `
   .patch-file { margin: 0 0 12px; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
   .patch-file > h3 { padding: 7px 10px; margin: 0; overflow-wrap: anywhere; background: var(--surface); font-family: var(--vscode-editor-font-family, monospace); }
   .patch-file > h3 span { margin-left: 8px; color: var(--muted); font-size: 10px; }
-  .patch-file .patch { border: 0; border-radius: 0; overflow-x: auto; white-space: pre; }
+  .patch-file .patch { border: 0; border-radius: 0; }
+  .cdiff { --add: rgb(34 92 43); --del: rgb(122 41 54); --add-word: rgb(56 166 96); --del-word: rgb(179 89 107);
+    padding: 4px 0; font: var(--vscode-editor-font-size, 12px)/1.6 var(--vscode-editor-font-family, monospace); background: var(--vscode-textCodeBlock-background, var(--surface)); }
+  body.vscode-light .cdiff { --add: rgb(199 225 203); --del: rgb(253 210 216); --add-word: rgb(105 219 124); --del-word: rgb(255 168 180); }
+  .dl { display: grid; grid-template-columns: var(--number) 2ch minmax(0, 1fr); padding-right: 10px; }
+  .cdiff.dg-0 { --number: .8ch; } ${[1, 2, 3, 4, 5, 6, 7].map(digits => `.cdiff.dg-${digits} { --number: ${digits + 1.5}ch; }`).join(' ')}
+  .dn { text-align: right; padding-right: 1ch; color: var(--muted); user-select: none; }
+  .ds { text-align: center; color: var(--muted); user-select: none; }
+  .dt { white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
+  .dadd { background: var(--add); } .ddel { background: var(--del); }
+  .dadd .dn, .ddel .dn, .dadd .ds, .ddel .ds { color: inherit; }
+  .dl mark { color: inherit; border-radius: 2px; }
+  .dadd mark { background: var(--add-word); } .ddel mark { background: var(--del-word); }
+  .dgap .dt { color: var(--muted); }
   .output-preview { margin: 5px 0 14px 21px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 5px; min-width: 0; }
   .output-preview h3 { color: var(--muted); font-size: 10px; }
   .output-preview pre { padding: 0; border: 0; background: transparent; font-size: 11px; max-height: 5.25em; overflow: hidden; }
@@ -1069,7 +1086,33 @@ function renderInputContent(content: InputContent): string {
     const code = renderCode(content.text, content.language);
     return content.label ? `<details><summary>${escapeHtml(content.label)}</summary>${code}</details>` : code;
   }
-  return content.files.map(file => `<section class="patch-file"><h3>${escapeHtml(file.path)}${file.moveTo ? ` → ${escapeHtml(file.moveTo)}` : ''}<span>${({ add: '新增', update: '修改', delete: '删除', write: '当时写入内容' })[file.operation]}</span></h3><pre class="patch">${file.lines.map(line => `<span class="patch-line ${file.operation === 'write' ? '' : line.startsWith('+') ? 'patch-added' : line.startsWith('-') ? 'patch-removed' : line.startsWith('@@') ? 'patch-header' : ''}">${escapeHtml(line)}</span>`).join('')}</pre></section>`).join('');
+  return content.files.map(file => patchFileHtml(file)).join('');
+}
+
+const operationNames: Record<PatchFile['operation'], string> = { add: '新增', update: '修改', delete: '删除', write: '当时写入内容' };
+const patchFileHtml = (file: PatchFile, path = file.path): string =>
+  `<section class="patch-file"><h3>${escapeHtml(path)}${file.moveTo ? ` → ${escapeHtml(file.moveTo)}` : ''}<span>${operationNames[file.operation]}</span></h3>${diffHtml(file)}</section>`;
+
+/**
+ * A recorded change as Claude Code draws one: each line's number where the
+ * record gives it, then its sign; a removed line on red and an added one on
+ * green across the width, the words that changed in a replaced line on a
+ * brighter shade. Long lines wrap under their text.
+ */
+function diffHtml(file: PatchFile): string {
+  const pieces = diffRows(file);
+  const numbers = pieces.flatMap(piece => 'no' in piece && piece.no !== undefined ? [piece.no] : []);
+  const digits = numbers.length ? String(Math.max(...numbers)).length : 0;
+  const rows = pieces.map(piece => {
+    if ('gap' in piece) return `<div class="dl dgap">${digits ? '<span class="dn"></span>' : ''}<span class="ds"></span><span class="dt">${escapeHtml(piece.gap || '…')}</span></div>`;
+    let text = '', at = 0;
+    for (const [from, to] of piece.words ?? []) { text += escapeHtml(piece.text.slice(at, from)) + `<mark>${escapeHtml(piece.text.slice(from, to))}</mark>`; at = to; }
+    text += escapeHtml(piece.text.slice(at));
+    const kind = piece.sign === '+' ? ' dadd' : piece.sign === '-' ? ' ddel' : '';
+    return `<div class="dl${kind}">${digits ? `<span class="dn">${piece.no ?? ''}</span>` : ''}<span class="ds">${piece.sign === ' ' ? '' : piece.sign}</span><span class="dt">${text}</span></div>`;
+  }).join('');
+  // The page's CSP admits no inline style: the width of the number column is a class.
+  return `<div class="patch cdiff dg-${Math.min(digits, 7)}">${rows}</div>`;
 }
 
 function detailState(item: TimelineItem, includeStatus = true): string {
@@ -1147,7 +1190,7 @@ function renderFileReading(reading: FileReading, records: TimelineItem[]): strin
     + `${renderFile(reading.lines, reading.start, reading.language)}</section>${records.map(record => evidenceSources(record)).join('')}`;
 }
 
-export function renderDetail({ item, items, provider, kept, nonce, locale }: DetailRenderOptions): string {
+export function renderDetail({ item, items, provider, kept, nonce, locale, change }: DetailRenderOptions): string {
   const records = items?.length ? items : undefined;
   // Each read keeps its own output. A call and its native execution record are one
   // read, and the native record carries the clean output.
@@ -1168,11 +1211,11 @@ export function renderDetail({ item, items, provider, kept, nonce, locale }: Det
   // A short request keeps its words in the summary; its detail still leads with them.
   const words = !records && item.kind === 'request' && !item.detail?.blocks.some(block => block.kind === 'text' && publicLabels.has(block.label))
     ? `<section class="evidence-block" data-evidence-kind="text">${renderUserText(item.summary)}</section>` : '';
-  const content = words + (reading ? reads.length === 1 ? renderFileReading(reading, reads[0].sources)
+  const content = change ? change.files.map((file, index) => patchFileHtml(file, change.paths[index])).join('') : words + (reading ? reads.length === 1 ? renderFileReading(reading, reads[0].sources)
     : reads.map((read, index) => `<section class="evidence-record"><header class="evidence-record-heading"><h2>第 ${index + 1} 次读取</h2></header>${renderFileReading(read.reading!, read.sources)}</section>`).join('')
     : records
     ? `${records.map((record) => `<section class="evidence-record" data-source-item-id="${escapeHtml(record.id)}">${multiple ? `<header class="evidence-record-heading"><h2>${escapeHtml(describeDisplayAction(record).label)}</h2>${detailState(record)}</header>` : ''}${evidenceContent(record)}</section>`).join('')}`
     : evidenceContent(item));
-  const body = `<main class="detail" aria-label="过程证据详情"><header class="toolbar"><span class="detail-identity">${providerName(provider)}<span aria-hidden="true">·</span><span data-keep-status>${kept ? '已保留' : '临时预览'}</span></span><button type="button" class="quiet-button" data-action="keep"${kept ? ' disabled' : ''}>${kept ? '已保留' : '保留此页'}</button></header><section class="detail-heading"><h1>${escapeHtml(reading ? reading.path.replace(/\\/g, '/').split('/').at(-1) || reading.path : title)}</h1>${multiple ? '' : detailState(records?.[0] ?? item)}</section><div class="detail-content">${content}</div></main>`;
+  const body = `<main class="detail" aria-label="过程证据详情"><header class="toolbar"><span class="detail-identity">${providerName(provider)}<span aria-hidden="true">·</span><span data-keep-status>${kept ? '已保留' : '临时预览'}</span></span><button type="button" class="quiet-button" data-action="keep"${kept ? ' disabled' : ''}>${kept ? '已保留' : '保留此页'}</button></header><section class="detail-heading"><h1>${escapeHtml(change ? change.title : reading ? reading.path.replace(/\\/g, '/').split('/').at(-1) || reading.path : title)}</h1>${multiple ? '' : change ? (item.status === 'failed' ? detailState(item) : '') : detailState(records?.[0] ?? item)}</section><div class="detail-content">${content}</div></main>`;
   return documentHtml(title, body, nonce, item.sessionId, locale);
 }

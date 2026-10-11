@@ -63,13 +63,15 @@ test('patch reader lists full paths, move target and additions/removals without 
   assert.equal(files.length, 3); assert.equal(files[0].moveTo, 'src/new/a.ts');
   const document = dom(call('apply_patch', patch));
   assert.equal(document.querySelectorAll('.patch-file').length, 3);
-  assert.equal(document.querySelector('.patch-removed')!.textContent, '-old');
+  // Drawn as Claude Code draws a change; a Codex patch gives no line numbers, so none are shown.
+  assert.equal(document.querySelector('.dl.ddel')!.textContent, '-old');
+  assert.equal(document.querySelector('.dl.ddel .dn'), null);
   assert.ok(document.querySelector('.patch-file h3')!.textContent!.includes('src/new/a.ts'));
   assert.equal(parsePatch('*** Begin Patch\n*** Update File: broken'), undefined);
 });
 test('Edit diff keeps replace_all parameter and code readers preserve whitespace with safe highlighting', () => {
   const document = dom(call('Edit', { file_path: 'src/a.ts', old_string: 'old', new_string: '<script>new</script>', replace_all: true }));
-  assert.equal(document.querySelector('.patch-added')!.textContent, '+<script>new</script>');
+  assert.equal(document.querySelector('.dl.dadd')!.textContent, '+<script>new</script>');
   assert.ok(document.querySelector('details code')!.textContent!.includes('replace_all'));
   assert.equal(document.querySelectorAll('script').length, 1, 'Only the nonce-protected application script');
   const command = dom(call('Bash', { command: 'printf "%s" "<script>bad</script>"\n', cwd: '/fixture' }));

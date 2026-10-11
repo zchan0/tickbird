@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import { basename } from 'node:path';
-import { realpath } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { existsSync, watch, type FSWatcher } from 'node:fs';
 import { discoverSessions, sessionKey, type DiscoveryOptions } from '../../core/src/sessions';
 import { openLiveSession, type LiveSession } from '../../core/src/live-session';
@@ -12,8 +12,10 @@ import { hasReadableEvidence, outlineCoverage, resolveOutlineEvidence } from '..
 import { currentSession, readSessionStates, sessionStateDirectory, type SessionState, type SessionStateCache } from '../../core/src/session-state';
 import { lastRecordAt, liveExtras as coreLiveExtras, type LiveExtras } from '../../core/src/live-extras';
 import { createSessionPickerMetadata, type SessionPickerEntry } from '../../core/src/session-picker';
+import { callLink, fileRead, findRow, recordedImage, rowChanges } from '../../core/src/call-target';
+import type { PatchFile } from '../../core/src/presentation';
 
-interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean }
+interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean; change?: { files: PatchFile[]; paths: string[]; title: string } }
 const observerType = 'agentSidecar.observer';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -126,8 +128,8 @@ export function activate(context: vscode.ExtensionContext) {
     if (source) void source.close().catch(() => undefined);
   }
   function renderEvidence(view: EvidenceView) {
-    view.panel.title = `${view.kept ? '已保留' : '预览'} · ${view.item.title}`;
-    view.panel.webview.html = renderDetail({ item: view.item, items: view.items, provider: view.provider, kept: view.kept, nonce: nonce(), locale: vscode.env?.language });
+    view.panel.title = `${view.kept ? '已保留' : '预览'} · ${view.change?.title ?? view.item.title}`;
+    view.panel.webview.html = renderDetail({ item: view.item, items: view.items, provider: view.provider, kept: view.kept, nonce: nonce(), locale: vscode.env?.language, ...(view.change ? { change: view.change } : {}) });
   }
   /**
    * Switching sessions closes the temporary preview, which belongs to the old
@@ -302,28 +304,55 @@ export function activate(context: vscode.ExtensionContext) {
   function detailColumn(): vscode.ViewColumn {
     return preview?.panel.viewColumn ?? vscode.ViewColumn.Active;
   }
+  const isFile = async (path: string) => { try { return (await stat(path)).isFile(); } catch { return false; } };
+  /**
+   * What a call points at opens itself, as in the terminal: the file it read,
+   * at the lines it read; the image it looked at; the address it fetched. Only
+   * what is still there: a file since deleted opens as the record of the time.
+   */
+  async function openTarget(target: { path?: string; url?: string; lines?: { start: number; count: number } }): Promise<boolean> {
+    if (target.url) { await vscode.env.openExternal(vscode.Uri.parse(target.url)); return true; }
+    if (!target.path || !await isFile(target.path)) return false;
+    const options = { viewColumn: detailColumn(), preview: true, preserveFocus: true };
+    if (!target.lines) { await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target.path), options); return true; }
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(target.path));
+    const last = Math.max(0, document.lineCount - 1), start = Math.min(last, target.lines.start - 1), end = Math.min(last, start + Math.max(0, target.lines.count - 1));
+    await vscode.window.showTextDocument(document, { ...options, selection: new vscode.Range(start, 0, end, document.lineAt(end).text.length) });
+    return true;
+  }
   function openDetail(id: string): Promise<void> {
     const boundSession = session;
     const boundObserver = observer;
     // Capture before either the detail queue or a layout change can yield.
     const resolved = boundSession && resolveOutlineEvidence(boundSession, id);
     const snapshot = resolved && structuredClone(resolved);
+    const found = boundSession && findRow(boundSession, id);
+    const read = found && fileRead(boundSession, found.row);
+    const image = found && recordedImage(boundSession, found.row);
+    const link = found && callLink(boundSession, found.row);
+    const target = image?.path ? { path: image.path } : link ? (/^https?:/.test(link.target) ? { url: link.target } : { path: link.target })
+      : read ? { path: read.path, lines: { start: read.start ?? 1, count: read.count } } : undefined;
+    const files = found && !target ? rowChanges(boundSession, found.row) : [];
+    const root = boundSession ? boundSession.projectPath.replace(/\/$/, '') + '/' : '';
+    const change = files.length ? { files: structuredClone(files), paths: files.map(file => file.path.startsWith(root) ? file.path.slice(root.length) : file.path),
+      title: files.length === 1 ? basename(files[0].path) : `${files.length} 个文件` } : undefined;
     const action = detailOpening.then(async () => {
       if (disposed || !boundSession || session !== boundSession || observer !== boundObserver) return;
+      if (target && await openTarget(target)) return;
       if (!snapshot || !(snapshot.items ?? [snapshot.item]).some(hasReadableEvidence)) return;
       const { item, items } = snapshot;
       const column = detailColumn();
       if (!preview) {
         const panel = vscode.window.createWebviewPanel('agentSidecar.evidence', '证据预览',
           { viewColumn: column, preserveFocus: true }, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
-        const view: EvidenceView = { panel, item: structuredClone(item), ...(items ? { items: structuredClone(items) } : {}), provider: boundSession.provider, kept: false };
+        const view: EvidenceView = { panel, item: structuredClone(item), ...(items ? { items: structuredClone(items) } : {}), provider: boundSession.provider, kept: false, ...(change ? { change } : {}) };
         preview = view;
         evidence.add(view);
         panel.onDidDispose(() => { evidence.delete(view); if (preview === view) preview = undefined; }, null, context.subscriptions);
         panel.webview.onDidReceiveMessage((message: unknown) => {
           if (message && typeof message === 'object' && (message as { type?: unknown }).type === 'keep' && preview === view) keepEvidence();
         }, null, context.subscriptions);
-      } else { preview.item = structuredClone(item); preview.items = items ? structuredClone(items) : undefined; preview.provider = boundSession.provider; preview.panel.reveal(column, true); }
+      } else { preview.item = structuredClone(item); preview.items = items ? structuredClone(items) : undefined; preview.provider = boundSession.provider; preview.change = change; preview.panel.reveal(column, true); }
       renderEvidence(preview);
     });
     detailOpening = action.catch(() => undefined);
@@ -333,7 +362,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (!preview) return;
     const kept = preview;
     kept.kept = true;
-    kept.panel.title = `已保留 · ${kept.item.title}`;
+    kept.panel.title = `已保留 · ${kept.change?.title ?? kept.item.title}`;
     preview = undefined;
     // Confirm the state in place: do not destroy the reader's DOM or scroll position.
     void Promise.resolve(kept.panel.webview.postMessage({ type: 'kept' })).catch(reportError);
