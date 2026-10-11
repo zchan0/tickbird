@@ -84,7 +84,9 @@ export function activate(context: vscode.ExtensionContext) {
   function describe(snapshot: SessionData | undefined) {
     if (!observer) return;
     const named = snapshot && (snapshot.titleSource === 'claude-ai-title' || snapshot.titleSource === 'codex-index') ? snapshot.title : undefined;
-    if (observer.description !== named) observer.description = named;
+    // A container's only view shows its title, not its description: the name goes in the title, 过程 without one.
+    const title = named ?? '过程';
+    if (observer.title !== title) observer.title = title;
   }
   function renderObserver() {
     if (!observer) return;

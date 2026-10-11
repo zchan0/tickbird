@@ -6,8 +6,9 @@ export const followClient = `
   const paintFollowing = () => {
     if (!followButton) return;
     followButton.setAttribute('aria-pressed', String(following));
-    followButton.textContent = following ? '' : '已暂停跟随 ↓';
-    followButton.title = following ? '' : '回到最新一轮的末尾，恢复跟随';
+    // Short, so the turn's line beside it keeps its time in a narrow side bar; the tooltip says the rest.
+    followButton.textContent = following ? '' : '↓ 跟随';
+    followButton.title = following ? '' : '已暂停跟随：回到最新一轮的末尾，恢复跟随';
     if (followLabel) followLabel.textContent = following ? '轮内按发生顺序' : '已暂停跟随';
   };
   const followPosition = () => {

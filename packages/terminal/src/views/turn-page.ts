@@ -201,7 +201,7 @@ function changesLines(view: TurnView, ctx: PageContext): Line[] {
   const open: Span = { text: ' ' + symbol(ctx.caps, '▾'), style: { dim: true, bold: true } };
   if (!ctx.changesOpen) {
     const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0), removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
-    const partial = files.some(file => file.added === undefined);
+    const partial = files.some(file => file.added === undefined) && files.some(file => file.added !== undefined);
     const line = cutLine([lead, { text: `${files.length} 个文件` }, ...(added || removed ? [{ text: '  ' }, ...sizes(added, removed)] : []), ...(partial ? [{ text: ' 等', style: DIM }] : []), open], ctx.width);
     CHANGES.add(line);
     return [head, line];

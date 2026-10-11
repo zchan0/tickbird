@@ -987,6 +987,6 @@ test('a described command that changes files says so after its description; one 
   const lines = text(turnBody(ctxOf(modelOf(session, { width: 62 }), 0)));
   assert.ok(lines.some(line => line.trimEnd() === '  ├ Commit item 8 · edits TODO.md · git commit +1'), lines.join('\n'));
   assert.ok(lines.some(line => line.trimEnd() === '  └ Run the tests'));
-  // The file goes into the turn's changes, without line counts.
-  assert.ok(lines.some(line => line.trimEnd() === '  1 个文件 等 ▾'), lines.join('\n'));
+  // The file goes into the turn's changes, without line counts: no total, so no 等 either.
+  assert.ok(lines.some(line => line.trimEnd() === '  1 个文件 ▾'), lines.join('\n'));
 });

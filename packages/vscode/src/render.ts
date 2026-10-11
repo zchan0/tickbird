@@ -382,7 +382,7 @@ const styles = `
   .write-heading .action-type { font-size: 12px; font-weight: 500; color: var(--muted); }
   .write-count { font-size: 11px; color: var(--muted); }
   .write-file { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 27px; padding: 3px 0 3px 10px; border: 0; border-left: 2px solid transparent; background: transparent; border-radius: 0; text-align: left; }
-  .write-file.node-button:hover { background: transparent; }
+  .write-file.node-button:hover, .crow.node-button:hover, .cfile.node-button:hover { background: transparent; }
   .write-file:hover .write-name { text-decoration: underline; text-underline-offset: 3px; }
   .write-file[aria-pressed="true"] { border-left-color: var(--vscode-focusBorder); background: transparent; }
   .write-files { margin-left: 2px; padding-left: 8px; border-left: 1px solid var(--border); }
@@ -397,6 +397,7 @@ const styles = `
   .write-added { color: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-foreground)); }
   .write-removed { color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-errorForeground)); }
   /* One turn to a page: the header says which, ‹ › go to the turn before and after, ☰ lists them all. */
+  .sidecar:not(:has([data-turn-panel])) .page-head { display: none; }
   .page-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 8px 3px 20px; border-bottom: 1px solid var(--border); font-size: 12px; }
   .ph-turn { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ph-turn b { font-weight: 600; }
@@ -409,6 +410,7 @@ const styles = `
   .ph-follow:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
   .ph-follow[aria-pressed="true"] { display: none; }
   .timeline { padding: 0 0 24px; }
+  .timeline:focus-visible { outline: none; }
   .turn-panel:not([data-current]) { display: none; }
   .turn-panel + .turn-panel { margin-top: 0; padding-top: 0; border-top: 0; }
   .turn-panel .turn-heading { display: none; }
@@ -597,6 +599,13 @@ const script = `(() => {
     else if (event.key === ']') { event.preventDefault(); step(-1); }
     else if (event.key === 't') { event.preventDefault(); if (toc && toc.hidden) openToc(); else closeToc(); }
     else if (event.key === 'Escape' && toc && !toc.hidden) { event.preventDefault(); closeToc(); timeline.focus({ preventScroll: true }); }
+    else if (timeline && (!toc || toc.hidden) && ['Home', 'End', 'PageUp', 'PageDown'].includes(event.key) && !(event.target instanceof Element && event.target.closest('.timeline'))) {
+      event.preventDefault();
+      const page = Math.max(40, timeline.clientHeight - 40);
+      timeline.scrollTop = event.key === 'Home' ? 0 : event.key === 'End' ? timeline.scrollHeight : timeline.scrollTop + (event.key === 'PageDown' ? page : -page);
+      if (event.key !== 'End') pauseFollowing();
+      timeline.focus({ preventScroll: true });
+    }
     // In a change's detail: the file's change before or after this one in the turn.
     else if ((event.key === '<' || event.key === '>') && document.querySelector('[data-action="olderEdit"]')) { event.preventDefault(); vscode.postMessage({ type: event.key === '<' ? 'olderEdit' : 'newerEdit' }); }
   });
@@ -960,7 +969,7 @@ export function projectSidecar({ projectName, session, locale, live }: Pick<Side
     : '当前以首条请求作为会话名称；未取得单独保存的名称。';
   const identity = session ? `${name}\n${providerName(session.provider)} · ${session.id}\n${projectName} · ${turns.length} 轮\n${nameSource}` : projectName;
   const empty = session ? groups.length ? '' : '<div class="empty"><h2>暂没有可展示的过程</h2><p>可在覆盖记录中查看来源与未支持项。</p></div>'
-    : '<div class="empty"><h2>选择要观察的会话</h2><p>从最新回合向下阅读，左侧目录可定位到任意回合。</p></div>';
+    : '<div class="empty"><h2>选择要观察的会话</h2><p>点标题栏的切换按钮选一个会话；开着接入时，会自动跟随这个窗口里正在进行的会话。</p></div>';
   const keys = new Set(groups.map(group => group.key));
   if (cache) for (const key of cache.keys()) if (!keys.has(key)) cache.delete(key);
   return { sessionKey: session ? `${session.provider}:${session.id}` : '', name, identity, map, lens, warnings, empty,

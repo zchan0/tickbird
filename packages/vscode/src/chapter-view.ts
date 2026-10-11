@@ -101,7 +101,8 @@ function changesHtml(files: ChangedFile[], turnKey: string): string {
   if (!files.length) return '';
   const size = (added?: number, removed?: number) => `${added ? `<span class="cadd">+${added}</span>` : ''}${removed ? `<span class="cdel">-${removed}</span>` : ''}`;
   const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0), removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
-  const partial = files.some(file => file.added === undefined);
+  // 等: some files' lines are counted and some are not; with none counted there is no total to qualify.
+  const partial = files.some(file => file.added === undefined) && files.some(file => file.added !== undefined);
   const names = shortFileLabels(files.map(file => file.path));
   const rows = files.map((file, index) => `<li data-observation-key="${escapeHtml(file.id)}"><button type="button" class="cfile node-button" data-item-id="${escapeHtml(file.id)}" data-path="${escapeHtml(file.path)}" aria-pressed="false" title="${escapeHtml(file.path)}">`
     + `<span class="cmark" data-mark="${file.mark}">${file.mark}</span><span class="cname">${escapeHtml(names[index] || base(file.path))}</span><span class="csize">${size(file.added, file.removed)}</span></button></li>`).join('');
@@ -168,7 +169,7 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { 
   const ordinal = group.ordinal ?? 0;
   const started = clock(turn.start);
   return `<section class="turn-panel chapter-turn" data-turn-panel="${escapeHtml(group.key)}" data-ordinal="${ordinal}"${live ? ` data-last-at="${escapeHtml(turn.lastAt)}"` : ''} aria-label="${escapeHtml(view.label)}">`
-    + `<header class="turn-heading">${group.turnId ? `<b>第 ${ordinal} 轮</b><span class="tsub"> / 共 <span data-turn-total>${ordinal}</span> 轮${started ? ` · ${started} 开始` : ''}</span>` : '<span class="tsub">未归属回合的记录</span>'}</header>`
+    + `<header class="turn-heading">${group.turnId ? `<b>第 ${ordinal} 轮</b><span class="tsub"> / 共 <span data-turn-total>${ordinal}</span> 轮${started ? ` · ${started}` : ''}</span>` : '<span class="tsub">未归属回合的记录</span>'}</header>`
     + prompt
     + `<ol class="cstream">${stream}${draft}${announced}${end}</ol>`
     + closing
@@ -219,7 +220,7 @@ export const chapterStyles = `
   .crow-item:has(> .crow[data-out])::before { top: 1.45em; }
   .crow-item:last-child:has(> .crow[data-out])::before { display: none; }
   .crow { display: flex; align-items: last baseline; gap: 6px; width: 100%; min-width: 0; padding: 0; margin: 0; border: 0; background: transparent; text-align: left; color: var(--ink-3); font: 12px/1.6 var(--mono); }
-  .cbranch { position: absolute; left: 0; width: 11px; text-align: center; color: var(--spin); font: 700 12px/1.6 var(--mono); }
+  .cbranch { position: absolute; left: 0; top: 0; width: 11px; text-align: center; color: var(--spin); font: 700 12px/1.6 var(--mono); }
   .clabel { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .clabel.command { -webkit-line-clamp: 1; word-break: break-all; }
   .cmore { flex: none; font-weight: 700; color: var(--ink-4); }
