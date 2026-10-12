@@ -75,15 +75,25 @@ function callsHtml(all: ChapterRow[], key: string, session: SessionData, live: b
   const rows = callSteps(all);
   if (!rows.length) return '';
   const names = rows.map(row => callTool(row, session));
-  let html = '';
+  // Agent calls are other agents set to work, not tools: off the band, each with a magenta bar, as in the terminal.
+  const agent = (row: ChapterRow) => row.items[0]?.kind === 'subagent';
+  let html = '', block = '', start = 0;
+  const close = (end: number) => {
+    if (!block) return;
+    const id = escapeHtml(start ? `${key}:calls@${start}` : `${key}:calls`);
+    html += agent(rows[start]) ? `<div class="cagents" data-observation-key="${id}">${block}</div>` : `<div class="ccalls" data-observation-key="${id}">${block}</div>`;
+    block = ''; start = end;
+  };
   for (let at = 0; at < rows.length;) {
     let last = at;
-    while (last + 1 < rows.length && names[last + 1] === names[at]) last++;
+    while (last + 1 < rows.length && names[last + 1] === names[at] && agent(rows[last + 1]) === agent(rows[at])) last++;
+    if (at && agent(rows[at]) !== agent(rows[at - 1])) close(at);
     const run = rows.slice(at, last + 1).map((row, index) => callHtml(row, `${key}#${at + index}`, session, live, waiting && at + index === rows.length - 1, unavailable)).join('');
-    html += `<div class="crun" data-observation-key="${escapeHtml(`${key}@${at}`)}"><div class="ctool">${escapeHtml(names[at])}</div><ol class="ctree">${run}</ol></div>`;
+    block += `<div class="crun" data-observation-key="${escapeHtml(`${key}@${at}`)}"><div class="ctool">${escapeHtml(names[at])}</div><ol class="ctree">${run}</ol></div>`;
     at = last + 1;
   }
-  return `<div class="ccalls" data-observation-key="${escapeHtml(key + ':calls')}">${html}</div>`;
+  close(rows.length);
+  return html;
 }
 
 /** The label over a block, as in the terminal: a coloured word on a line of its own. */
@@ -204,6 +214,13 @@ export const chapterStyles = `
   .tlabel[data-tone="yellow"] { color: var(--gold); } .tlabel[data-tone="red"] { color: var(--red); }
   /* What you asked: a blue bar down its side, out in the margin. */
   .tprompt { margin: 12px 0 0; }
+  /* Agent calls: off the band, a magenta bar where the tree would be, the words in the body colour. */
+  .cagents { margin: 12px 0 0; --agent: var(--vscode-terminal-ansiMagenta, var(--vscode-charts-purple, #bc3fbc)); }
+  .chapter > .cagents:first-child { margin-top: 0; }
+  .cagents .crow-item { padding-left: 0; }
+  .cagents .crow-item::before, .cagents .crow-item::after { display: none; }
+  .cagents .crow { margin-left: -12px; padding-left: 9px; border-left: 3px solid var(--agent); color: var(--vscode-foreground); }
+  .cagents .cbranch { display: none; }
   .tprompt .turn-question { margin: 0 0 0 -12px; padding: 0 0 0 9px; border: 0; border-left: 3px solid var(--blue); border-radius: 0; background: transparent; }
   .cstream { list-style: none; margin: 0; padding: 0; }
   .chapter, .cseg { margin: 12px 0 0; }

@@ -304,15 +304,40 @@ test('an Agent call with its subagent\'s record opens on that subagent\'s turn: 
   assert.deepEqual([doc.title, doc.meta, doc.copy], ['Name brainstorm', 'Agent', { text: task, what: '任务' }]);
   // The task as the prompt, cut to its first three lines; then the subagent's words and calls; the answer open in full.
   const prompt = lines.indexOf('  Prompt');
-  assert.deepEqual(lines.slice(prompt + 1, prompt + 5).map(line => line.trimEnd()), ['┃ You are helping name a developer tool.', '┃ Brainstorm, then check availability.', '┃ Reply in Chinese.', '┃ …']);
+  assert.deepEqual(lines.slice(prompt + 1, prompt + 5).map(line => line.trimEnd()), ['┃ You are helping name a developer tool.', '┃ Brainstorm, then check availability.', '┃ Reply in Chinese.', '┃ … ▾']);
+  assert.deepEqual(doc.fold, { open: false, lines: 5 });
   assert.ok(lines.some(line => /└ Check npm for railbird/.test(line)), lines.join('\n'));
   const answer = lines.indexOf('  Final Answer');
   assert.match(lines[answer + 1], /railbird 最好：三个平台都空着。/);
+  // ⏎ opens the task in full and folds it again; a click on it does the same.
+  {
+    const { model } = open(true);
+    const base: AppState = { ...initialState(), index: 0, follow: false, mode: 'detail', detail: { scroll: 0 }, call: layout({ ...initialState(), index: 0, follow: false }, model).targets.findIndex(target => target.row?.tool === 'Agent') };
+    let state = key(base, keyOf('enter'), model);
+    const opened = openDetail(state, model)!;
+    assert.equal(opened.fold?.open, true);
+    assert.ok(text(opened.lines).includes('┃ A read-only viewer.'), 'The whole task');
+    state = key(state, keyOf('enter'), model);
+    assert.equal(openDetail(state, model)!.fold?.open, false);
+    // The page's first line is the screen's fourth: the header takes three.
+    state = key(base, { type: 'mouse', action: 'press', button: 0, x: 6, y: 5 }, model);
+    assert.equal(openDetail(state, model)!.fold?.open, true);
+  }
   // Still running: no answer yet, the spinner at its end.
   parent.items.find(item => item.kind === 'subagent')!.status = 'running';
   const running = open(false);
   assert.equal(running.doc.meta, 'Agent · running');
   assert.match(text(running.doc.lines).at(-1)!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
+  // On the turn page, Agent calls are set off the band: under their tool's name, a magenta bar, the words in the body colour.
+  {
+    const banded = { ...modelOf(parent, { width: 70 }), caps: { ...ONE_CELL, background: { r: 30, g: 30, b: 30, dark: true } } };
+    const body = turnBody(ctxOf(banded, 0));
+    const at = text(body).findIndex(line => line.includes('Name brainstorm'));
+    assert.equal(text(body)[at - 1].trimEnd(), '  Agent');
+    assert.match(text(body)[at], /^┃ Name brainstorm/);
+    assert.equal(spans(body[at])[0].style?.fg, 'magenta');
+    assert.ok(spans(body[at]).every(span => !span.style?.bgRgb && !span.style?.dim), 'Off the band, not grey');
+  }
   // Without a record of its own, the call opens as any call does.
   const plain = openDetail({ ...initialState(), index: 0, follow: false, call: layout(initialState(), modelOf(parent)).targets.findIndex(target => target.row?.tool === 'Agent') }, modelOf(parent));
   assert.ok(plain && !text(plain.lines).includes('  Prompt'));

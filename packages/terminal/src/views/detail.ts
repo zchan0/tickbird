@@ -37,6 +37,8 @@ export interface DetailDoc {
   copy: { text: string; what: string };
   /** Other changes to the same file in this turn, switched with < >. */
   edits?: { index: number; total: number };
+  /** A subagent's task, cut to its first lines: opened and folded with ⏎ or a click on its first `lines` lines. */
+  fold?: { open: boolean; lines: number };
   lines: Line[];
 }
 
@@ -191,6 +193,8 @@ export interface DetailInput {
   subagent?: SessionData;
   caps?: Pick<Capabilities, 'symbols' | 'background'>;
   now?: number;
+  /** The subagent's task is opened in full. */
+  promptOpen?: boolean;
 }
 
 /**
@@ -198,22 +202,31 @@ export interface DetailInput {
  * as a turn page is, with the task (the first lines of it) as the prompt and
  * the answer open. While the subagent runs, the spinner turns at its end.
  */
-function subagentDoc(row: ChapterRow, subagent: SessionData, width: number, caps: Pick<Capabilities, 'symbols' | 'background'>, now: number): DetailDoc | undefined {
+/** A subagent's task shows this many lines until opened. */
+const PROMPT_LINES = 3;
+
+function subagentDoc(row: ChapterRow, subagent: SessionData, width: number, caps: Pick<Capabilities, 'symbols' | 'background'>, now: number, promptOpen = false): DetailDoc | undefined {
   const groups = visibleTurnGroups(subagent);
   const group = groups[0];
   if (!group) return undefined;
   const view = turnView(group, true, subagent.provider);
   const running = row.items[0]?.status === 'running';
   const status: PageContext['status'] = running ? { kind: 'running', since: view.turn.start, verb: view.verb } : { kind: 'idle' };
-  const lines = turnBody({ session: subagent, groups: [group], index: 0, status, extras: {}, caps, width, now, answerOpen: true, promptMax: 3 });
+  const page = (max?: number) => turnBody({ session: subagent, groups: [group], index: 0, status, extras: {}, caps, width, now, answerOpen: true, ...(max ? { promptMax: max } : {}) });
+  // The prompt is the page's first block, up to its first empty line.
+  const promptEnd = (lines: Line[]) => { const at = lines.findIndex(line => !plainText(line).trim()); return at < 0 ? lines.length : at; };
+  const full = page(), cut = page(PROMPT_LINES);
+  const foldable = promptEnd(full) > promptEnd(cut);
+  const lines = foldable && !promptOpen ? cut : full;
   const word = running ? 'running' : row.outcome ? outcomeWord(row.outcome) : '';
   return { kind: 'call', title: row.label || 'Agent', meta: ['Agent', word].filter(Boolean).join(' · '),
-    copy: { text: view.turn.request ? publicBody(view.turn.request) : row.label, what: '任务' }, lines };
+    copy: { text: view.turn.request ? publicBody(view.turn.request) : row.label, what: '任务' }, lines,
+    ...(foldable ? { fold: { open: promptOpen, lines: promptEnd(lines) } } : {}) };
 }
 
-export function detailDoc({ session, group, row, width, glyph, edit, background, subagent, caps, now }: DetailInput): DetailDoc | undefined {
+export function detailDoc({ session, group, row, width, glyph, edit, background, subagent, caps, now, promptOpen }: DetailInput): DetailDoc | undefined {
   if (subagent && caps) {
-    const page = subagentDoc(row, subagent, width, caps, now ?? Date.now());
+    const page = subagentDoc(row, subagent, width, caps, now ?? Date.now(), promptOpen);
     if (page) return page;
   }
   const evidence = resolveOutlineEvidence(session, row.id, row.items[0]);

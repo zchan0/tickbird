@@ -50,7 +50,7 @@ export interface AppState {
   /** Selected call on the turn page, by position: calls only ever append. */
   call?: number;
   /** The open detail: its first line on screen, which change of the file, and whether a click opened it. */
-  detail?: { scroll: number; edit?: number; clicked?: boolean };
+  detail?: { scroll: number; edit?: number; clicked?: boolean; promptOpen?: boolean };
   /** A turn that started while an older one was on screen. */
   notice?: number;
   /** Turns known at the last update, to see a new one start. */
@@ -152,10 +152,10 @@ export function openDetail(state: AppState, model: Model): DetailDoc | undefined
   if (!target?.row || !group) return undefined;
   const callId = target.row.tool === 'Agent' ? target.row.items[0]?.callId : undefined;
   const subagent = callId ? model.subagents?.get(callId) : undefined;
-  const key = JSON.stringify([state.index, target.row.id, state.detail?.edit ?? null, model.width, model.caps.background ?? null, model.caps.symbols, subagent ? model.subagentsRevision ?? 0 : null, subagent && target.row.items[0]?.status === 'running' ? Math.floor(model.now / 80) : null]);
+  const key = JSON.stringify([state.index, target.row.id, state.detail?.edit ?? null, model.width, model.caps.background ?? null, model.caps.symbols, subagent ? model.subagentsRevision ?? 0 : null, subagent && target.row.items[0]?.status === 'running' ? Math.floor(model.now / 80) : null, state.detail?.promptOpen ?? false]);
   const kept = DETAILS.get(model.groups);
   if (kept?.key === key) return kept.value;
-  const value = detailDoc({ session: model.session, group, row: target.row, width: model.width, glyph: ch => symbol(model.caps, ch), edit: state.detail?.edit, background: model.caps.background, subagent, caps: model.caps, now: model.now });
+  const value = detailDoc({ session: model.session, group, row: target.row, width: model.width, glyph: ch => symbol(model.caps, ch), edit: state.detail?.edit, background: model.caps.background, subagent, caps: model.caps, now: model.now, promptOpen: state.detail?.promptOpen });
   DETAILS.set(model.groups, { key, value });
   return value;
 }
@@ -305,6 +305,8 @@ function detailKey(state: AppState, name: string, model: Model): AppState {
     case '>': return edit(1);
     case 'o': return doc?.path ? { ...state, effect: { kind: 'open', path: doc.path, ...(doc.line ? { line: doc.line } : {}) } } : state;
     case 'y': return doc ? { ...state, effect: { kind: 'copy', text: doc.copy.text, what: doc.copy.what } } : state;
+    // A subagent's task: its first lines, or all of it.
+    case 'enter': return doc?.fold ? { ...state, detail: { ...detail, promptOpen: !doc.fold.open } } : state;
     case '?': return { ...state, mode: 'help' };
     default: return state;
   }
@@ -347,7 +349,12 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
       return scrollTo({ ...state, pointer: { x: event.x, y: event.y }, ...(delta < 0 ? { follow: false } : {}) }, model, state.scroll + delta);
     }
     if (event.action !== 'press') return state;
-    if (state.mode === 'detail') return event.y === 1 && event.x <= MARGIN + 7 ? detailKey(state, 'escape', model) : state;
+    if (state.mode === 'detail') {
+      if (event.y === 1 && event.x <= MARGIN + 7) return detailKey(state, 'escape', model);
+      // A click on a subagent's task opens or folds it, as ⏎ does.
+      const doc = openDetail(state, model), at = event.y - DETAIL_HEADER - 1 + (state.detail?.scroll ?? 0);
+      return doc?.fold && at >= 0 && at < doc.fold.lines ? detailKey(state, 'enter', model) : state;
+    }
     if (state.mode === 'turn' && event.y === 1) return { ...state, mode: 'contents', selected: state.index };
     // The line saying a new turn started takes you there: a click works whatever the input method.
     if (state.mode === 'turn' && state.notice !== undefined && event.y === HEADER + bodyHeight(state, model) + 1) return showTurn(state, model, state.notice);
@@ -434,7 +441,7 @@ const dim = (text: string): Span => ({ text, style: { dim: true } });
 
 const HELP: Array<[string, string]> = [
   ['j k  ↓ ↑', '移动：选择调用或答复（选中后暂停跟随）；详情里滚动'],
-  ['⏎', '进入：打开详情；展开或收起答复；目录里打开这一轮'],
+  ['⏎', '进入：打开详情；展开或收起答复（子任务页里是任务说明）；目录里打开这一轮'],
   ['Esc', '返回上一层；轮页上是取消选择'],
   ['[  ]', '同一层的上一个 / 下一个：轮页是轮，详情是调用'],
   ['<  >', '详情里：同一文件的上一次 / 下一次修改'],
@@ -458,7 +465,7 @@ function detailFrame(state: AppState, model: Model): Line[] {
     const path: Span[] = doc.directory !== undefined ? [dim(' '.repeat(MARGIN) + doc.directory), { text: doc.title, style: { underline: Boolean(link), ...(link ? { link } : {}) } }] : [];
     // What this detail can do, on the right of its path; what does not fit is on the help page.
     const room = width - 2 - (path.length ? Math.min(textWidth(path.map(span => span.text).join('')), Math.floor(width / 2)) + 2 : 0);
-    const keys = fitKeys([doc.path ? 'o 打开' : '', `y 复制${doc.copy.what}`, doc.edits ? '< > 切换修改' : '', '? 按键'], room);
+    const keys = fitKeys([doc.fold ? (doc.fold.open ? '⏎ 收起任务' : '⏎ 展开任务') : '', doc.path ? 'o 打开' : '', `y 复制${doc.copy.what}`, doc.edits ? '< > 切换修改' : '', '? 按键'], room);
     lines.push(row(path, [dim(keys + ' ')], width));
     lines.push([]);
     const shown = height - DETAIL_HEADER;

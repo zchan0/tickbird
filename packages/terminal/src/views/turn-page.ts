@@ -182,7 +182,7 @@ function promptLines(text: string, ctx: PageContext): Line[] {
   const room = Math.max(8, ctx.width - MARGIN - 1);
   const words = text.replace(/\r/g, '').split('\n').flatMap(source => source.trim() ? wrapSpans(inlineSpans(source.trimEnd()), room).map(line => [...bar, ...spans(line)]) : [bar.slice(0, 1)]);
   const max = ctx.promptMax;
-  return [heading('Prompt', 'blue'), ...(max && words.length > max ? [...words.slice(0, max), [...bar, { text: '…', style: DIM }]] : words)];
+  return [heading('Prompt', 'blue'), ...(max && words.length > max ? [...words.slice(0, max), [...bar, { text: '… ', style: DIM }, { text: symbol(ctx.caps, '▾'), style: { dim: true, bold: true } }]] : words)];
 }
 
 
@@ -303,6 +303,51 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
     said.set(key, count + 1);
     return ctx.motion.shows(`${key}\u0000${count}`);
   });
+  // Runs of calls, and runs of Agent calls: another agent's work is set off the band (agentLines).
+  const runs: ChapterRow[][] = [];
+  for (const chapterRow of rows) {
+    const last = runs.at(-1);
+    if (last && isAgent(last[0]) === isAgent(chapterRow)) last.push(chapterRow); else runs.push([chapterRow]);
+  }
+  return runs.flatMap((run, index) => [...(index ? [[]] : []), ...(isAgent(run[0]) ? agentLines(run, view, ctx, waitingOn) : bandLines(run, view, ctx, waitingOn, rows.at(-1)))]);
+}
+
+/** A subagent's call: its own session's work, opened on its own page. */
+const isAgent = (chapterRow: ChapterRow): boolean => chapterRow.items[0]?.kind === 'subagent';
+const AGENT_BAR: Style = { fg: 'magenta' };
+
+/**
+ * Agent calls are not tools the agent used but other agents it set to work:
+ * off the band, under their tool's name, a magenta bar beside each, as the
+ * prompt has its blue one, and the words in the body colour. What a line says
+ * is what any call's says.
+ */
+function agentLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean): Line[] {
+  const live = view.live || waitingOn;
+  const bar: Span = { text: symbol(ctx.caps, '┃') + ' '.repeat(MARGIN - 1), style: AGENT_BAR };
+  const room = Math.max(8, ctx.width - MARGIN - MARGIN);
+  const lines: Line[] = [[{ text: ' '.repeat(MARGIN) }, { text: callTool(rows[0], ctx.session), style: TOOL }]];
+  for (const chapterRow of rows) {
+    const shown = wordsOf(chapterRow, ctx.session);
+    const style = owned({}, chapterRow.id);
+    const label = shown.text + (chapterRow.count > 1 ? ` · ${chapterRow.count} 次` : '');
+    const outcome = callEnd(chapterRow, ctx, live);
+    const tail: Span[] = [...(shown.more ? [{ text: ` +${shown.more}`, style: owned({ dim: true, bold: true }, chapterRow.id) }] : []), ...(outcome.length ? [{ text: ' ' }, ...outcome] : [])];
+    const parts = wrapSpans([{ text: label, style }], room);
+    if (parts.length > CALL_LINES) parts.splice(CALL_LINES - 1, Infinity, [...cutLine([{ text: parts.slice(CALL_LINES - 1).map(plainText).join(' ') + '  ', style }], room)]);
+    const lastPart = parts.length - 1;
+    parts[lastPart] = textWidth(plainText(parts[lastPart]) + plainText(tail)) <= room ? [...parts[lastPart], ...tail] : withTail(parts[lastPart], tail, room);
+    parts.forEach((part, piece) => {
+      const line: Line = [bar, ...part];
+      if (piece === 0 && chapterRow.openable) TARGETS.set(line as object, [{ row: chapterRow, height: parts.length }]);
+      lines.push(line);
+    });
+  }
+  return lines;
+}
+
+/** Calls on the band: see callLines. */
+function bandLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean, lastRow = rows.at(-1)): Line[] {
   const tint = bandColor(ctx.caps.background);
   const live = view.live || waitingOn;
   const names = rows.map(chapterRow => callTool(chapterRow, ctx.session));
@@ -325,7 +370,7 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
     run.forEach((chapterRow, index) => {
       const end = index === run.length - 1;
       // A call waiting on you shows ? in its tree cell. One still running is drawn as any other: the spinner is the turn's, at its end.
-      const asking = waitingOn && chapterRow === rows.at(-1) && rowView(chapterRow, live).out;
+      const asking = waitingOn && chapterRow === lastRow && rowView(chapterRow, live).out;
       const branch: Span[] = asking
         ? [{ text: lead }, { text: '?', style: gold(ctx) }, { text: ' ' }]
         : [{ text: lead + symbol(ctx.caps, end ? '└' : '├') + ' ', style: DIM }];
