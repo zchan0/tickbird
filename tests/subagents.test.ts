@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { readClaudeSubagents, type SubagentCache } from '../packages/core/src/subagents';
 import { visibleTurnGroups } from '../packages/core/src/outline';
 import { tempDir } from './temp';
+import { agentGroup } from '../packages/core/src/agent-line';
 
 const line = (record: unknown) => JSON.stringify(record) + '\n';
 const rec = (type: string, content: unknown, extra = {}) => line({ type, uuid: `u${Math.random()}`, timestamp: '2026-10-12T03:00:00.000Z', sessionId: 's1', cwd: '/fixture', isSidechain: true, message: { role: type, content }, ...extra });
@@ -36,4 +37,15 @@ test('a subagent\'s own record is found by the call that started it, and read ag
   assert.equal(read.changed, true);
   // A session with no subagents directory has none.
   assert.equal((await readClaudeSubagents({ id: 'other', projectPath: '/fixture' }, transcript)).byCall.size, 0);
+});
+
+test('a lead every Agent description shares is said once; anything less is left as written', () => {
+  assert.deepEqual(agentGroup(['Name brainstorm: companion metaphors', 'Name brainstorm: reading and recording']), { lead: 'Name brainstorm', names: ['companion metaphors', 'reading and recording'] });
+  assert.deepEqual(agentGroup(['审查：解析器', '审查：渲染']), { lead: '审查', names: ['解析器', '渲染'] });
+  assert.deepEqual(agentGroup(['Review - parser', 'Review - render']), { lead: 'Review', names: ['parser', 'render'] });
+  // One alone, leads that differ, a lead with nothing after it, no separator: as written.
+  assert.deepEqual(agentGroup(['Name brainstorm: x']), { names: ['Name brainstorm: x'] });
+  assert.deepEqual(agentGroup(['Fix: parser', 'Test: parser']), { names: ['Fix: parser', 'Test: parser'] });
+  assert.deepEqual(agentGroup(['Name: ', 'Name: b']), { names: ['Name: ', 'Name: b'] });
+  assert.deepEqual(agentGroup(['Explore the parser', 'Explore the render']), { names: ['Explore the parser', 'Explore the render'] });
 });

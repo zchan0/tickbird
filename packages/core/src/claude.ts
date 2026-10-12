@@ -193,6 +193,10 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
     if (status === 'killed') back.interrupted = true;
     append(back, [textBlock('后台任务通知', field('summary') || raw)]);
     const item = agent;
+    // What the subagent cost, as the notification reports it: <usage><subagent_tokens>…<tool_uses>…<duration_ms>….
+    const count = (name: string) => { const value = Number(field(name)); return Number.isFinite(value) && value >= 0 && field(name) ? value : undefined; };
+    const usage = { tokens: count('subagent_tokens'), toolUses: count('tool_uses'), durationMs: count('duration_ms') };
+    if (Object.values(usage).some(value => value !== undefined)) item.agentUsage = Object.fromEntries(Object.entries(usage).filter(([, value]) => value !== undefined));
     observeResult(item, 'readable');
     addSource(item, ref); append(item, [textBlock('父会话收到的通知', raw)], '这里只核对父会话通知，不代表子任务内部过程完整。');
     if (status === 'completed' && item.status !== 'failed') { item.status = 'completed'; item.summary = '已取得子任务完成通知；内部过程仍未关联加载。'; }

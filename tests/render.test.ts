@@ -334,8 +334,10 @@ test('目录 lists each turn by its request, latest first, two lines each, witho
 
 test('a subagent reads as an Agent call row in its place, named in text and opening its record in the editor', () => {
   const html = renderSidecar({ projectName: 'project', nonce, session: session([item({ kind: 'subagent', title: '子 Agent 返回' })]) });
-  assert.match(html, /<button type="button" class="crow node-button" data-item-id="tool-1" data-tool="Agent"/);
-  assert.match(html, /<div class="ctool">Agent<\/div>/);
+  // Off the band, a dot coloured by its state (design v10): done here.
+  assert.match(html, /<div class="cagents"[^>]*><div class="crun"[^>]*><div class="ctool">Agent<\/div><ol class="cagent-list">/);
+  assert.match(html, /<button type="button" class="crow cagent node-button" data-item-id="tool-1" data-tool="Agent" data-state="done"[^>]*><span class="cdot" aria-hidden="true"><\/span><span class="clabel">/);
+  assert.match(html, /\.cagent\[data-state="running"\] \.cdot \{ background: var\(--gold\); \}/);
   assert.doesNotMatch(html, /class="record-disclosure/);
 });
 

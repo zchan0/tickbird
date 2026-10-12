@@ -20,6 +20,8 @@ export interface TimelineItem {
   noticeType?: 'context-compacted' | 'task-notification';
   /** For a task notification: the tool that ran the task (Bash, Agent, Artifact…). */
   taskTool?: string;
+  /** For a subagent: what its notification reported when it finished. */
+  agentUsage?: { tokens?: number; toolUses?: number; durationMs?: number };
   /** The agent's own id for a call (Claude Code's tool_use id): how a subagent's own record names the call that started it. */
   callId?: string;
   /** A call that started a task in the background: whether it has reported back, or was stopped, as the record says. */

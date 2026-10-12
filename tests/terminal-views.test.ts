@@ -328,19 +328,29 @@ test('an Agent call with its subagent\'s record opens on that subagent\'s turn: 
   const running = open(false);
   assert.equal(running.doc.meta, 'Agent · running');
   assert.match(text(running.doc.lines).at(-1)!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
-  // On the turn page, Agent calls are set off the band: under their tool's name, a magenta bar, the words in the body colour.
-  {
-    const banded = { ...modelOf(parent, { width: 70 }), caps: { ...ONE_CELL, background: { r: 30, g: 30, b: 30, dark: true } } };
-    const body = turnBody(ctxOf(banded, 0));
-    const at = text(body).findIndex(line => line.includes('Name brainstorm'));
-    assert.equal(text(body)[at - 1].trimEnd(), '  Agent');
-    assert.match(text(body)[at], /^┃ Name brainstorm/);
-    assert.equal(spans(body[at])[0].style?.fg, 'magenta');
-    assert.ok(spans(body[at]).every(span => !span.style?.bgRgb && !span.style?.dim), 'Off the band, not grey');
-  }
   // Without a record of its own, the call opens as any call does.
   const plain = openDetail({ ...initialState(), index: 0, follow: false, call: layout(initialState(), modelOf(parent)).targets.findIndex(target => target.row?.tool === 'Agent') }, modelOf(parent));
   assert.ok(plain && !text(plain.lines).includes('  Prompt'));
+});
+
+test('Agent calls sit off the band: the shared lead beside the tool\'s name, a dot coloured by state, what the run came to under it', () => {
+  const finished = (id: string, tool: string, second: number) => rec('user', `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>${tool}</tool-use-id>\n<status>completed</status>\n<summary>Agent finished</summary>\n<usage><subagent_tokens>43708</subagent_tokens><tool_uses>6</tool_uses><duration_ms>346000</duration_ms></usage>\n</task-notification>`, second, { origin: { kind: 'task-notification' } });
+  const records = [...BACKGROUND, finished('agent-1', 'a1', 30), said('第一个返回了。', 31, true), done(32, 2_000)];
+  const banded = (extra: unknown[] = []) => ({ ...modelOf(parse([...records, ...extra]), { width: 60, height: 60, now: Date.parse(at(72)) }), caps: { ...ONE_CELL, background: { r: 30, g: 30, b: 30, dark: true } } });
+  let body = turnBody(ctxOf(banded(), 0));
+  let lines = text(body).map(line => line.trimEnd());
+  const head = lines.indexOf('  Agent · Name brainstorm');
+  assert.ok(head >= 0, lines.join('\n'));
+  assert.deepEqual(lines.slice(head + 1, head + 5), ['  ● companions', '    后台 · 5m 46s · 43.7k tokens · 6 次调用', '  ● reading', '    后台 · 1m 10s']);
+  const dot = (offset: number) => spans(body[head + offset]).find(span => span.text === '●')!.style;
+  assert.equal(dot(1)?.fg, 'green', 'Done');
+  assert.equal(dot(3)?.fg, 'yellow', 'Running: the gold of the running mark');
+  assert.ok(spans(body[head + 1]).every(span => !span.style?.bgRgb), 'Off the band');
+  // Stopped with TaskStop: grey.
+  body = turnBody(ctxOf(banded([rec('user', '停掉第二个', 80), call('s1', 'TaskStop', { task_id: 'agent-2' }, 81), result('s1', 81)]), 0));
+  lines = text(body).map(line => line.trimEnd());
+  const stopped = spans(body[lines.indexOf('  ● reading')]).find(span => span.text === '●')!.style;
+  assert.equal(stopped?.dim, true);
 });
 
 test('a background command stopped with TaskStop is not left running', () => {

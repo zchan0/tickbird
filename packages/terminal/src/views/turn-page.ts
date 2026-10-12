@@ -4,6 +4,7 @@ import type { ChapterRow, TurnSegment } from '../../../core/src/chapters';
 import type { LiveExtras } from '../../../core/src/live-extras';
 import { plainPasted } from '../../../core/src/pasted';
 import { backgroundLine, clock, publicBody, rowView, turnView, type TurnView } from '../../../core/src/turn-view';
+import { agentFacts, agentGroup, agentState } from '../../../core/src/agent-line';
 import { symbol, type Capabilities } from '../caps';
 import { cutLine, plainText, row, spans, type Color, type Line, type Span, type Style } from '../screen';
 import { textWidth } from '../width';
@@ -96,6 +97,8 @@ export interface PageContext {
   answerOpen?: boolean;
   /** At most this many lines of the prompt, then …: a subagent's task can run long. */
   promptMax?: number;
+  /** Subagents' own sessions, by the id of the call that started each: what a running one has done so far. */
+  subagents?: ReadonlyMap<string, SessionData>;
   /** The turn's changes are listed a file a line. */
   changesOpen?: boolean;
   /** What is new on the page and how far it has come in; without it, everything is simply there. */
@@ -314,35 +317,33 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
 
 /** A subagent's call: its own session's work, opened on its own page. */
 const isAgent = (chapterRow: ChapterRow): boolean => chapterRow.items[0]?.kind === 'subagent';
-const AGENT_BAR: Style = { fg: 'magenta' };
 
 /**
- * Agent calls are not tools the agent used but other agents it set to work:
- * off the band, under their tool's name, a magenta bar beside each, as the
- * prompt has its blue one, and the words in the body colour. What a line says
- * is what any call's says.
+ * Agent calls are other agents set to work, not tools the agent used: off the
+ * band, under their tool's name and the lead their descriptions share, each a
+ * dot whose colour is its state (gold running, green done, red failed, grey
+ * stopped) and its own words in the body colour; under it, in grey, what the
+ * run came to: background or not, how long, its tokens and its calls.
  */
 function agentLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean): Line[] {
-  const live = view.live || waitingOn;
-  const bar: Span = { text: symbol(ctx.caps, '┃') + ' '.repeat(MARGIN - 1), style: AGENT_BAR };
-  const room = Math.max(8, ctx.width - MARGIN - MARGIN);
-  const lines: Line[] = [[{ text: ' '.repeat(MARGIN) }, { text: callTool(rows[0], ctx.session), style: TOOL }]];
-  for (const chapterRow of rows) {
-    const shown = wordsOf(chapterRow, ctx.session);
+  const lead = ' '.repeat(MARGIN);
+  const group = agentGroup(rows.map(chapterRow => wordsOf(chapterRow, ctx.session).text));
+  const room = Math.max(8, ctx.width - MARGIN - 2 - MARGIN);
+  const lines: Line[] = [[{ text: lead }, { text: callTool(rows[0], ctx.session), style: TOOL }, ...(group.lead ? [{ text: ' · ' + group.lead }] : [])]];
+  rows.forEach((chapterRow, index) => {
+    const state = agentState(chapterRow);
+    const dot: Style = state === 'running' ? gold(ctx) : state === 'done' ? { fg: 'green' } : state === 'failed' ? { fg: 'red' } : DIM;
     const style = owned({}, chapterRow.id);
-    const label = shown.text + (chapterRow.count > 1 ? ` · ${chapterRow.count} 次` : '');
-    const outcome = callEnd(chapterRow, ctx, live);
-    const tail: Span[] = [...(shown.more ? [{ text: ` +${shown.more}`, style: owned({ dim: true, bold: true }, chapterRow.id) }] : []), ...(outcome.length ? [{ text: ' ' }, ...outcome] : [])];
+    const label = group.names[index] + (chapterRow.count > 1 ? ` · ${chapterRow.count} 次` : '');
     const parts = wrapSpans([{ text: label, style }], room);
     if (parts.length > CALL_LINES) parts.splice(CALL_LINES - 1, Infinity, [...cutLine([{ text: parts.slice(CALL_LINES - 1).map(plainText).join(' ') + '  ', style }], room)]);
-    const lastPart = parts.length - 1;
-    parts[lastPart] = textWidth(plainText(parts[lastPart]) + plainText(tail)) <= room ? [...parts[lastPart], ...tail] : withTail(parts[lastPart], tail, room);
-    parts.forEach((part, piece) => {
-      const line: Line = [bar, ...part];
-      if (piece === 0 && chapterRow.openable) TARGETS.set(line as object, [{ row: chapterRow, height: parts.length }]);
-      lines.push(line);
-    });
-  }
+    const callId = chapterRow.items[0]?.callId;
+    const facts = agentFacts(chapterRow, ctx.now, callId ? ctx.subagents?.get(callId) : undefined);
+    const own: Line[] = parts.map((part, piece) => [{ text: lead }, piece ? { text: '  ' } : { text: symbol(ctx.caps, '●'), style: dot }, ...(piece ? [] : [{ text: ' ' }]), ...part]);
+    if (facts) own.push(cutLine([{ text: lead + '  ' }, { text: facts, style: owned(DIM, chapterRow.id) }], ctx.width));
+    if (chapterRow.openable) TARGETS.set(own[0] as object, [{ row: chapterRow, height: own.length }]);
+    lines.push(...own);
+  });
   return lines;
 }
 

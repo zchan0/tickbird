@@ -4,6 +4,7 @@ import type { ChapterRow, ChangedFile, TurnSegment } from '../../core/src/chapte
 import { backgroundLine, clock, rowView, turnView } from '../../core/src/turn-view';
 import { announcedRow, callEnd, callSteps, callText, callTool } from '../../core/src/call-line';
 import { shortFileLabels } from '../../core/src/presentation';
+import { agentFacts, agentGroup, agentState } from '../../core/src/agent-line';
 import { renderMarkdown } from './markdown';
 import type { LiveExtras } from '../../core/src/live-extras';
 
@@ -88,12 +89,39 @@ function callsHtml(all: ChapterRow[], key: string, session: SessionData, live: b
     let last = at;
     while (last + 1 < rows.length && names[last + 1] === names[at] && agent(rows[last + 1]) === agent(rows[at])) last++;
     if (at && agent(rows[at]) !== agent(rows[at - 1])) close(at);
+    if (agent(rows[at])) {
+      block += agentsHtml(rows.slice(at, last + 1), `${key}@${at}`, `${key}#${at}`, session, unavailable);
+      at = last + 1;
+      continue;
+    }
     const run = rows.slice(at, last + 1).map((row, index) => callHtml(row, `${key}#${at + index}`, session, live, waiting && at + index === rows.length - 1, unavailable)).join('');
     block += `<div class="crun" data-observation-key="${escapeHtml(`${key}@${at}`)}"><div class="ctool">${escapeHtml(names[at])}</div><ol class="ctree">${run}</ol></div>`;
     at = last + 1;
   }
   close(rows.length);
   return html;
+}
+
+/**
+ * Agent calls, as in the terminal (design v10): the tool's name and the lead
+ * their descriptions share, then each a dot coloured by its state, its own
+ * words, and under them what the run came to.
+ */
+function agentsHtml(rows: ChapterRow[], key: string, rowKey: string, session: SessionData, unavailable: ChapterRenderers['unavailable']): string {
+  const group = agentGroup(rows.map(row => callText(row, session).text));
+  const states: Record<string, string> = { running: '运行中', done: '已完成', failed: '失败', stopped: '已停止' };
+  const items = rows.map((row, index) => {
+    const state = agentState(row);
+    const facts = agentFacts(row, Date.now());
+    const label = group.names[index] + (row.count > 1 ? ` · ${row.count} 次` : '');
+    const title = [callTool(row, session), callText(row, session).text, states[state], facts, row.openable ? '' : unavailable(row.items)].filter(Boolean).join(' · ');
+    const copy = `<span class="cdot" aria-hidden="true"></span><span class="clabel">${escapeHtml(label)}</span>${facts ? `<span class="cfacts">${escapeHtml(facts)}</span>` : ''}`;
+    const body = row.openable
+      ? `<button type="button" class="crow cagent node-button" data-item-id="${escapeHtml(row.id)}" data-tool="Agent" data-state="${state}" aria-pressed="false" title="${escapeHtml(title)}">${copy}</button>`
+      : `<div class="crow cagent" data-tool="Agent" data-state="${state}" role="group" aria-label="${escapeHtml(title)}">${copy}</div>`;
+    return `<li class="cagent-item" data-observation-key="${escapeHtml(`${rowKey}+${index}`)}">${body}</li>`;
+  }).join('');
+  return `<div class="crun" data-observation-key="${escapeHtml(key)}"><div class="ctool">${escapeHtml(callTool(rows[0], session))}${group.lead ? `<span class="clead"> · ${escapeHtml(group.lead)}</span>` : ''}</div><ol class="cagent-list">${items}</ol></div>`;
 }
 
 /** The label over a block, as in the terminal: a coloured word on a line of its own. */
@@ -214,13 +242,18 @@ export const chapterStyles = `
   .tlabel[data-tone="yellow"] { color: var(--gold); } .tlabel[data-tone="red"] { color: var(--red); }
   /* What you asked: a blue bar down its side, out in the margin. */
   .tprompt { margin: 12px 0 0; }
-  /* Agent calls: off the band, a magenta bar where the tree would be, the words in the body colour. */
-  .cagents { margin: 12px 0 0; --agent: var(--vscode-terminal-ansiMagenta, var(--vscode-charts-purple, #bc3fbc)); }
+  /* Agent calls: off the band; a dot coloured by state, the words in the body colour, what the run came to under them. */
+  .cagents { margin: 12px 0 0; }
   .chapter > .cagents:first-child { margin-top: 0; }
-  .cagents .crow-item { padding-left: 0; }
-  .cagents .crow-item::before, .cagents .crow-item::after { display: none; }
-  .cagents .crow { margin-left: -12px; padding-left: 9px; border-left: 3px solid var(--agent); color: var(--vscode-foreground); }
-  .cagents .cbranch { display: none; }
+  .clead { font-weight: 400; }
+  .cagent-list { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 4px; }
+  .crow.cagent { display: grid; grid-template-columns: 7px minmax(0, 1fr); column-gap: 8px; align-items: baseline; color: var(--vscode-foreground); }
+  .cagent .clabel { -webkit-line-clamp: 2; }
+  .cagent .cfacts { grid-column: 2; font: 11.5px/1.5 var(--vscode-font-family, sans-serif); color: var(--ink-3); }
+  .cdot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); transform: translateY(-1px); }
+  .cagent[data-state="running"] .cdot { background: var(--gold); }
+  .cagent[data-state="done"] .cdot { background: var(--green); }
+  .cagent[data-state="failed"] .cdot { background: var(--red); }
   .tprompt .turn-question { margin: 0 0 0 -12px; padding: 0 0 0 9px; border: 0; border-left: 3px solid var(--blue); border-radius: 0; background: transparent; }
   .cstream { list-style: none; margin: 0; padding: 0; }
   .chapter, .cseg { margin: 12px 0 0; }
