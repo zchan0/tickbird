@@ -59,7 +59,8 @@ export function handle(provider, hookPid, input, hookEnv = process.env, tools = 
   // A compaction continues the session: the pane, if the reader kept it, is still there.
   if (input.source === 'compact') return '压缩后继续：不开栏';
   if (!(hookPid > 1)) return '没有 Agent 进程号：不开栏';
-  const front = frontOf(hookPid, input.cwd || process.cwd(), { exec: tools.run, ...(tools.input ? { input: tools.input } : {}) });
+  // tools.platform: tests pin the process table they fake (ps and lsof, or Linux's /proc).
+  const front = frontOf(hookPid, input.cwd || process.cwd(), { exec: tools.run, ...(tools.input ? { input: tools.input } : {}), ...(tools.platform ? { platform: tools.platform } : {}) });
   if (front.ambiguous) return `同一目录有 ${front.ambiguous.length} 个 Codex（${front.ambiguous.join(', ')}），都没有明显是刚发出消息的那个：不开栏`;
   if (front.missing) return 'Codex 后台运行这个会话，但找不到它在终端里的前台：不开栏';
   if (front.server && !front.env) return `读不到 Codex 前台 ${front.pid} 的环境变量：不开栏`;

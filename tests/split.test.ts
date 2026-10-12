@@ -10,7 +10,7 @@ import { tempDir } from './temp';
 
 // The plugin is plain ES modules with Node's own modules only; Node loads them with require.
 const pluginDir = resolve(__dirname, '../../plugins/tickbird-split/scripts');
-type Tools = { run(command: string, args: string[]): { status: number; stdout: string; stderr: string }; which(name: string): string | undefined; input?: (tty: string) => number };
+type Tools = { run(command: string, args: string[]): { status: number; stdout: string; stderr: string }; which(name: string): string | undefined; input?: (tty: string) => number; platform?: NodeJS.Platform };
 const split = require(join(pluginDir, 'split.mjs')) as {
   handle(provider: string, agentPid: number, input: object, env: NodeJS.ProcessEnv, tools: Tools): string | undefined;
   interactive(provider: string, args: string): boolean;
@@ -250,7 +250,8 @@ test('Codex through its server: the pane goes beside the front, in the front’s
   const machine = codexMachine([[501, '/work/project'], [503, '/work/other']]);
   const commands: string[][] = [];
   const terminal = fakeTools({ tmuxTty: 'ttys010' });
-  const tools: Tools = { which: terminal.tools.which, run: (command, args) => {
+  // The machine is faked as a Mac's: ps and lsof, not Linux's /proc.
+  const tools: Tools = { platform: 'darwin', which: terminal.tools.which, run: (command, args) => {
     if (command === 'ps' || command === 'lsof') return machine.run(command, args);
     commands.push([command, ...args]);
     return terminal.tools.run(command, args);
@@ -263,8 +264,8 @@ test('Codex through its server: the pane goes beside the front, in the front’s
   assert.equal(splitWindow[splitWindow.indexOf('--agent') + 1], '501', 'The pane follows the front, which exits with the session');
   assert.ok(!commands.some(call => call.includes('unix:/tmp/old')));
   assert.ok(splitWindow.includes(`XDG_STATE_HOME=${stale.XDG_STATE_HOME}`), 'The pane reads the state where the hooks write it');
-  assert.match(split.handle('codex', SERVER, START, stale, { which: tools.which, run: codexMachine().run, input: () => 0 })!, /同一目录有 2 个 Codex（501, 502）/);
-  assert.match(split.handle('codex', SERVER, { ...START, cwd: '/work/none' }, stale, { which: tools.which, run: codexMachine().run })!, /找不到它在终端里的前台/);
+  assert.match(split.handle('codex', SERVER, START, stale, { platform: 'darwin', which: tools.which, run: codexMachine().run, input: () => 0 })!, /同一目录有 2 个 Codex（501, 502）/);
+  assert.match(split.handle('codex', SERVER, { ...START, cwd: '/work/none' }, stale, { platform: 'darwin', which: tools.which, run: codexMachine().run })!, /找不到它在终端里的前台/);
 });
 
 test('both plugins carry the same front.mjs', () => {
