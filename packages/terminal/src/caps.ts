@@ -133,9 +133,11 @@ export async function probe(io: ProbeIO, env: NodeJS.ProcessEnv = process.env, t
   if (!env.TERM || env.TERM === 'dumb') return NONE;
   const tmuxFeatures = env.TMUX ? tmuxFeaturesOf() : undefined;
   let received = '';
+  // The timer keeps the process waiting for the answer (a test's fake terminal holds nothing else open); the answer clears it.
   const answered = new Promise<void>(resolve => {
-    const stop = io.onData(text => { received += text; if (parseAnswers(received).done) { stop(); resolve(); } });
-    setTimeout(() => { stop(); resolve(); }, timeoutMs).unref?.();
+    let timer: NodeJS.Timeout | undefined;
+    const stop = io.onData(text => { received += text; if (parseAnswers(received).done) { clearTimeout(timer); stop(); resolve(); } });
+    timer = setTimeout(() => { stop(); resolve(); }, timeoutMs);
   });
   io.write(queries(Object.keys(SYMBOLS), !apcIsTitle(env)));
   await answered;
