@@ -11,6 +11,7 @@ import { plainText, type Line, type Span, type Style } from '../screen';
 import { textWidth } from '../width';
 import { hardWrap, highlightLines } from './code';
 import type { Glyph } from './prose';
+import { MARGIN } from './turn-page';
 
 /**
  * A call opened in the pane: a read shows the file as read, a change shows the
@@ -48,20 +49,21 @@ const shown = (path: string, session: SessionData) => {
 };
 
 /**
- * Every detail is made of panels of one shape: a left column, a bar, the text.
- * The left column holds a line number, a + or -, or nothing. Long lines wrap
- * under the bar with an empty left column.
+ * Every detail is made of panels of one shape: a left column, a bar, the text,
+ * from the page's margin as the rest of the page is. The left column holds line
+ * numbers or marks, and is there only when a row has one: input and output
+ * start at the bar. Long lines wrap under the bar with an empty left column.
  */
 export interface PanelRow { mark?: string; markStyle?: Style; spans: Span[] }
-const GUTTER = 4;
 
 export function panel(rows: PanelRow[], width: number, glyph: Glyph): Line[] {
-  const gutter = Math.max(GUTTER, ...rows.map(row => textWidth(row.mark ?? '')));
+  // As wide as the widest mark, as a diff's line numbers are.
+  const gutter = rows.some(row => row.mark) ? Math.max(...rows.map(row => textWidth(row.mark ?? ''))) + 1 : 0;
   const bar = glyph('│');
-  const room = Math.max(8, width - gutter - 4);
+  const room = Math.max(8, width - MARGIN - gutter - 3);
   return rows.flatMap(row => (row.spans.length ? hardWrap(row.spans, room) : [[]]).map((part, piece) => [
-    { text: ' ' + (piece ? '' : row.mark ?? '').padStart(gutter), style: row.markStyle ?? DIM },
-    { text: ` ${bar} `, style: DIM }, ...part,
+    { text: ' '.repeat(MARGIN) + (gutter ? (piece ? '' : row.mark ?? '').padStart(gutter - 1) + ' ' : ''), style: row.markStyle ?? DIM },
+    { text: `${bar} `, style: DIM }, ...part,
   ]));
 }
 
@@ -92,7 +94,7 @@ export function diffLines(file: PatchFile, width: number, glyph: Glyph, backgrou
   const pieces = diffRows(file);
   const numbers = pieces.flatMap(piece => 'no' in piece && piece.no !== undefined ? [piece.no] : []);
   const digits = numbers.length ? String(Math.max(...numbers)).length : 0;
-  const gutter = 1 + (digits ? digits + 1 : 0) + 2;
+  const gutter = MARGIN + (digits ? digits + 1 : 0) + 2;
   const room = Math.max(8, width - gutter - 1);
   const lines: Line[] = [];
   for (const piece of pieces) {
@@ -116,7 +118,7 @@ export function diffLines(file: PatchFile, width: number, glyph: Glyph, backgrou
     hardWrap(spans, room).forEach((part, index) => {
       const used = gutter + textWidth(plainText(part));
       lines.push([
-        { text: ' ' + (index ? ' '.repeat(number.length) : number), style: numberStyle },
+        { text: ' '.repeat(MARGIN) + (index ? ' '.repeat(number.length) : number), style: numberStyle },
         { text: index ? '  ' : piece.sign + ' ', style: { ...base, ...(changed ? {} : DIM) } },
         ...part,
         ...(lineBg && used < width ? [{ text: ' '.repeat(width - used), style: { bgRgb: lineBg } }] : []),
@@ -169,7 +171,7 @@ const outputLines = (contents: InputContent[], width: number, glyph: Glyph): Lin
     : content.kind === 'code' ? highlightLines(content.text.replace(/\n$/, ''), content.language).map(spans => ({ spans }))
     : content.files.flatMap(file => file.lines.map(line => ({ spans: [{ text: line }] })))), width, glyph);
 
-const section = (title: string): Line => [{ text: ' ' + title, style: { ...DIM, bold: true } }];
+const section = (title: string): Line => [{ text: ' '.repeat(MARGIN) + title, style: { ...DIM, bold: true } }];
 const join2 = (blocks: Line[][]): Line[] => blocks.filter(block => block.length).flatMap((block, index) => index ? [[], ...block] : block);
 
 export interface DetailInput {

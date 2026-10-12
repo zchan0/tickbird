@@ -570,16 +570,16 @@ test('details: a call shows its input and return; a read shows the file; a chang
   let doc = openDetail(state, model)!;
   assert.deepEqual([doc.kind, doc.meta, doc.copy], ['call', 'Bash · exit 1', { text: 'npm test', what: '命令' }]);
   let lines = text(doc.lines);
-  assert.equal(lines[0], ' 输入');
-  assert.equal(lines[1], '      │ npm test');
-  assert.ok(lines.includes(' 返回 · exit 1') && lines.includes('      │ AssertionError'), lines.join('\n'));
-  // Every content line has the same shape: a left column, a bar, the text.
-  assert.ok(lines.filter(line => line && !/^ \S/.test(line)).every(line => /^ .{4} │ /.test(line)), lines.join('\n'));
+  assert.equal(lines[0], '  输入');
+  assert.equal(lines[1], '  │ npm test');
+  assert.ok(lines.includes('  返回 · exit 1') && lines.includes('  │ AssertionError'), lines.join('\n'));
+  // Every line starts at the page's margin: a label, or a bar and the text (no line numbers here, so no left column).
+  assert.ok(lines.every(line => !line || /^ {2}\S/.test(line)), lines.join('\n'));
   assert.match(text(frame(state, model))[0], /^  ← Esc {2}Run the unit tests +Bash · exit 1 $/);
   state = key(key(state, keyOf(']'), model), keyOf(']'), model);
   doc = openDetail(state, model)!;
   assert.deepEqual([doc.kind, doc.title, doc.directory, doc.meta, doc.path, doc.line], ['file', 'width.ts', 'src/', 'Read · 第 1–1 行', '/fixture/src/width.ts', 1]);
-  assert.deepEqual(text(doc.lines), ['    1 │ const a = 1;']);
+  assert.deepEqual(text(doc.lines), ['  1 │ const a = 1;']);
   // The file is highlighted with palette colours.
   assert.ok(doc.lines[0].length > 2 && spans(doc.lines[0]).some(span => span.style?.fg === 'magenta'));
   assert.deepEqual(key(state, keyOf('o'), model).effect, { kind: 'open', path: '/fixture/src/width.ts', line: 1 });
@@ -587,7 +587,7 @@ test('details: a call shows its input and return; a read shows the file; a chang
   state = key(state, keyOf(']'), model);
   doc = openDetail(state, model)!;
   assert.deepEqual([doc.kind, doc.title, doc.meta], ['diff', 'width.test.ts', 'Edit']);
-  assert.deepEqual(text(doc.lines), [' - a', ' + b']);
+  assert.deepEqual(text(doc.lines), ['  - a', '  + b']);
   assert.equal(spans(doc.lines[0]).find(span => span.text.trim() === '-')?.style?.fg, 'red');
   // The end of the turn's calls: ] stays.
   assert.equal(key(state, keyOf(']'), model).call, state.call);
@@ -606,10 +606,10 @@ test('details: changes to the same file in one turn switch with < >', () => {
   const model = modelOf(edits);
   let state = key(key(update(initialState(), model), keyOf('down'), model), keyOf('enter'), model);
   let doc = openDetail(state, model)!;
-  assert.deepEqual([doc.meta, doc.edits, text(doc.lines)], ['Edit · 第 1 次 / 共 2 次', { index: 0, total: 2 }, [' - one', ' + two']]);
+  assert.deepEqual([doc.meta, doc.edits, text(doc.lines)], ['Edit · 第 1 次 / 共 2 次', { index: 0, total: 2 }, ['  - one', '  + two']]);
   state = key(state, keyOf('>'), model);
   doc = openDetail(state, model)!;
-  assert.deepEqual([doc.meta, text(doc.lines)], ['Edit · 第 2 次 / 共 2 次', [' - two', ' + three']]);
+  assert.deepEqual([doc.meta, text(doc.lines)], ['Edit · 第 2 次 / 共 2 次', ['  - two', '  + three']]);
   assert.match(text(frame(state, model))[1], /< > 切换修改/);
   state = key(state, keyOf('<'), model);
   assert.equal(openDetail(state, model)!.edits!.index, 0);
@@ -624,21 +624,21 @@ test('details: arguments read as name: value rows inside the same panel; the des
   ]);
   const model = modelOf(session);
   let state = key(key(update(initialState(), model), keyOf('down'), model), keyOf('enter'), model);
-  assert.deepEqual(text(openDetail(state, model)!.lines).slice(0, 4), [' 输入', '      │ 匹配: TODO', '      │ 路径: src', '      │ output_mode: content']);
+  assert.deepEqual(text(openDetail(state, model)!.lines).slice(0, 4), ['  输入', '  │ 匹配: TODO', '  │ 路径: src', '  │ output_mode: content']);
   state = key(state, keyOf(']'), model);
-  assert.deepEqual(text(openDetail(state, model)!.lines).slice(0, 3), [' 输入', '      │ npm test', '      │ timeout: 30000']);
+  assert.deepEqual(text(openDetail(state, model)!.lines).slice(0, 3), ['  输入', '  │ npm test', '  │ timeout: 30000']);
 });
 
 test('a diff reads as Claude Code draws one: line numbers, the sign, red and green across the pane, the changed words brighter', () => {
   const glyph = (ch: string) => ch;
   const file = { path: 'a.ts', operation: 'update' as const, lines: ['@@ -10,2 +10,2 @@', ' keep', '-const narrow = ctx.width < 50;', '+const narrow = ctx.width < 40;', '@@ -40,1 +40,1 @@ function tail()', '-a', '+b'] };
   assert.deepEqual(text(diffLines(file, 40, glyph)).map(line => line.trimEnd()), [
-    ' 10   keep',
-    ' 11 - const narrow = ctx.width < 50;',
-    ' 11 + const narrow = ctx.width < 40;',
-    '      function tail()',
-    ' 40 - a',
-    ' 40 + b',
+    '  10   keep',
+    '  11 - const narrow = ctx.width < 50;',
+    '  11 + const narrow = ctx.width < 40;',
+    '       function tail()',
+    '  40 - a',
+    '  40 + b',
   ]);
   // Without a known background the colour is on the text; with one, the line is on red or green to the edge, the changed word brighter.
   assert.equal(spans(diffLines(file, 40, glyph)[2]).find(span => span.text.includes('narrow'))?.style?.fg, 'green');
@@ -651,8 +651,8 @@ test('a diff reads as Claude Code draws one: line numbers, the sign, red and gre
   // A line rewritten through is the change as a whole: no word marks.
   assert.equal(changedWords('one', 'two'), undefined);
   // A Codex patch has no line numbers: the column is left out. A written file counts from 1.
-  assert.deepEqual(text(diffLines({ path: 'b.ts', operation: 'update', lines: ['@@', '-x', '+y'] }, 40, glyph)).map(line => line.trimEnd()), [' - x', ' + y']);
-  assert.deepEqual(text(diffLines({ path: 'n.txt', operation: 'write', lines: ['x', 'y'] }, 40, glyph)).map(line => line.trimEnd()), [' 1 + x', ' 2 + y']);
+  assert.deepEqual(text(diffLines({ path: 'b.ts', operation: 'update', lines: ['@@', '-x', '+y'] }, 40, glyph)).map(line => line.trimEnd()), ['  - x', '  + y']);
+  assert.deepEqual(text(diffLines({ path: 'n.txt', operation: 'write', lines: ['x', 'y'] }, 40, glyph)).map(line => line.trimEnd()), ['  1 + x', '  2 + y']);
 });
 
 test('a message covers the bottom lines, wrapped, until it expires', () => {
@@ -666,7 +666,7 @@ test('a message covers the bottom lines, wrapped, until it expires', () => {
 });
 
 test('details: a read keeps its last empty line, a call drops arguments that only repeat its description, hints fit the footer', () => {
-  assert.deepEqual(text(fileLines({ lines: ['one', 'two', ''], start: 1 }, 40, ch => ch)), ['    1 │ one', '    2 │ two', '    3 │ ']);
+  assert.deepEqual(text(fileLines({ lines: ['one', 'two', ''], start: 1 }, 40, ch => ch)), ['  1 │ one', '  2 │ two', '  3 │ ']);
   const model = modelOf(parse([...FIRST, ...SECOND]));
   const state = key(key(key(update(initialState(), model), keyOf('['), model), keyOf('down'), model), keyOf('enter'), model);
   assert.ok(!text(openDetail(state, model)!.lines).some(line => line.includes('description')));
@@ -678,8 +678,8 @@ test('detail lines fit the pane: long code wraps under the gutter', () => {
   const reading = { lines: ['const value = "' + 'x'.repeat(80) + '";'], start: 7, language: 'typescript' };
   const lines = text(fileLines(reading, 40, ch => ch));
   assert.ok(lines.length > 1);
-  assert.match(lines[0], /^ {4}7 │ const/);
-  assert.match(lines[1], /^ {6}│ /);
+  assert.match(lines[0], /^ {2}7 │ const/);
+  assert.match(lines[1], /^ {4}│ /);
   for (const line of lines) assert.ok(textWidth(line) <= 40, line);
 });
 
