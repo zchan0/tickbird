@@ -94,6 +94,8 @@ export interface PageContext {
   now: number;
   /** The closing answer is opened in full. */
   answerOpen?: boolean;
+  /** At most this many lines of the prompt, then …: a subagent's task can run long. */
+  promptMax?: number;
   /** The turn's changes are listed a file a line. */
   changesOpen?: boolean;
   /** What is new on the page and how far it has come in; without it, everything is simply there. */
@@ -179,7 +181,8 @@ function promptLines(text: string, ctx: PageContext): Line[] {
   // Typed, not written as a document: each line as it was typed, wrapped beside the bar, no list indents.
   const room = Math.max(8, ctx.width - MARGIN - 1);
   const words = text.replace(/\r/g, '').split('\n').flatMap(source => source.trim() ? wrapSpans(inlineSpans(source.trimEnd()), room).map(line => [...bar, ...spans(line)]) : [bar.slice(0, 1)]);
-  return [heading('Prompt', 'blue'), ...words];
+  const max = ctx.promptMax;
+  return [heading('Prompt', 'blue'), ...(max && words.length > max ? [...words.slice(0, max), [...bar, { text: '…', style: DIM }]] : words)];
 }
 
 

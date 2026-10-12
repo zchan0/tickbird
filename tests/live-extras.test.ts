@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseClaude } from '../packages/core/src/claude';
-import { projectSidecar, renderSidecar } from '../packages/vscode/src/render';
+import { projectSidecar, renderDetail, renderSidecar, renderSubagentTurn } from '../packages/vscode/src/render';
 
 const parse = (records: unknown[]) => parseClaude({ file: '/fixture/cl.jsonl', projectPath: '/fixture', text: records.map(r => JSON.stringify(r)).join('\n') + '\n' });
 const at = (second: number) => new Date(Date.UTC(2026, 9, 5, 1, 0, second)).toISOString();
@@ -86,4 +86,31 @@ test('an ended turn with agents still out in the background says so under its an
   assert.match(html, /<p class="tbackground"[^>]*>1 background task running<\/p>/);
   // Hidden unless the client has heard the agent's state: a session that has gone claims nothing.
   assert.match(renderSidecar({ projectName: 'p', nonce: 'n', session }), /\.tbackground \{ display: none;[^}]*\}\s*\[data-agent-known\] \.tbackground \{ display: block; \}/);
+});
+
+test('an Agent call with its subagent\'s record opens on that turn: its task, its calls, the answer open; running, the spinner at its end', () => {
+  const row = (type: string, content: unknown, extra = {}) => ({ type, uuid: `s${Math.random()}`, timestamp: new Date().toISOString(), sessionId: 'cl', cwd: '/fixture', isSidechain: true, message: { role: type, content }, ...extra });
+  const records = (finished: boolean) => [
+    row('user', 'Think of names for a developer tool.'),
+    row('assistant', [{ type: 'tool_use', id: 'c1', name: 'Bash', input: { command: 'npm view railbird name', description: 'Check npm for railbird' } }]),
+    row('user', [{ type: 'tool_result', tool_use_id: 'c1', content: '' }]),
+    ...(finished ? [{ ...row('assistant', [{ type: 'text', text: 'railbird 最好。' }]), message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'railbird 最好。' }] } }] : []),
+  ];
+  const child = (finished: boolean) => parseClaude({ file: '/fixture/agent-x.jsonl', projectPath: '/fixture', text: records(finished).map(r => JSON.stringify(r)).join('\n') + '\n' });
+  const item = child(true).items[0];
+  const page = (finished: boolean, running: boolean) => renderDetail({ item, provider: 'claude', kept: false, nonce: 'n', call: { tool: 'Agent', label: 'Brainstorm' }, subagent: { session: child(finished), running } });
+  const done = page(true, false);
+  assert.match(done, /<div class="subagent-turn">/);
+  assert.match(done, /Think of names for a developer tool\./);
+  assert.match(done, /Check npm for railbird/);
+  assert.match(done, /<details open class="cfold fanswer"/, 'The answer is what the page is for: open');
+  assert.doesNotMatch(done, /<section data-fresh/);
+  const running = page(false, true);
+  assert.match(running, /<section data-current data-fresh class="turn-panel/);
+  assert.match(running, /class="cseg tend live-tail"/);
+  // Its own margins, and no 第 1 轮 header: it is the page's only turn.
+  assert.match(done, /\.detail-content:has\(> \.subagent-turn\) \{ padding: 0; \}/);
+  // What the page replaces in place is what it was drawn with.
+  const same = child(true);
+  assert.ok(renderDetail({ item, provider: 'claude', kept: false, nonce: 'n', subagent: { session: same, running: false } }).includes(`<div class="subagent-turn">${renderSubagentTurn(same, false)}</div>`));
 });

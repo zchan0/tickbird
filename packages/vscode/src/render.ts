@@ -31,7 +31,23 @@ export interface DetailRenderOptions { item: TimelineItem; items?: TimelineItem[
   /** A change opens as its diff: the files as the harness recorded them, with their paths as shown. */
   change?: { files: PatchFile[]; paths: string[]; title: string; edit?: { index: number; total: number } };
   /** The call the page is about, named as its line in the panel names it; its failure word, if it failed. */
-  call?: { tool: string; label: string; word?: string } }
+  call?: { tool: string; label: string; word?: string };
+  /** An Agent call whose subagent kept its own record: that record's turn is the page. */
+  subagent?: { session: SessionData; running: boolean } }
+
+/**
+ * A subagent's one turn, as the panel sets a turn: its task as the prompt, its
+ * words and calls, the answer open. While it runs, the spinner at its end.
+ * The page replaces this part in place as the record grows.
+ */
+export function renderSubagentTurn(session: SessionData, running: boolean, locale?: string): string {
+  const group = visibleTurnGroups(session)[0];
+  if (!group) return '<p class="empty">子任务还没有记录。</p>';
+  return renderTurn(group, session, locale, running)
+    // The page's only turn: current, as the panel marks the turn on screen.
+    .replace('<section class="turn-panel', `<section data-current${running ? ' data-fresh' : ''} class="turn-panel`)
+    .replace('<details class="cfold fanswer"', '<details open class="cfold fanswer"');
+}
 
 const escapeHtml = (value: unknown): string => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -192,6 +208,9 @@ const styles = `
   .detail-state { padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; }
   .detail-state[data-status="failed"] { color: var(--vscode-errorForeground); }
   .detail-content { padding: 0 16px; }
+  /* A subagent's turn brings its own margins, and is the page's only turn: no 第 1 轮 header. */
+  .detail-content:has(> .subagent-turn) { padding: 0; }
+  .subagent-turn .chapter-turn .turn-heading { display: none; }
   .evidence-record + .evidence-record { padding-top: 18px; margin-top: 24px; border-top: 1px solid var(--border); }
   .evidence-record-heading { margin-bottom: 12px; }
   .evidence-record-heading h2 { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
@@ -608,6 +627,16 @@ const script = `(() => {
     if (message && typeof message === 'object' && !Array.isArray(message)) {
       if (message.type === 'follow') { const button = document.querySelector('.follow-session'); if (button) button.hidden = !message.paused; return; }
       if (message.type === 'integrationHint') { const hint = document.querySelector('.integration-hint'); if (hint) hint.hidden = !message.show; return; }
+    }
+    // A subagent's record grew: its turn is replaced where it is. Reading at the end, the page stays at the end.
+    if (message && typeof message === 'object' && message.type === 'subagentTurn' && typeof message.html === 'string') {
+      const turn = document.querySelector('.subagent-turn');
+      if (!turn) return;
+      const scroller = document.scrollingElement || document.documentElement;
+      const atEnd = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24;
+      turn.innerHTML = message.html;
+      if (atEnd) scroller.scrollTop = scroller.scrollHeight;
+      return;
     }
     if (!message || typeof message !== 'object' || Array.isArray(message) || Object.keys(message).length !== 1 || message.type !== 'kept') return;
     const button = document.querySelector('.detail button[data-action="keep"]');
@@ -1095,7 +1124,7 @@ function renderFileReading(reading: FileReading, records: TimelineItem[]): strin
     + `${renderFile(reading.lines, reading.start, reading.language)}</section>${records.map(record => evidenceSources(record)).join('')}`;
 }
 
-export function renderDetail({ item, items, provider, kept, nonce, locale, change, call }: DetailRenderOptions): string {
+export function renderDetail({ item, items, provider, kept, nonce, locale, change, call, subagent }: DetailRenderOptions): string {
   const records = items?.length ? items : undefined;
   // Each read keeps its own output. A call and its native execution record are one
   // read, and the native record carries the clean output.
@@ -1116,11 +1145,11 @@ export function renderDetail({ item, items, provider, kept, nonce, locale, chang
   // A short request keeps its words in the summary; its detail still leads with them.
   const words = !records && item.kind === 'request' && !item.detail?.blocks.some(block => block.kind === 'text' && publicLabels.has(block.label))
     ? `<section class="evidence-block" data-evidence-kind="text">${renderUserText(item.summary)}</section>` : '';
-  const content = change ? change.files.map((file, index) => patchFileHtml(file, change.paths[index])).join('') : words + (reading ? reads.length === 1 ? renderFileReading(reading, reads[0].sources)
+  const content = subagent ? `<div class="subagent-turn">${renderSubagentTurn(subagent.session, subagent.running, locale)}</div>` : change ? change.files.map((file, index) => patchFileHtml(file, change.paths[index])).join('') : words + (reading ? reads.length === 1 ? renderFileReading(reading, reads[0].sources)
     : reads.map((read, index) => `<section class="evidence-record"><header class="evidence-record-heading"><h2>第 ${index + 1} 次读取</h2></header>${renderFileReading(read.reading!, read.sources)}</section>`).join('')
     : records
     ? `${records.map((record) => `<section class="evidence-record" data-source-item-id="${escapeHtml(record.id)}">${multiple ? `<header class="evidence-record-heading"><h2>${escapeHtml(describeDisplayAction(record).label)}</h2>${detailState(record)}</header>` : ''}${evidenceContent(record)}</section>`).join('')}`
     : evidenceContent(item));
-  const body = `<main class="detail" aria-label="过程证据详情"><header class="toolbar"><span class="detail-identity">${providerName(provider)}<span aria-hidden="true">·</span><span data-keep-status>${kept ? '已保留' : '临时预览'}</span></span><button type="button" class="quiet-button" data-action="keep"${kept ? ' disabled' : ''}>${kept ? '已保留' : '保留此页'}</button></header><section class="detail-heading">${change?.edit ? `<div class="edit-steps"><button type="button" class="quiet-button" data-action="olderEdit" title="上一次修改 &lt;"${change.edit.index ? '' : ' disabled'}>‹</button><span>第 ${change.edit.index + 1} 次 / 共 ${change.edit.total} 次</span><button type="button" class="quiet-button" data-action="newerEdit" title="下一次修改 &gt;"${change.edit.index < change.edit.total - 1 ? '' : ' disabled'}>›</button></div>` : ''}<h1>${escapeHtml(change ? change.title : reading ? reading.path.replace(/\\/g, '/').split('/').at(-1) || reading.path : call ? call.label : title)}</h1>${change ? (item.status === 'failed' ? detailState(item) : '') : call ? callMeta(call, all, reading) : multiple ? '' : detailState(records?.[0] ?? item)}</section><div class="detail-content">${content}</div></main>`;
+  const body = `<main class="detail" aria-label="过程证据详情"><header class="toolbar"><span class="detail-identity">${providerName(provider)}<span aria-hidden="true">·</span><span data-keep-status>${kept ? '已保留' : '临时预览'}</span></span><button type="button" class="quiet-button" data-action="keep"${kept ? ' disabled' : ''}>${kept ? '已保留' : '保留此页'}</button></header><section class="detail-heading">${change?.edit ? `<div class="edit-steps"><button type="button" class="quiet-button" data-action="olderEdit" title="上一次修改 &lt;"${change.edit.index ? '' : ' disabled'}>‹</button><span>第 ${change.edit.index + 1} 次 / 共 ${change.edit.total} 次</span><button type="button" class="quiet-button" data-action="newerEdit" title="下一次修改 &gt;"${change.edit.index < change.edit.total - 1 ? '' : ' disabled'}>›</button></div>` : ''}<h1>${escapeHtml(change ? change.title : reading ? reading.path.replace(/\\/g, '/').split('/').at(-1) || reading.path : call ? call.label : title)}</h1>${change ? (item.status === 'failed' ? detailState(item) : '') : subagent && call ? `<div class="detail-meta"><b>${escapeHtml(call.tool)}</b>${subagent.running ? ' · 运行中' : call.word ? ` · <span class="detail-bad">${escapeHtml(call.word)}</span>` : ''}</div>` : call ? callMeta(call, all, reading) : multiple ? '' : detailState(records?.[0] ?? item)}</section><div class="detail-content">${content}</div></main>`;
   return documentHtml(title, body, nonce, item.sessionId, locale);
 }

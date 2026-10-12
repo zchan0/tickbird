@@ -11,7 +11,10 @@ import { plainText, type Line, type Span, type Style } from '../screen';
 import { textWidth } from '../width';
 import { hardWrap, highlightLines } from './code';
 import type { Glyph } from './prose';
-import { MARGIN } from './turn-page';
+import { MARGIN, turnBody, type PageContext } from './turn-page';
+import { visibleTurnGroups } from '../../../core/src/outline';
+import { publicBody, turnView } from '../../../core/src/turn-view';
+import type { Capabilities } from '../caps';
 
 /**
  * A call opened in the pane: a read shows the file as read, a change shows the
@@ -184,9 +187,35 @@ export interface DetailInput {
   edit?: number;
   /** The terminal's background, for the diff's colours. */
   background?: Background;
+  /** For an Agent call: the subagent's own session, when its record is there. */
+  subagent?: SessionData;
+  caps?: Pick<Capabilities, 'symbols' | 'background'>;
+  now?: number;
 }
 
-export function detailDoc({ session, group, row, width, glyph, edit, background }: DetailInput): DetailDoc | undefined {
+/**
+ * An Agent call whose subagent kept its own record: that record's one turn, set
+ * as a turn page is, with the task (the first lines of it) as the prompt and
+ * the answer open. While the subagent runs, the spinner turns at its end.
+ */
+function subagentDoc(row: ChapterRow, subagent: SessionData, width: number, caps: Pick<Capabilities, 'symbols' | 'background'>, now: number): DetailDoc | undefined {
+  const groups = visibleTurnGroups(subagent);
+  const group = groups[0];
+  if (!group) return undefined;
+  const view = turnView(group, true, subagent.provider);
+  const running = row.items[0]?.status === 'running';
+  const status: PageContext['status'] = running ? { kind: 'running', since: view.turn.start, verb: view.verb } : { kind: 'idle' };
+  const lines = turnBody({ session: subagent, groups: [group], index: 0, status, extras: {}, caps, width, now, answerOpen: true, promptMax: 3 });
+  const word = running ? 'running' : row.outcome ? outcomeWord(row.outcome) : '';
+  return { kind: 'call', title: row.label || 'Agent', meta: ['Agent', word].filter(Boolean).join(' · '),
+    copy: { text: view.turn.request ? publicBody(view.turn.request) : row.label, what: '任务' }, lines };
+}
+
+export function detailDoc({ session, group, row, width, glyph, edit, background, subagent, caps, now }: DetailInput): DetailDoc | undefined {
+  if (subagent && caps) {
+    const page = subagentDoc(row, subagent, width, caps, now ?? Date.now());
+    if (page) return page;
+  }
   const evidence = resolveOutlineEvidence(session, row.id, row.items[0]);
   const records = evidence ? evidence.items ?? [evidence.item] : row.items;
   if (!records.length) return undefined;

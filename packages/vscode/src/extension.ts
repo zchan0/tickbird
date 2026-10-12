@@ -7,7 +7,8 @@ import { discoverSessions, sessionKey, type DiscoveryOptions } from '../../core/
 import { openLiveSession, type LiveSession } from '../../core/src/live-session';
 import { LiveView } from './live-view';
 import type { SessionCandidate, SessionData, TimelineItem, Provider } from '../../core/src/model';
-import { renderDetail, renderSidecar, renderInlineEvidence, inlineRevision, renderWorkspaceGap, workspaceGaps, type WorkspaceGap } from './render';
+import { readClaudeSubagents, type SubagentCache } from '../../core/src/subagents';
+import { renderDetail, renderSubagentTurn, renderSidecar, renderInlineEvidence, inlineRevision, renderWorkspaceGap, workspaceGaps, type WorkspaceGap } from './render';
 import { hasReadableEvidence, outlineCoverage, resolveOutlineEvidence } from '../../core/src/outline';
 import { currentSession, readSessionStates, sessionStateDirectory, type SessionState, type SessionStateCache } from '../../core/src/session-state';
 import { lastRecordAt, liveExtras as coreLiveExtras, type LiveExtras } from '../../core/src/live-extras';
@@ -20,7 +21,9 @@ interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?:
   /** The call the detail is about, named as its line in the panel names it. */
   call?: { tool: string; label: string; word?: string };
   /** A change shown as its diff: every change to the file in the turn, the one on screen, its path as shown. */
-  change?: { steps: PatchFile[]; index: number; path: string; title: string } }
+  change?: { steps: PatchFile[]; index: number; path: string; title: string };
+  /** An Agent call shown as its subagent's turn: the call's id, its record, and the session the call is in. */
+  subagent?: { callId: string; file: string; session: SessionData; parent: SessionData; running?: boolean } }
 const observerType = 'tickbird.observer';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -134,9 +137,29 @@ export function activate(context: vscode.ExtensionContext) {
     const source = live; live = undefined; liveView = undefined;
     if (source) void source.close().catch(() => undefined);
   }
+  /** Running until the session the call is in has its result: the live session when it is the same one. */
+  const subagentRunning = (subagent: NonNullable<EvidenceView['subagent']>) =>
+    ((session?.id === subagent.parent.id ? session : subagent.parent).items.find(item => item.callId === subagent.callId)?.status ?? 'unknown') === 'running';
+  const subagentCache: SubagentCache = new Map();
+  // An open subagent page follows its record: a changed record, or the call's end, replaces its turn in place.
+  const subagentPoll = setInterval(() => {
+    for (const view of evidence) {
+      const subagent = view.subagent;
+      if (!subagent) continue;
+      void readClaudeSubagents(subagent.parent, subagent.file, subagentCache).then(read => {
+        const found = read.byCall.get(subagent.callId);
+        const running = subagentRunning(subagent);
+        if (!found || (!read.changed && running === subagent.running)) return;
+        subagent.session = found.session; subagent.running = running;
+        void Promise.resolve(view.panel.webview.postMessage({ type: 'subagentTurn', html: renderSubagentTurn(found.session, running, vscode.env?.language) })).catch(() => undefined);
+      }).catch(() => undefined);
+    }
+  }, 1000);
+  context.subscriptions.push({ dispose: () => clearInterval(subagentPoll) });
   function renderEvidence(view: EvidenceView) {
     view.panel.title = `${view.kept ? '已保留' : '预览'} · ${view.change?.title ?? view.call?.label ?? view.item.title}`;
-    view.panel.webview.html = renderDetail({ item: view.item, items: view.items, provider: view.provider, kept: view.kept, nonce: nonce(), locale: vscode.env?.language, ...(view.call ? { call: view.call } : {}), ...(view.change ? { change: { files: [view.change.steps[view.change.index]], paths: [view.change.path], title: view.change.title,
+    view.panel.webview.html = renderDetail({ item: view.item, items: view.items, provider: view.provider, kept: view.kept, nonce: nonce(), locale: vscode.env?.language, ...(view.call ? { call: view.call } : {}),
+      ...(view.subagent ? { subagent: { session: view.subagent.session, running: subagentRunning(view.subagent) } } : {}), ...(view.change ? { change: { files: [view.change.steps[view.change.index]], paths: [view.change.path], title: view.change.title,
       ...(view.change.steps.length > 1 ? { edit: { index: view.change.index, total: view.change.steps.length } } : {}) } } : {}) });
   }
   /**
@@ -358,16 +381,23 @@ export function activate(context: vscode.ExtensionContext) {
     const end = found && boundSession ? callEnd(found.row, boundSession, false) : undefined;
     const call = found && boundSession && !found.row.output ? { tool: callTool(found.row, boundSession),
       label: callText(found.row, boundSession).text + (found.row.count > 1 ? ` · ${found.row.count} 次` : ''), ...(end?.kind === 'failed' ? { word: end.word } : {}) } : undefined;
+    const transcript = candidate?.file;
     const action = detailOpening.then(async () => {
       if (disposed || !boundSession || session !== boundSession || observer !== boundObserver) return;
       if (target && await openTarget(target)) return;
       if (!snapshot || !(snapshot.items ?? [snapshot.item]).some(hasReadableEvidence)) return;
       const { item, items } = snapshot;
+      // An Agent call whose subagent kept its own record opens on that record's turn.
+      const callId = found?.row.tool === 'Agent' && boundSession.provider === 'claude' ? found.row.items[0]?.callId : undefined;
+      const record = callId && transcript ? (await readClaudeSubagents(boundSession, transcript, subagentCache).catch(() => undefined))?.byCall.get(callId) : undefined;
+      if (disposed || session !== boundSession) return;
+      const subagent: EvidenceView['subagent'] = record && callId ? { callId, file: transcript!, session: record.session, parent: boundSession } : undefined;
+      if (subagent) subagent.running = subagentRunning(subagent);
       const column = detailColumn();
       if (!preview) {
         const panel = vscode.window.createWebviewPanel('tickbird.evidence', '证据预览',
           { viewColumn: column, preserveFocus: true }, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
-        const view: EvidenceView = { panel, item: structuredClone(item), ...(items ? { items: structuredClone(items) } : {}), provider: boundSession.provider, kept: false, ...(change ? { change } : {}), ...(call ? { call } : {}) };
+        const view: EvidenceView = { panel, item: structuredClone(item), ...(items ? { items: structuredClone(items) } : {}), provider: boundSession.provider, kept: false, ...(change ? { change } : {}), ...(call ? { call } : {}), ...(subagent ? { subagent } : {}) };
         preview = view;
         evidence.add(view);
         panel.onDidDispose(() => { evidence.delete(view); if (preview === view) preview = undefined; }, null, context.subscriptions);
@@ -380,7 +410,7 @@ export function activate(context: vscode.ExtensionContext) {
             if (index !== view.change.index) { view.change.index = index; renderEvidence(view); }
           }
         }, null, context.subscriptions);
-      } else { preview.item = structuredClone(item); preview.items = items ? structuredClone(items) : undefined; preview.provider = boundSession.provider; preview.change = change; preview.call = call; preview.panel.reveal(column, true); }
+      } else { preview.item = structuredClone(item); preview.items = items ? structuredClone(items) : undefined; preview.provider = boundSession.provider; preview.change = change; preview.call = call; preview.subagent = subagent; preview.panel.reveal(column, true); }
       renderEvidence(preview);
     });
     detailOpening = action.catch(() => undefined);

@@ -30,6 +30,9 @@ export interface Model {
   /** What is new on the page, and a count that moves on with each frame while something moves. */
   motion?: Motion;
   frame?: number;
+  /** Subagents' own sessions, by the id of the call that started each; the revision moves when one is read anew. */
+  subagents?: ReadonlyMap<string, SessionData>;
+  subagentsRevision?: number;
 }
 
 export type Effect = { kind: 'open'; path: string; line?: number } | { kind: 'copy'; text: string; what: string } | { kind: 'focus' } | { kind: 'view'; image: RecordedImage } | { kind: 'link'; link: { target: string; name: string } };
@@ -147,10 +150,12 @@ export function openDetail(state: AppState, model: Model): DetailDoc | undefined
   const target = state.call !== undefined ? layout(state, model).targets[state.call] : undefined;
   const group = model.groups[state.index];
   if (!target?.row || !group) return undefined;
-  const key = JSON.stringify([state.index, target.row.id, state.detail?.edit ?? null, model.width, model.caps.background ?? null, model.caps.symbols]);
+  const callId = target.row.tool === 'Agent' ? target.row.items[0]?.callId : undefined;
+  const subagent = callId ? model.subagents?.get(callId) : undefined;
+  const key = JSON.stringify([state.index, target.row.id, state.detail?.edit ?? null, model.width, model.caps.background ?? null, model.caps.symbols, subagent ? model.subagentsRevision ?? 0 : null, subagent && target.row.items[0]?.status === 'running' ? Math.floor(model.now / 80) : null]);
   const kept = DETAILS.get(model.groups);
   if (kept?.key === key) return kept.value;
-  const value = detailDoc({ session: model.session, group, row: target.row, width: model.width, glyph: ch => symbol(model.caps, ch), edit: state.detail?.edit, background: model.caps.background });
+  const value = detailDoc({ session: model.session, group, row: target.row, width: model.width, glyph: ch => symbol(model.caps, ch), edit: state.detail?.edit, background: model.caps.background, subagent, caps: model.caps, now: model.now });
   DETAILS.set(model.groups, { key, value });
   return value;
 }

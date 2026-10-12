@@ -282,6 +282,42 @@ test('an agent heard back from in the background reads as a row in the turn, and
   assert.ok(!lines.some(line => line.includes('background')));
 });
 
+test('an Agent call with its subagent\'s record opens on that subagent\'s turn: the task\'s first lines, its work, its answer', () => {
+  const parent = parse([rec('user', '想几个名字', 0), call('a1', 'Agent', { description: 'Name brainstorm', prompt: 'p' }, 1), result('a1', 9, false, 'railbird'), said('选 railbird。', 10, true), done(11, 11_000)]);
+  const task = ['You are helping name a developer tool.', 'Brainstorm, then check availability.', 'Reply in Chinese.', '## The product', 'A read-only viewer.'].join('\n');
+  const child = (finished: boolean) => parse([
+    rec('user', task, 1), said('先查 npm。', 2),
+    call('c1', 'Bash', { command: 'npm view railbird name', description: 'Check npm for railbird' }, 3), result('c1', 4),
+    ...(finished ? [said('**railbird** 最好：三个平台都空着。', 8, true)] : []),
+  ]);
+  const open = (finished: boolean) => {
+    const model = { ...modelOf(parent, { width: 70, height: 60 }), subagents: new Map([['a1', child(finished)]]), subagentsRevision: finished ? 2 : 1 };
+    // The Agent call, selected and opened.
+    let state: AppState = { ...initialState(), index: 0, follow: false };
+    const at = layout(state, model).targets.findIndex(target => target.row?.tool === 'Agent');
+    assert.ok(at >= 0);
+    state = { ...state, call: at };
+    return { model, doc: openDetail(state, model)! };
+  };
+  const { doc } = open(true);
+  const lines = text(doc.lines);
+  assert.deepEqual([doc.title, doc.meta, doc.copy], ['Name brainstorm', 'Agent', { text: task, what: '任务' }]);
+  // The task as the prompt, cut to its first three lines; then the subagent's words and calls; the answer open in full.
+  const prompt = lines.indexOf('  Prompt');
+  assert.deepEqual(lines.slice(prompt + 1, prompt + 5).map(line => line.trimEnd()), ['┃ You are helping name a developer tool.', '┃ Brainstorm, then check availability.', '┃ Reply in Chinese.', '┃ …']);
+  assert.ok(lines.some(line => /└ Check npm for railbird/.test(line)), lines.join('\n'));
+  const answer = lines.indexOf('  Final Answer');
+  assert.match(lines[answer + 1], /railbird 最好：三个平台都空着。/);
+  // Still running: no answer yet, the spinner at its end.
+  parent.items.find(item => item.kind === 'subagent')!.status = 'running';
+  const running = open(false);
+  assert.equal(running.doc.meta, 'Agent · running');
+  assert.match(text(running.doc.lines).at(-1)!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
+  // Without a record of its own, the call opens as any call does.
+  const plain = openDetail({ ...initialState(), index: 0, follow: false, call: layout(initialState(), modelOf(parent)).targets.findIndex(target => target.row?.tool === 'Agent') }, modelOf(parent));
+  assert.ok(plain && !text(plain.lines).includes('  Prompt'));
+});
+
 test('a background command stopped with TaskStop is not left running', () => {
   const records = [rec('user', '跑个慢命令', 0), call('b1', 'Bash', { command: 'sleep 100', run_in_background: true }, 1),
     { ...result('b1', 1), toolUseResult: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg-1' } }, said('在后台跑。', 2, true), done(3, 3_000)];

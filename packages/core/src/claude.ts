@@ -337,7 +337,7 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
         }
         const kind: ItemKind = name === 'AskUserQuestion' ? 'question' : ['Agent', 'Task'].includes(name) ? 'subagent' : ['Edit', 'Write'].includes(name) ? 'file-change' : 'tool';
         const summary = short(string(args.command) || string(args.file_path) || string(args.pattern) || string(args.description) || string(args.skill) || '已记录调用输入，尚未取得最终状态。');
-        const item = add(ref, kind, name || '工具调用', summary); item.status = 'unknown'; item.result = 'not-observed'; calls.set(id, item);
+        const item = add(ref, kind, name || '工具调用', summary); item.status = 'unknown'; item.result = 'not-observed'; item.callId = id; calls.set(id, item);
         if (recordedInput) callInputs.set(id, recordedInput);
         // Stopping a task is the record's only word that it will not report back.
         const stopped = name === 'TaskStop' ? tasks.get(string(args.task_id) || string(args.shell_id))?.backgroundTask : undefined;

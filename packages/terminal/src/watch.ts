@@ -6,6 +6,8 @@ import { discoverSessions } from '../../core/src/sessions';
 import { openLiveSession, type LiveSession } from '../../core/src/live-session';
 import { readSessionStates, sessionStateDirectory, type SessionState, type SessionStateCache } from '../../core/src/session-state';
 import { liveExtras } from '../../core/src/live-extras';
+import { readClaudeSubagents, type SubagentCache } from '../../core/src/subagents';
+import type { SessionData } from '../../core/src/model';
 import { Motion, SPIN_MS } from './motion';
 import { visibleTurnGroups } from '../../core/src/outline';
 import type { turnView } from '../../core/src/turn-view';
@@ -99,6 +101,10 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
   const stateDir = sessionStateDirectory();
   let states = await readSessionStates(stateDir, undefined, cache);
   let live: LiveSession | undefined;
+  /** The transcript `live` reads, and its subagents' own sessions. */
+  let liveFile: string | undefined;
+  let subagents: ReadonlyMap<string, SessionData> = new Map(), subagentsRevision = 0;
+  const subagentCache: SubagentCache = new Map();
   let pausedRetry = 0;
   let app: AppState = initialState();
   // What is new on the page: the first page of a session is drawn still, what comes after moves in.
@@ -131,7 +137,7 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
     const extras = liveExtras(session, state);
     const agentState = live.health.agent;
     const status = sessionStatus(latest, extras, Date.now(), { busy: agentState === 'busy' || agentState === 'waiting', ended: state?.phase === 'ended', ...(agentState ? { state: agentState } : {}) });
-    return { session, groups, status, extras, caps, now: Date.now(), width: screen.width, height: screen.height, focusAgent: Boolean(focus), motion, frame: frames };
+    return { session, groups, status, extras, caps, now: Date.now(), width: screen.width, height: screen.height, focusAgent: Boolean(focus), motion, frame: frames, subagents, subagentsRevision };
   };
   const waitingLines = (message: string): Line[] => {
     const lines: Line[] = [row([{ text: ' Tickbird', style: { bold: true } }], '', screen.width), [], ...prose(message, screen.width - 1, { indent: 3, style: { dim: true } })];
@@ -250,7 +256,8 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
       if (!opened) return;
       if (target !== wanted || live !== stale) { void opened.close(); return; }
       if (stale) { void stale.close(); revision++; }
-      live = opened;
+      live = opened; liveFile = candidate.file;
+      subagents = new Map(); subagentsRevision++;
       live.start(change => { if (change.contentChanged) revision++; draw(); });
     } finally { opening = false; }
   };
@@ -262,6 +269,13 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
     states = await readSessionStates(stateDir, undefined, cache).catch(() => states);
     if (agent && !alive(agent)) finish();
     await follow();
+    // Subagents write their own records: read again only what changed.
+    if (live?.session.provider === 'claude' && liveFile) {
+      const read = await readClaudeSubagents(live.session, liveFile, subagentCache).catch(() => undefined);
+      if (read && (read.changed || read.byCall.size !== subagents.size)) {
+        subagents = new Map([...read.byCall].map(([id, found]) => [id, found.session])); subagentsRevision++;
+      }
+    }
     draw();
   };
   setInterval(() => { void refresh(); }, STATE_POLL_MS);
