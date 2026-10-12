@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile, readFile, readdir, access } from 'node:f
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 // The newest installed copy of each Agent extension, as the developer window loads them; the command must still be public.
@@ -65,4 +65,8 @@ console.log(JSON.stringify({ passed: result?.passed ?? false, checks: result?.ch
 process.exitCode = result?.passed ? 0 : 1;
 
 // The run's VS Code profile is about 50 MB; the result above is what is kept. TICKBIRD_KEEP_RUN=1 keeps the run too.
-if (!process.env.TICKBIRD_KEEP_RUN) await rm(runRoot, { recursive: true, force: true });
+// VS Code's helpers go on writing to the profile for a moment after the window closes: wait for them first.
+if (!process.env.TICKBIRD_KEEP_RUN) {
+  for (let waited = 0; waited < 15_000 && spawnSync('pgrep', ['-f', userData]).status === 0; waited += 250) await new Promise(done => setTimeout(done, 250));
+  await rm(runRoot, { recursive: true, force: true });
+}

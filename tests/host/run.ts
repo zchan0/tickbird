@@ -258,7 +258,7 @@ export async function run() {
     await check('the window follows the session the integration says is its current one, and shows what it waits for', async () => {
       // A state file as the integration hook writes it, naming this extension host as the window.
       const directory = join(process.env.XDG_STATE_HOME!, 'tickbird', 'sessions');
-      assert.ok(directory.startsWith(process.env.XDG_STATE_HOME!) && process.env.XDG_STATE_HOME!.includes('sidecar-product-host-'), 'Only this run\'s state directory');
+      assert.ok(directory.startsWith(process.env.XDG_STATE_HOME!) && process.env.XDG_STATE_HOME!.includes('tickbird-product-host-'), 'Only this run\'s state directory');
       const claude = api.candidates.find((candidate: any) => candidate.provider === 'claude');
       await api.selectSession('codex:cx-fixture');
       assert.equal(api.session.id, 'cx-fixture');
