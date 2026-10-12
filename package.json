@@ -109,9 +109,9 @@
     "install:terminal": "npm run build && node scripts/install-terminal.mjs"
   },
   "dependencies": {
+    "acorn": "8.18.0",
     "highlight.js": "11.11.1",
-    "markdown-it": "14.3.1",
-    "typescript": "5.9.3"
+    "markdown-it": "14.3.1"
   },
   "devDependencies": {
     "@types/jsdom": "^21.1.7",
@@ -120,6 +120,7 @@
     "@types/vscode": "1.96.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
-    "jsdom": "^26.1.0"
+    "jsdom": "^26.1.0",
+    "typescript": "5.9.3"
   }
 }

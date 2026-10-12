@@ -1,4 +1,4 @@
-import ts from 'typescript';
+import { parse } from 'acorn';
 import type { TimelineItem } from './model';
 
 /** Labels describe recorded inputs, never inferred execution or inner-call success. */
@@ -44,102 +44,124 @@ const webSource = (reference: string): string => {
 const unresolved = (): Atom => atom('orchestration:unresolved', '编排调用（未解析）');
 const normalized = (name: string): string => name.replace(/^functions[/.]/, '').replace(/\//g, '__');
 
+/** An ESTree node as acorn gives it: only the fields read here are typed. */
+type Node = { type: string; start: number; end: number; [field: string]: any };
+const isNode = (value: unknown): value is Node => value !== null && typeof value === 'object' && typeof (value as Node).type === 'string';
+/** The node's children in source order. */
+function children(node: Node): Node[] {
+  const found: Node[] = [];
+  for (const [field, value] of Object.entries(node)) {
+    if (field === 'type' || field === 'start' || field === 'end') continue;
+    for (const child of Array.isArray(value) ? value : [value]) if (isNode(child)) found.push(child);
+  }
+  return found.sort((a, b) => a.start - b.start);
+}
+/** A recorded script as a syntax tree, or nothing when it does not parse. Nothing in it runs. */
+function parseScript(source: string): Node | undefined {
+  const options = { ecmaVersion: 'latest', allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true, allowHashBang: true } as const;
+  try { return parse(source, { ...options, sourceType: 'script' }) as unknown as Node; } catch { /* imports and exports need a module */ }
+  try { return parse(source, { ...options, sourceType: 'module' }) as unknown as Node; } catch { return undefined; }
+}
+const FUNCTIONS = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'ClassDeclaration', 'ClassExpression']);
+const isMethod = (node: Node): boolean => node.type === 'MethodDefinition' || (node.type === 'Property' && (node.method || node.kind !== 'init'));
+/** `{ key: value }` written out: no shorthand, method, accessor or computed key. */
+const plainProperty = (node: Node): boolean => node.type === 'Property' && node.kind === 'init' && !node.method && !node.shorthand && !node.computed;
+const keyName = (key: Node): string | undefined => key.type === 'Identifier' ? key.name : key.type === 'Literal' && (typeof key.value === 'string' || typeof key.value === 'number') ? String(key.value) : undefined;
+
 /** Only literal data is decoded. Identifiers, spreads, getters and substitutions are not evaluated. */
-function literal(node: ts.Expression | undefined): unknown {
+function literal(node: Node | null | undefined): unknown {
   if (!node) return undefined;
-  if (ts.isParenthesizedExpression(node)) return literal(node.expression);
-  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
-  if (ts.isNumericLiteral(node)) return Number(node.text);
-  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
-  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
-  if (node.kind === ts.SyntaxKind.NullKeyword) return null;
-  if (ts.isArrayLiteralExpression(node)) return node.elements.map(value => ts.isSpreadElement(value) ? undefined : literal(value));
-  if (ts.isObjectLiteralExpression(node)) {
+  if (node.type === 'Literal') return node.regex || node.bigint !== undefined ? undefined : node.value;
+  if (node.type === 'TemplateLiteral') return node.expressions.length ? undefined : node.quasis[0]?.value.cooked ?? undefined;
+  if (node.type === 'ArrayExpression') return node.elements.map((value: Node | null) => value?.type === 'SpreadElement' ? undefined : literal(value));
+  if (node.type === 'ObjectExpression') {
     const result: Obj = Object.create(null) as Obj;
-    for (const property of node.properties) {
-      if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) return undefined;
-      const key = property.name.text;
+    for (const property of node.properties as Node[]) {
       // A later dynamic spread could replace any earlier value. Do not guess.
-      if (node.properties.some(ts.isSpreadAssignment)) return undefined;
-      result[key] = literal(property.initializer);
+      if (!plainProperty(property)) return undefined;
+      const key = keyName(property.key);
+      if (key === undefined) return undefined;
+      result[key] = literal(property.value);
     }
     return result;
   }
   return undefined;
 }
-function referencesTools(node: ts.Node): boolean {
-  if (ts.isIdentifier(node) && node.text === 'tools') return true;
-  return !!ts.forEachChild(node, child => referencesTools(child) || undefined);
+function referencesTools(node: Node): boolean {
+  if (node.type === 'Identifier' && node.name === 'tools') return true;
+  return children(node).some(referencesTools);
 }
-function shadowsTools(node: ts.Node): boolean {
-  if ((ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name && referencesTools(node.name)) return true;
-  if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && referencesTools(node.left)) return true;
-  return !!ts.forEachChild(node, child => shadowsTools(child) || undefined);
+function shadowsTools(node: Node): boolean {
+  if (node.type === 'VariableDeclarator' && referencesTools(node.id)) return true;
+  if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(node.type) && node.params.some(referencesTools)) return true;
+  if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration') && node.id && referencesTools(node.id)) return true;
+  if (node.type === 'CatchClause' && node.param && referencesTools(node.param)) return true;
+  if (node.type === 'AssignmentExpression' && referencesTools(node.left)) return true;
+  return children(node).some(shadowsTools);
 }
+/** `tools.name` or `tools[name]`, with or without `?.`. */
+const toolsMember = (node: Node): boolean => node.type === 'MemberExpression' && node.object.type === 'Identifier' && node.object.name === 'tools';
 
 /** A syntax hint, never an evaluated command or proof a conditional call ran. */
 export function execCommandHint(source: string): string | undefined {
   if (source.length > 256_000) return undefined;
-  const tree = ts.createSourceFile('recorded-input.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  if ((tree as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }).parseDiagnostics.length || shadowsTools(tree)) return undefined;
+  const tree = parseScript(source);
+  if (!tree || shadowsTools(tree)) return undefined;
   const hints: string[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isFunctionLike(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node)) return;
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
-      && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === 'tools'
-      && node.expression.name.text === 'exec_command') {
-      const args = node.arguments[0];
-      if (args && ts.isObjectLiteralExpression(args) && !args.properties.some(ts.isSpreadAssignment)) {
-        const property = args.properties.find(p => ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name) && ['cmd', 'command'].includes(p.name.text));
-        if (property && ts.isPropertyAssignment(property)) {
-          const value = literal(property.initializer);
-          hints.push(typeof value === 'string' ? compact(value, 120) : `cmd: ${compact(property.initializer.getText(tree), 120)}`);
+  const visit = (node: Node): void => {
+    if (FUNCTIONS.has(node.type) || isMethod(node)) return;
+    if (node.type === 'CallExpression' && toolsMember(node.callee) && !node.callee.computed && node.callee.property.name === 'exec_command') {
+      const args: Node | undefined = node.arguments[0];
+      if (args?.type === 'ObjectExpression' && !args.properties.some((p: Node) => p.type === 'SpreadElement')) {
+        const property = (args.properties as Node[]).find(p => plainProperty(p) && ['cmd', 'command'].includes(keyName(p.key) ?? ''));
+        if (property) {
+          const value = literal(property.value);
+          hints.push(typeof value === 'string' ? compact(value, 120) : `cmd: ${compact(source.slice(property.value.start, property.value.end), 120)}`);
         }
       }
     }
-    ts.forEachChild(node, visit);
+    children(node).forEach(visit);
   };
   visit(tree);
   return hints.length ? hints.slice(0, 3).map(hint => `[${hint}]`).join(' ') : undefined;
 }
 
+const BRANCHES = new Set(['ConditionalExpression', 'IfStatement', 'ForStatement', 'ForInStatement', 'ForOfStatement', 'WhileStatement', 'DoWhileStatement',
+  'SwitchStatement', 'TryStatement', 'WithStatement', 'ThrowStatement', 'ReturnStatement']);
+
 /** Traverse only eager, non-conditional expressions in top-level statements. */
 function wrapperActions(source: string, decode = toolActions): Atom[] {
   if (!source.trim() || source.length > 256_000) return [unresolved()];
-  const tree = ts.createSourceFile('recorded-input.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const diagnostics = (tree as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }).parseDiagnostics;
-  if (diagnostics.length || shadowsTools(tree)) return [unresolved()];
+  const tree = parseScript(source);
+  if (!tree || shadowsTools(tree)) return [unresolved()];
   const result: Atom[] = [];
   const unknown = (): void => { result.push(unresolved()); };
-  const visit = (node: ts.Node): void => {
-    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+  const visit = (node: Node): void => {
+    // A function or a method body runs later, if at all; a branch may not run.
+    if (FUNCTIONS.has(node.type) || isMethod(node) || BRANCHES.has(node.type)) {
       if (referencesTools(node)) unknown();
       return;
     }
-    if (ts.isConditionalExpression(node) || ts.isIfStatement(node) || ts.isIterationStatement(node, false) || ts.isSwitchStatement(node) || ts.isTryStatement(node) || ts.isWithStatement(node) || ts.isThrowStatement(node) || ts.isReturnStatement(node)) {
-      if (referencesTools(node)) unknown();
-      return;
-    }
-    if (ts.isBinaryExpression(node) && [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind)) {
+    if (node.type === 'LogicalExpression') {
       visit(node.left);
       if (referencesTools(node.right)) unknown();
       return;
     }
-    if (ts.isCallExpression(node)) {
-      const expression = node.expression;
-      if ((ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) && ts.isIdentifier(expression.expression) && expression.expression.text === 'tools') {
-        const name = ts.isPropertyAccessExpression(expression) ? expression.name.text : literal(expression.argumentExpression);
-        if (typeof name !== 'string' || node.questionDotToken || expression.questionDotToken) { unknown(); return; }
+    if (node.type === 'CallExpression') {
+      const callee: Node = node.callee;
+      if (toolsMember(callee)) {
+        const name = callee.computed ? literal(callee.property) : callee.property.name;
+        if (typeof name !== 'string' || node.optional || callee.optional) { unknown(); return; }
         // Evaluate argument calls before the outer call, matching source evaluation order.
         node.arguments.forEach(visit);
         result.push(...decode(name, literal(node.arguments[0])));
         return;
       }
-      if (node.questionDotToken) { if (referencesTools(node)) unknown(); return; }
+      if (node.optional) { if (referencesTools(node)) unknown(); return; }
     }
-    ts.forEachChild(node, visit);
+    children(node).forEach(visit);
   };
-  tree.statements.forEach(visit);
+  (tree.body as Node[]).forEach(visit);
   return result.length ? result : [unresolved()];
 }
 
