@@ -55,7 +55,8 @@ export function claudePlugins(run: Runner, source: string, ids: string[], report
   const before = new Set((json(run, 'claude', ['plugin', 'list', '--json']) ?? []).map((item: any) => item.id));
   for (const id of OLD.plugins) if (before.has(id)) { run('claude', ['plugin', 'uninstall', id]); report.ok(`Claude Code：移除旧插件 ${id}`); }
   for (const name of OLD.marketplaces) if (markets.some((item: any) => item.name === name)) run('claude', ['plugin', 'marketplace', 'remove', name]);
-  const market = markets.some((item: any) => item.name === MARKETPLACE)
+  const now = json(run, 'claude', ['plugin', 'marketplace', 'list', '--json']) ?? [];
+  const market = now.some((item: any) => item.name === MARKETPLACE)
     ? run('claude', ['plugin', 'marketplace', 'update', MARKETPLACE]) : run('claude', ['plugin', 'marketplace', 'add', source]);
   if (!market.ok) { report.fail('Claude Code 插件市场', lastLine(market.out)); return false; }
   const installed = new Set((json(run, 'claude', ['plugin', 'list', '--json']) ?? []).map((item: any) => item.id));
@@ -73,10 +74,11 @@ export function codexPlugins(run: Runner, source: string, ids: string[], report:
   const markets = json(run, 'codex', ['plugin', 'marketplace', 'list', '--json']);
   if (!markets) { report.fail('Codex', '没有找到 codex 命令，跳过'); return false; }
   // `codex plugin remove` reports success even for a plugin that is not there: run it, do not report it.
-  // codex plugin remove reports success for a plugin that is not there: no report, just the removal.
   for (const id of OLD.plugins) run('codex', ['plugin', 'remove', id]);
   for (const name of OLD.marketplaces) run('codex', ['plugin', 'marketplace', 'remove', name]);
-  const known = (markets.marketplaces ?? []).some((item: any) => item.name === MARKETPLACE);
+  // Listed again: Codex names a marketplace by its manifest, so one added under an earlier name
+  // read as this one until it was removed just now.
+  const known = (json(run, 'codex', ['plugin', 'marketplace', 'list', '--json'])?.marketplaces ?? []).some((item: any) => item.name === MARKETPLACE);
   const market = known ? { ok: true, out: '' } : run('codex', ['plugin', 'marketplace', 'add', source]);
   if (!market.ok) { report.fail('Codex 插件市场', lastLine(market.out)); return false; }
   let all = true;

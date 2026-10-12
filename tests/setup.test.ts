@@ -11,6 +11,8 @@ const SOURCE = resolve(__dirname, '../..');
 function agents(options: { vscode?: string; claude?: boolean; codex?: boolean; kitty?: boolean } = {}) {
   const claude = { markets: [] as string[], plugins: [] as string[] }, codex = { markets: [] as string[], plugins: [] as string[] };
   const calls: string[] = [];
+  // Codex lists a marketplace under the name in its manifest, not the key it was added as.
+  const codexNames: Record<string, string> = {};
   const ok = (out = '') => ({ ok: true, out });
   const run: Runner = (command, args) => {
     calls.push([command.split('/').pop(), ...args].join(' '));
@@ -27,7 +29,7 @@ function agents(options: { vscode?: string; claude?: boolean; codex?: boolean; k
     }
     if (command === 'codex') {
       if (options.codex === false) return { ok: false, out: '', missing: true };
-      if (sub === 'plugin marketplace list --json') return ok(JSON.stringify({ marketplaces: codex.markets.map(name => ({ name })) }));
+      if (sub === 'plugin marketplace list --json') return ok(JSON.stringify({ marketplaces: codex.markets.map(name => ({ name: codexNames[name] ?? name })) }));
       if (sub === 'plugin list --json') return ok(JSON.stringify({ installed: codex.plugins.map(pluginId => ({ pluginId })), available: [] }));
       if (sub.startsWith('plugin marketplace add')) { codex.markets.push('tickbird'); return ok(); }
       if (sub.startsWith('plugin marketplace remove')) { codex.markets = codex.markets.filter(name => name !== args[3]); return ok(); }
@@ -40,7 +42,7 @@ function agents(options: { vscode?: string; claude?: boolean; codex?: boolean; k
     if (command === 'kitty') return options.kitty === false ? { ok: false, out: '', missing: true } : ok('kitty 0.48.2');
     return { ok: false, out: '', missing: true };
   };
-  return { run, calls, claude, codex };
+  return { run, calls, claude, codex, codexNames };
 }
 
 function collect(): Report & { lines: string[] } {
@@ -51,6 +53,17 @@ function collect(): Report & { lines: string[] } {
     info: (text: string) => { lines.push(`· ${text}`); } };
   return report;
 }
+
+test('the earlier names go: their plugins and marketplace, even one Codex lists under the new name', () => {
+  const machine = agents();
+  machine.claude.markets.push('agent-sidecar'); machine.claude.plugins.push('sidecar-state@agent-sidecar', 'sidecar-split@agent-sidecar');
+  // Added as agent-sidecar from this checkout, whose manifest now says tickbird.
+  machine.codex.markets.push('agent-sidecar'); machine.codexNames['agent-sidecar'] = 'tickbird'; machine.codex.plugins.push('sidecar-state@agent-sidecar');
+  assert.equal(claudePlugins(machine.run, SOURCE, [STATE, SPLIT], collect()), true);
+  assert.equal(codexPlugins(machine.run, SOURCE, [STATE, SPLIT], collect()), true);
+  assert.deepEqual(machine.claude, { markets: ['tickbird'], plugins: [STATE, SPLIT] });
+  assert.deepEqual(machine.codex, { markets: ['tickbird'], plugins: [STATE, SPLIT] });
+});
 
 test('both plugins in both agents: installed the first time, brought up to date after', () => {
   const machine = agents();
