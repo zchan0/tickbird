@@ -29,7 +29,7 @@ export interface Capabilities {
 /** Symbols the views draw, and what replaces each one when it is not one cell wide. */
 export const SYMBOLS: Readonly<Record<string, string>> = {
   '●': '*', '✻': '*', '┃': '|', '…': '...', '─': '-', '⏸': '||', '▌': '|', '›': '>', '‹': '<', '│': '|', '✓': 'v', '❯': '>', '→': '>',
-  // A call still running turns in its tree cell; a plain line turns where braille is not one cell.
+  // The running turn's spinner, at its end; a plain line turns where braille is not one cell.
   '⠋': '|', '⠙': '/', '⠹': '-', '⠸': '\\', '⠼': '|', '⠴': '/', '⠦': '-', '⠧': '\\', '⠇': '|', '⠏': '/',
   '☐': '[ ]', '☑': '[x]', '┌': '+', '┬': '+', '┐': '+', '├': '+', '┼': '+', '┤': '+', '└': '+', '┴': '+', '┘': '+', '┆': ':', '▸': '>', '▾': 'v', '⏎': '<', '≡': '=', '±': '~',
 };

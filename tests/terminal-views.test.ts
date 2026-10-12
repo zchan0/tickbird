@@ -227,14 +227,17 @@ test('a long call label wraps to two lines at most, the second under the tree', 
   assert.match(lines[0], /^  └ one two/);
   assert.match(lines[1].trimEnd(), /^ {4}\S.*…$/);
 });
-test('the running turn shows no agent word or clock and no end; a call still out is marked', () => {
+test('the running turn shows no agent word or clock and no end; one spinner at its end, a call still out drawn as any other', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]));
   assert.equal(model.status.kind, 'running');
   const body = turnBody(ctxOf(model, 1));
   const lines = text(body);
-  assert.equal(lines.at(-2)!.trimEnd(), '  Search');
-  // A call still out turns in its tree cell, in gold; nothing at its end.
-  assert.match(lines.at(-1)!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Search for reversed assertions *$/);
+  // The call still out is on its branch as any other; the spinner turns once, in gold, at the turn's end.
+  const call = lines.findIndex(line => line.includes('Search for reversed assertions'));
+  assert.equal(lines[call - 1].trimEnd(), '  Search');
+  assert.match(lines[call], /^  └ Search for reversed assertions *$/);
+  assert.match(lines.at(-1)!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] *$/);
+  assert.equal(lines.filter(line => /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(line)).length, 1);
   assert.equal(spans(body.at(-1)!).find(span => /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/.test(span.text))?.style?.fg, 'yellow');
   assert.ok(!lines.some(line => line.includes('答复')));
   const header = text(headerLines(ctxOf(model, 1)));
@@ -264,7 +267,10 @@ test('waiting for an approval replaces the status line, marks the call and chang
   const groups = model.groups, latest = turnView(groups.at(-1)!, true, 'claude');
   assert.equal(sessionStatus(latest, model.extras, model.now, { busy: true, state: 'busy' }).kind, 'running');
   assert.equal(sessionStatus(latest, model.extras, model.now, { busy: true, state: 'waiting' }).kind, 'waiting');
-  assert.equal(windowTitle(model), '⏸ 等你批准 — Sidecar · Claude Code');
+  // The tab reads the session's name, as the agent's own pane does; before it has one, the agent's.
+  assert.equal(windowTitle(model), '⏸ 先看看测试为什么失败，再修好它');
+  const { titleSource: _, ...unnamed } = model.session;
+  assert.equal(windowTitle({ ...model, session: unnamed }), '⏸ Claude Code');
 });
 
 test('the turn\'s changes fold to one line and open to a line a file; a file a script changed has no counts', () => {
@@ -340,14 +346,16 @@ test('a call on screen but not yet in the transcript shows as it will, once', ()
   assert.deepEqual(extras.calls?.map(call => call.input.description), ['Run the regression test']);
   const lines = text(turnBody(ctxOf(modelOf(session, { extras, now: Date.parse(at(24)) }), 1)));
   assert.equal(lines.filter(line => line.includes('Search for reversed assertions')).length, 1, lines.join('\n'));
-  assert.match(lines.find(line => line.includes('Run the regression test'))!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Run the regression test *$/);
+  assert.match(lines.find(line => line.includes('Run the regression test'))!, /^  └ Run the regression test *$/);
 });
 
 test('text on screen but not yet in the transcript shows as the words will, so nothing changes when the record arrives', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]), { extras: { draft: '找到 3 处写反的断言，接下来逐个修正。' } });
   const lines = turnBody(ctxOf(model, 1));
-  const draft = lines.at(-1)!;
+  // Last of what was said, then the turn's spinner under it.
+  const draft = lines.filter(line => plainText(line).trim()).at(-2)!;
   assert.equal(plainText(draft), '  找到 3 处写反的断言，接下来逐个修正。');
+  assert.match(plainText(lines.at(-1)!), /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
   assert.ok(spans(draft).filter(span => span.text.trim()).every(span => !span.style?.dim && !span.style?.italic));
   // Not on an older turn.
   assert.ok(!text(turnBody(ctxOf(model, 0))).some(line => line.includes('找到 3 处')));

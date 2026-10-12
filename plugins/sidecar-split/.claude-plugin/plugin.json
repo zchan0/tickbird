@@ -1,6 +1,6 @@
 {
   "name": "sidecar-split",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Agent Sidecar 终端版的自动分屏：在 kitty 或 tmux 里启动 Agent 时，在旁边开一栏 Sidecar，显示这个会话的过程。/clear 后同一栏显示新会话，Agent 退出时栏自己关闭。不显示其它界面，不改变 Agent 的行为。",
   "author": {
     "name": "zchan0"

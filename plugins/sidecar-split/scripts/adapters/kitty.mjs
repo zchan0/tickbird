@@ -34,7 +34,8 @@ export function locate(env, { run, which }) {
       const total = windows(`id:${window}`)[0]?.columns;
       const bias = Number.isInteger(total) && total > 0 ? Math.max(10, Math.round(100 * (paneColumns(total) + 3) / total)) : 35;
       const result = at('launch', '--match', `window_id:${window}`, '--type=window', '--location=before', '--next-to', `id:${window}`, '--keep-focus', `--bias=${bias}`,
-        '--var', `sidecar_agent=${tag}`, '--cwd', cwd, '--title', 'Sidecar',
+        // No --title: kitty would hold it over the titles the pane sets, and the tab would read Sidecar.
+        '--var', `sidecar_agent=${tag}`, '--cwd', cwd,
         ...Object.entries(extra).flatMap(([key, value]) => ['--env', `${key}=${value}`]), ...argv);
       return result.status === 0 ? { pane: result.stdout.trim() } : { error: result.stderr || `kitten 退出码 ${result.status}` };
     },

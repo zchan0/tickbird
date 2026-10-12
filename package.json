@@ -3,7 +3,7 @@
   "displayName": "Agent Sidecar",
   "description": "Read-only, project-scoped process evidence beside Codex and Claude Code.",
   "publisher": "zchan0",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "engines": {
     "vscode": "^1.96.0",

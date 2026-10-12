@@ -1382,11 +1382,12 @@ test('only the newest open turn carries live markers: a call still out, or the a
   // From this turn's panel to the next one: turns never nest.
   const panel = (key: string) => html.slice(html.indexOf(`data-turn-panel="turn:${key}"`)).split(/<section class="turn-panel|<\/main>/)[0];
   assert.match(panel('t2'), /data-last-at="2026-09-23T06:24:07.000Z"/);
-  // A call still out turns where its branch would be; the end spinner is there too, and the page shows one at a time.
-  assert.match(panel('t2'), /<button type="button" class="crow node-button"[^>]* data-out [^>]*title="Read · read-out\.ts · 进行中[^"]*"><span class="cbranch" aria-hidden="true"><span class="cspin"><\/span><\/span>/);
+  // A call still out is drawn as any other, its state said only to the screen reader; the one spinner is at the end, shown even while a call runs.
+  assert.match(panel('t2'), /<button type="button" class="crow node-button"[^>]* title="Read · read-out\.ts · 进行中[^"]*"><span class="cbranch" aria-hidden="true"><\/span>/);
+  assert.equal(panel('t2').match(/class="cspin"/g)?.length, 1);
   assert.match(panel('t2'), /<li class="cseg tend live-tail"[^>]*><span class="cbranch"><span class="cspin"><\/span><\/span>/);
-  assert.match(html, /\.chapter-turn:has\(\.crow\[data-out\]:not\(\[data-ask\]\)\) \.live-tail \{ display: none; \}/);
-  assert.ok(!panel('t1').includes('data-last-at') && !panel('t1').includes('live-tail') && !panel('t1').includes('data-out'), 'An older turn is never live');
+  assert.doesNotMatch(html, /:has\(\.crow\[data-out\]/);
+  assert.ok(!panel('t1').includes('data-last-at') && !panel('t1').includes('live-tail'), 'An older turn is never live');
   html = renderSidecar({ projectName: 'project', nonce, session: session([request('q2', 't2'), said('s2', 't2'),
     item({ id: 'end', turnId: 't2', kind: 'notice', title: '回合结束', summary: '', status: 'completed', availability: 'none', detail: undefined, timestamp: at })]) });
   assert.ok(!panel('t2').includes('data-last-at') && !panel('t2').includes('live-tail'), 'The source closed the turn');

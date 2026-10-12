@@ -320,12 +320,10 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
     push([{ text: lead }, { text: names[at], style: TOOL }], []);
     run.forEach((chapterRow, index) => {
       const end = index === run.length - 1;
-      // A call still out turns in its tree cell, in gold; one waiting on you shows ? there. Done, it is the tree again.
-      const out = rowView(chapterRow, live).out;
-      const asking = waitingOn && chapterRow === rows.at(-1);
-      if (out && !asking) { ctx.motion?.turning(); turningDrawn = true; }
-      const branch: Span[] = out
-        ? [{ text: lead }, { text: asking ? '?' : symbol(ctx.caps, spinnerAt(ctx.now)), style: gold(ctx) }, { text: ' ' }]
+      // A call waiting on you shows ? in its tree cell. One still running is drawn as any other: the spinner is the turn's, at its end.
+      const asking = waitingOn && chapterRow === rows.at(-1) && rowView(chapterRow, live).out;
+      const branch: Span[] = asking
+        ? [{ text: lead }, { text: '?', style: gold(ctx) }, { text: ' ' }]
         : [{ text: lead + symbol(ctx.caps, end ? '└' : '├') + ' ', style: DIM }];
       const through: Span = { text: lead + (end ? ' ' : symbol(ctx.caps, '│')) + ' ', style: DIM };
       const shown = wordsOf(chapterRow, ctx.session);
@@ -433,12 +431,10 @@ function answerLines(view: TurnView, ctx: PageContext): Line[] {
 }
 
 /** Set while a page is drawn: a call on it turns. */
-let turningDrawn = false;
-
 /**
  * The end of the turn: waiting on you, no word for a while, or the answer it
- * closed with. While it runs and no call on the page turns, the agent works out
- * its next step: the spinner turns here, where the answer will come.
+ * closed with. While it runs, a call out or the agent working out its next
+ * step, the one spinner turns here, where the answer will come.
  */
 function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
   const status = ctx.status;
@@ -453,7 +449,6 @@ function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
     ];
   }
   if (latest && status.kind === 'running') {
-    if (turningDrawn) return [];
     ctx.motion?.turning();
     return [[lead, { text: symbol(ctx.caps, spinnerAt(ctx.now)), style: gold(ctx) }]];
   }
@@ -505,7 +500,6 @@ export function turnBody(ctx: PageContext): Line[] {
   const view = viewOf(group, latest, ctx.session.provider);
   const waitingOn = latest && ctx.status.kind === 'waiting';
   const going = latest && (ctx.status.kind === 'running' || waitingOn);
-  turningDrawn = false;
   // Only the newest turn, while it runs, moves; anything else drawn is simply there, now and later.
   const motion = ctx.motion;
   if (motion) {

@@ -47,8 +47,9 @@ function callHtml(row: ChapterRow, key: string, session: SessionData, live: bool
       : end?.kind === 'empty' ? '<span class="cnote">no match</span>'
       : end?.kind === 'note' ? `<span class="cnote">${escapeHtml(end.text)}</span>`
       : end?.kind === 'size' ? `<span class="csize">${end.added ? `<span class="cadd">+${end.added}</span>` : ''}${end.removed ? `<span class="cdel">-${end.removed}</span>` : ''}</span>` : '');
-  const out = view.out ? ` data-out${asking ? ' data-ask' : ''}` : '';
-  const copy = `<span class="cbranch" aria-hidden="true">${view.out ? asking ? '?' : '<span class="cspin"></span>' : ''}</span>`
+  // A call waiting on the reader shows ? in its tree cell. One still running is drawn as any other: the spinner is the turn's, at its end.
+  const out = view.out && asking ? ' data-ask' : '';
+  const copy = `<span class="cbranch" aria-hidden="true">${out ? '?' : ''}</span>`
     + `<span class="clabel${words.command ? ' command' : ''}">${escapeHtml(label)}</span>${tail}`;
   const title = [callTool(row, session), label, end?.kind === 'failed' ? `${end.word} ${end.reason}`.trim() : '', view.out || row.running ? '进行中' : '', row.openable ? '' : unavailable(row.items)].filter(Boolean).join(' · ');
   const tool = escapeHtml(callTool(row, session));
@@ -216,9 +217,9 @@ export const chapterStyles = `
   .crow-item::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; border-left: 1px solid var(--hair); }
   .crow-item:last-child::before { bottom: auto; height: .8em; }
   .crow-item::after { content: ""; position: absolute; left: 4px; top: .8em; width: 7px; border-top: 1px solid var(--hair); }
-  .crow-item:has(> .crow[data-out])::after { display: none; }
-  .crow-item:has(> .crow[data-out])::before { top: 1.45em; }
-  .crow-item:last-child:has(> .crow[data-out])::before { display: none; }
+  .crow-item:has(> .crow[data-ask])::after { display: none; }
+  .crow-item:has(> .crow[data-ask])::before { top: 1.45em; }
+  .crow-item:last-child:has(> .crow[data-ask])::before { display: none; }
   .crow { display: flex; align-items: last baseline; gap: 6px; width: 100%; min-width: 0; padding: 0; margin: 0; border: 0; background: transparent; text-align: left; color: var(--ink-3); font: 12px/1.6 var(--mono); }
   .cbranch { position: absolute; left: 0; top: 0; width: 11px; text-align: center; color: var(--spin); font: 700 12px/1.6 var(--mono); }
   .clabel { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
@@ -243,8 +244,6 @@ export const chapterStyles = `
   .live-tail .cquiet:empty { display: none; }
   .turn-panel:not([data-fresh]) .live-tail, .turn-panel[data-idle] .live-tail { display: none; }
   .turn-panel[data-stale] .live-tail .cbranch { display: none; }
-  /* One spinner at a time: while a call turns, the end is empty. */
-  .chapter-turn:has(.crow[data-out]:not([data-ask])) .live-tail { display: none; }
   .awaiting .cwait-what { font-size: 12px; overflow-wrap: anywhere; }
   .awaiting .cwait-what b { font-weight: 700; }
   .awaiting .cnote { font-size: 12px; color: var(--ink-3); }

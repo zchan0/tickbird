@@ -20,7 +20,7 @@ test('waiting for an approval ends the turn with Needs approval, naming the tool
   assert.match(html, /class="cseg tend awaiting"/);
   assert.match(html, /<div class="tlabel" data-tone="yellow">Needs approval<\/div><div class="cwait-what"><b>Write<\/b> · numbers\.txt<\/div>/);
   assert.match(html, /在 Claude Code 里选择批准或拒绝。/);
-  assert.match(html, /data-out data-ask[^>]*><span class="cbranch" aria-hidden="true">\?<\/span>/, 'The call waiting on the reader shows ? where its branch would be');
+  assert.match(html, / data-ask[^>]*><span class="cbranch" aria-hidden="true">\?<\/span>/, 'The call waiting on the reader shows ? where its branch would be');
   assert.ok(!html.includes('live-tail"'), 'No spinner while the agent waits for the reader');
   assert.match(latestHtml({ approval: { tool: 'Bash', summary: 'rm -rf build' } }), /<b>Bash<\/b> · rm -rf build/);
   assert.match(latestHtml({}), /class="cseg tend live-tail"/, 'Without an approval the end spinner stays');

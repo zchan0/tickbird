@@ -532,9 +532,9 @@ export function frame(state: AppState, model: Model): Line[] {
   return withMessage(lines.slice(0, height), state, model);
 }
 
-/** The tab title: who, and whether the agent waits for you. */
+/** The tab title: the session's own name, as the agent's pane shows it, so the tab reads the same
+ * whichever of the two has focus; ⏸ while the agent waits for you. Before the session has a name, the agent's. */
 export function windowTitle(model: Model): string {
-  const who = providerName(model.session.provider);
-  if (model.status.kind === 'waiting') return `⏸ 等你批准 — Sidecar · ${who}`;
-  return `Sidecar — ${who}${model.session.title ? ' · ' + model.session.title : ''}`;
+  const name = model.session.titleSource ? model.session.title : providerName(model.session.provider);
+  return model.status.kind === 'waiting' ? `⏸ ${name}` : name;
 }
