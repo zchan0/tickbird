@@ -4,9 +4,10 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claudeProjectDirectory, discoverSessions, loadSession, sessionKey } from '../packages/core/src/sessions';
+import { tempDir } from './temp';
 
 test('discovery scopes both providers by verified project identity, not newest file or entry point', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'sidecar-discovery-test-'));
+  const root = tempDir('discovery-test');
   try {
     const project = join(root, 'project');
     const codex = join(root, 'codex');
@@ -30,13 +31,13 @@ test('discovery scopes both providers by verified project identity, not newest f
 });
 
 test('missing source directories do not manufacture a session', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'sidecar-empty-test-'));
+  const root = tempDir('empty-test');
   try { assert.equal((await discoverSessions({ projectPath: root, codexRoot: join(root, 'absent'), claudeRoot: join(root, 'absent2') })).candidates.length, 0); }
   finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('explicit Codex subagent logs are excluded while normal forked sessions retain their own identity', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'sidecar-session-granularity-test-'));
+  const root = tempDir('session-granularity-test');
   try {
     const project = join(root, 'project'); const codex = join(root, 'codex');
     await Promise.all([mkdir(project), mkdir(codex)]);

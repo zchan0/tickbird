@@ -11,6 +11,7 @@ import type { SessionState } from '../packages/core/src/session-state';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { tempDir } from './temp';
 
 // This is an in-memory async/control-flow fixture, not a real VS Code host test.
 function deferred<T>() {
@@ -267,7 +268,7 @@ function harness(initialOrientation = 0) {
     };
     if (request === '../../core/src/session-picker') return { createSessionPickerMetadata: () => metadata };
     if (request === '../../core/src/session-state') return { ...sessionStateModule,
-      sessionStateDirectory: () => join(tmpdir(), 'sidecar-no-state-dir'), readSessionStates: async () => sessionStates.list.map(item => ({ ...item })) };
+      sessionStateDirectory: () => join(tmpdir(), 'tickbird-no-state-dir'), readSessionStates: async () => sessionStates.list.map(item => ({ ...item })) };
     return original.call(this, request, ...args);
   };
   let api: ReturnType<typeof import('../packages/vscode/src/extension').activate>;
@@ -832,7 +833,7 @@ test('coverage report links each original action to semantic detail rows without
 });
 
 // A transcript the integration points at must exist before the window follows it.
-const transcript = () => { const file = join(mkdtempSync(join(tmpdir(), 'sidecar-follow-')), 'b.jsonl'); writeFileSync(file, '{}\n'); return file; };
+const transcript = () => { const file = join(tempDir('follow'), 'b.jsonl'); writeFileSync(file, '{}\n'); return file; };
 const liveState = (session: string, extra: Partial<SessionState> = {}): SessionState => ({ provider: session === 'a' ? 'codex' : 'claude', session, transcript: transcript(),
   cwd: '/fixture', agentPid: process.pid, hostPid: process.pid, startedAt: 1, activeAt: 5, phase: 'working', ...extra });
 const tick = () => new Promise(resolve => setImmediate(resolve));

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, readFile, readdir, access } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, readFile, readdir, access } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,7 @@ for (const extension of agentExtensions) {
   Object.assign(extension, { path: latest.path, version: latest.version });
 }
 await access(join(root, 'dist', 'tests', 'host', 'coexistence.js'));
-const runRoot = await mkdtemp(join(tmpdir(), 'sidecar-coexistence-'));
+const runRoot = await mkdtemp(join(tmpdir(), 'tickbird-coexistence-'));
 const userData = join(runRoot, 'user-data');
 const extensions = join(runRoot, 'extensions');
 await Promise.all([mkdir(join(userData, 'User'), { recursive: true }), mkdir(extensions)]);
@@ -63,3 +63,6 @@ await writeFile(artifact, JSON.stringify(result ? { ...result, runRoot, launcher
 }, null, 2) + '\n');
 console.log(JSON.stringify({ passed: result?.passed ?? false, checks: result?.checks?.map(value => ({ name: value.name, passed: value.passed })), artifact }, null, 2));
 process.exitCode = result?.passed ? 0 : 1;
+
+// The run's VS Code profile is about 50 MB; the result above is what is kept. TICKBIRD_KEEP_RUN=1 keeps the run too.
+if (!process.env.TICKBIRD_KEEP_RUN) await rm(runRoot, { recursive: true, force: true });

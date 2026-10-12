@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { SessionState } from '../packages/core/src/session-state';
 import { agentSession, parseWatchArgs, resolveSession } from '../packages/terminal/src/watch';
+import { tempDir } from './temp';
 
 // The plugin is plain ES modules with Node's own modules only; Node loads them with require.
 const pluginDir = resolve(__dirname, '../../plugins/tickbird-split/scripts');
@@ -143,7 +144,7 @@ test('no pane where it would not belong', () => {
 
 // The hook as the agents run it: a separate node process with JSON on stdin.
 test('the hook prints nothing, never fails, and logs what it decided', () => {
-  const home = mkdtempSync(join(tmpdir(), 'tickbird-split-'));
+  const home = tempDir('split');
   const hook = join(pluginDir, 'split.mjs');
   const env = { PATH: process.env.PATH, HOME: process.env.HOME, XDG_STATE_HOME: home, TERM_PROGRAM: 'Apple_Terminal', TICKBIRD_CLI: CLI.TICKBIRD_CLI };
   for (const input of [JSON.stringify(START), 'not json', '']) {
@@ -156,7 +157,7 @@ test('the hook prints nothing, never fails, and logs what it decided', () => {
   assert.equal(log.length, 1, 'Only the session start is logged');
   assert.match(log[0], /claude s-1 startup · /);
   // An unwritable log is not the agent's problem either.
-  const blocked = mkdtempSync(join(tmpdir(), 'tickbird-split-'));
+  const blocked = tempDir('split');
   writeFileSync(join(blocked, 'tickbird'), 'a file where a directory should be');
   const result = spawnSync(process.execPath, [hook, 'claude', '1'], { input: JSON.stringify(START), env: { ...env, XDG_STATE_HOME: blocked }, encoding: 'utf8' });
   assert.equal(result.status, 0);
@@ -255,7 +256,7 @@ test('Codex through its server: the pane goes beside the front, in the front’s
     return terminal.tools.run(command, args);
   } };
   // The server was started from another kitty window long ago: its variables must not be used.
-  const stale = { KITTY_WINDOW_ID: '59', KITTY_LISTEN_ON: 'unix:/tmp/old', XDG_STATE_HOME: mkdtempSync(join(tmpdir(), 'tickbird-state-')) };
+  const stale = { KITTY_WINDOW_ID: '59', KITTY_LISTEN_ON: 'unix:/tmp/old', XDG_STATE_HOME: tempDir('state') };
   const outcome = split.handle('codex', SERVER, START, stale, tools);
   assert.match(outcome!, /^tmux：在 %3 旁开栏 %7（Agent 501，Codex 前台，后台 900）/);
   const splitWindow = commands.find(call => call.includes('split-window'))!;
@@ -289,7 +290,7 @@ test('tickbird-state records the front as the Codex session’s agent, with its 
 });
 
 test('the pane opens a session from the transcript its state names, wherever the agent keeps it', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'sidecar-codex-home-'));
+  const home = tempDir('codex-home');
   const transcript = join(home, 'rollout-x.jsonl');
   writeFileSync(transcript, JSON.stringify({ type: 'session_meta', payload: { id: 'x-1', cwd: '/work/project' } }) + '\n');
   const state: SessionState = { provider: 'codex', session: 'x-1', transcript, cwd: '/work/project', agentPid: AGENT, hostPid: 1, startedAt: 1, activeAt: 1, phase: 'idle' };

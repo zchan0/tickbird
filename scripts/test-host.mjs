@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 // TICKBIRD_EXTENSION_PATH runs the same checks against another build, such as the packaged build/vsix.
 const extensionPath = process.env.TICKBIRD_EXTENSION_PATH || root;
-const runRoot = await mkdtemp(join(tmpdir(), 'sidecar-product-host-'));
+const runRoot = await mkdtemp(join(tmpdir(), 'tickbird-product-host-'));
 const fixture = join(runRoot, 'workspace');
 const userData = join(runRoot, 'user-data');
 const extensions = join(runRoot, 'extensions');
@@ -66,3 +66,6 @@ if (project) {
     artifact: '.test-artifacts/host-latest.json' }, null, 2));
 }
 process.exitCode = project?.passed && empty?.passed ? 0 : 1;
+
+// The run's VS Code profile is about 50 MB; the result above is what is kept. TICKBIRD_KEEP_RUN=1 keeps the run too.
+if (!process.env.TICKBIRD_KEEP_RUN) await rm(runRoot, { recursive: true, force: true });

@@ -6,10 +6,11 @@ import { join } from 'node:path';
 import type { Provider, SessionCandidate } from '../packages/core/src/model';
 import { JsonlFramer, SessionRecordCursor, SourceChangedError, type RecordFrame } from '../packages/core/src/record-stream';
 import { observeRecord } from '../packages/core/src/record-observation';
+import { tempDir } from './temp';
 
 const jsonl = (value: unknown) => JSON.stringify(value) + '\n';
 async function fixture(t: { after(fn: () => Promise<void>): void }, provider: Provider = 'codex', suffix = '') {
-  const root = await mkdtemp(join(tmpdir(), 'sidecar-record-stream-test-'));
+  const root = tempDir('record-stream-test');
   t.after(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project'); await mkdir(project);
   const file = join(root, 'session.jsonl');
@@ -206,7 +207,7 @@ test('unknown and hostile event-type shapes cannot select inherited names or lea
 });
 
 test('a session whose first message carries a pasted image (a row past 128 KB) still opens', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'sidecar-record-stream-test-'));
+  const root = tempDir('record-stream-test');
   t.after(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project'); await mkdir(project);
   const file = join(root, 'session.jsonl');

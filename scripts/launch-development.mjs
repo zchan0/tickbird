@@ -8,7 +8,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 // The folder to open; defaults to this checkout. A worktree has no sessions of its own,
 // so `npm run dev -- <project>` opens the project whose sessions to read.
 const folder = process.argv[2] ?? root;
-const runRoot = await mkdtemp(join(tmpdir(), 'sidecar-development-'));
+const runRoot = await mkdtemp(join(tmpdir(), 'tickbird-development-'));
 const userData = join(runRoot, 'user-data');
 const extensions = join(runRoot, 'extensions');
 await Promise.all([mkdir(join(userData, 'User'), { recursive: true }), mkdir(extensions)]);

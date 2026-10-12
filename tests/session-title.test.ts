@@ -6,11 +6,12 @@ import { join } from 'node:path';
 import { applyCodexSessionTitle, explicitSessionTitle } from '../packages/core/src/session-title';
 import { loadSession } from '../packages/core/src/sessions';
 import type { SessionData } from '../packages/core/src/model';
+import { tempDir } from './temp';
 
 const session = (): SessionData => ({id:'fixture-codex',provider:'codex',projectPath:'/fixture',title:'First request fallback',titleSource:'request',items:[],coverage:[],warnings:[]});
 const jsonl = (records: unknown[]) => records.map(record => JSON.stringify(record)).join('\n') + '\n';
 async function fixture(t: {after: (fn: () => Promise<void>) => void}) {
-  const directory = await mkdtemp(join(tmpdir(), 'sidecar-session-title-'));
+  const directory = tempDir('session-title');
   t.after(() => rm(directory, {recursive:true,force:true}));
   return {directory,index:join(directory,'session_index.jsonl')};
 }

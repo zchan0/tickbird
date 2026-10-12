@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, readdirSync, statSync, utimesSync, writeFile
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { awaitingApproval, CALL_PENDING_MS, currentSession, DRAFT_SUPERSEDED_MS, foldSessionState, pendingCalls, pendingDraft, readSessionStates, sessionStateDirectory, type SessionStateCache } from '../packages/core/src/session-state';
+import { tempDir } from './temp';
 
 const live = () => true;
 const lines = (...records: object[]) => records.map(record => JSON.stringify({ v: 1, ...record })).join('\n') + '\n';
@@ -73,7 +74,7 @@ test('an approval is over once the transcript records anything after it', () => 
 });
 
 test('a window follows its own most recently active live session', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'tickbird-state-'));
+  const directory = tempDir('state');
   const write = (name: string, ...records: object[]) => writeFileSync(join(directory, name), lines(...records));
   write('claude-a.jsonl', start(1, { session: 'a', hostPid: 100 }), { t: 5, e: 'prompt' });
   write('codex-b.jsonl', start(2, { provider: 'codex', session: 'b', hostPid: 100 }), { t: 8, e: 'prompt' });
@@ -95,7 +96,7 @@ function run(provider: string, input: object, env: NodeJS.ProcessEnv, pid = proc
 }
 
 test('the hook appends one silent line per event it records, and records the agent’s window', () => {
-  const home = mkdtempSync(join(tmpdir(), 'sidecar-hook-'));
+  const home = tempDir('hook');
   const env = { XDG_STATE_HOME: home, KITTY_WINDOW_ID: '19', KITTY_LISTEN_ON: 'unix:/tmp/kitty-1' };
   const events = [
     { hook_event_name: 'SessionStart', session_id: 'abc-1', transcript_path: '/t.jsonl', cwd: '/p', source: 'startup' },
@@ -156,7 +157,7 @@ test('the plugins hook only what the transcript lacks or has too late', () => {
 });
 
 test('a session’s latest activity is its transcript’s last write', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'tickbird-state-'));
+  const directory = tempDir('state');
   const transcript = join(directory, 'transcript.jsonl');
   writeFileSync(transcript, '{}\n');
   utimesSync(transcript, new Date(50_000), new Date(50_000));
@@ -168,7 +169,7 @@ test('a session’s latest activity is its transcript’s last write', async () 
 });
 
 test('the hook ignores what it cannot place and never fails the agent', () => {
-  const home = mkdtempSync(join(tmpdir(), 'sidecar-hook-'));
+  const home = tempDir('hook');
   const directory = sessionStateDirectory({ XDG_STATE_HOME: home });
   for (const [provider, input] of [
     ['claude', { hook_event_name: 'SessionStart', session_id: '../../etc/passwd' }],
@@ -185,7 +186,7 @@ test('the hook ignores what it cannot place and never fails the agent', () => {
 });
 
 test('only a start opens a session file; an end without a start leaves nothing', () => {
-  const home = mkdtempSync(join(tmpdir(), 'sidecar-hook-'));
+  const home = tempDir('hook');
   const directory = sessionStateDirectory({ XDG_STATE_HOME: home });
   // Codex quits before its first message: SessionEnd with no SessionStart.
   run('codex', { hook_event_name: 'SessionEnd', session_id: 'never-started', reason: 'other' }, { XDG_STATE_HOME: home });
@@ -194,7 +195,7 @@ test('only a start opens a session file; an end without a start leaves nothing',
 });
 
 test('a new session prunes week-old files of dead agents and keeps live ones', () => {
-  const home = mkdtempSync(join(tmpdir(), 'sidecar-hook-'));
+  const home = tempDir('hook');
   const directory = sessionStateDirectory({ XDG_STATE_HOME: home });
   run('claude', { hook_event_name: 'SessionStart', session_id: 'first' }, { XDG_STATE_HOME: home });
   const old = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000;
@@ -220,7 +221,7 @@ test('a draft shows until the transcript holds the same words, and never once id
 });
 
 test('a cached read skips unchanged files but still notices a dead agent', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'tickbird-state-'));
+  const directory = tempDir('state');
   writeFileSync(join(directory, 'claude-a.jsonl'), lines(start(1, { session: 'a', agentPid: 4242 }), { t: 2, e: 'prompt' }));
   const cache: SessionStateCache = new Map();
   let alive = true;

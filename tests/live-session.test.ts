@@ -8,13 +8,14 @@ import { openLiveSession, type LiveUpdate } from '../packages/core/src/live-sess
 import type { Provider, SessionCandidate } from '../packages/core/src/model';
 import { parseCodex } from '../packages/core/src/codex';
 import { parseClaude } from '../packages/core/src/claude';
+import { tempDir } from './temp';
 
 const jsonl = (records: unknown[]) => records.map(value => JSON.stringify(value)).join('\n') + '\n';
 const event = (payload: unknown) => ({ type: 'event_msg', payload });
 const response = (payload: unknown) => ({ type: 'response_item', payload });
 const message = (text: string) => response({ type: 'message', role: 'assistant', phase: 'commentary', content: [{ type: 'output_text', text }] });
 async function fixture(t: { after(fn: () => Promise<void>): void }, provider: Provider = 'codex') {
-  const root = await mkdtemp(join(tmpdir(), 'sidecar-live-test-'));
+  const root = tempDir('live-test');
   t.after(() => rm(root, { recursive: true, force: true }));
   const projectPath = join(root, 'project'); await mkdir(projectPath);
   const file = join(root, 'session.jsonl');
@@ -94,7 +95,7 @@ test('automatic polling works and closing cancels subsequent delivery', async t 
 });
 
 test('a write to the source is read at once, without waiting for the poll interval', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'sidecar-live-watch-'));
+  const root = tempDir('live-watch');
   t.after(() => rm(root, { recursive: true, force: true }));
   const projectPath = join(root, 'project'); await mkdir(projectPath);
   const file = join(root, 'session.jsonl');

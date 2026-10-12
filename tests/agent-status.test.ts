@@ -4,9 +4,10 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claudeRunState, claudeSessionsDirectory } from '../packages/core/src/agent-status';
+import { tempDir } from './temp';
 
 test('Claude Code\'s own busy/idle is read for the attached session only, and only from a living process', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'sidecar-claude-home-'));
+  const home = tempDir('claude-home');
   const transcript = join(home, 'projects', '-fixture', 'session-a.jsonl');
   assert.equal(claudeSessionsDirectory(transcript), join(home, 'sessions'));
   const read = claudeRunState(transcript, 'session-a');

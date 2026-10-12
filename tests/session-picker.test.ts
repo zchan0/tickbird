@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionCandidate } from '../packages/core/src/model';
 import { createSessionPickerMetadata } from '../packages/core/src/session-picker';
+import { tempDir } from './temp';
 
 const jsonl = (records: unknown[]) => records.map(record => JSON.stringify(record)).join('\n') + '\n';
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
-  const directory = await mkdtemp(join(tmpdir(), 'sidecar-picker-metadata-'));
+  const directory = tempDir('picker-metadata');
   t.after(() => rm(directory, { recursive: true, force: true }));
   const project = join(directory, 'project');
   await mkdir(project);

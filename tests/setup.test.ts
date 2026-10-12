@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { claudePlugins, codexPlugins, kitty, kittyRemote, KITTY_LINES, olderThan, setup, uninstall, SPLIT, STATE, type Report, type Runner } from '../packages/terminal/src/setup';
+import { tempDir } from './temp';
 
 const SOURCE = resolve(__dirname, '../..');
 
@@ -96,7 +97,7 @@ test('kitty.conf is read as kitty reads it: the last setting wins', () => {
 });
 
 test('kitty.conf changes only when the reader says yes, backed up first, and only once', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'sidecar-kitty-'));
+  const dir = tempDir('kitty');
   const file = join(dir, 'kitty.conf');
   writeFileSync(file, 'font_size 13\nenabled_layouts splits,stack');
   const env = { KITTY_CONFIG_DIRECTORY: dir };
@@ -124,8 +125,8 @@ test('kitty.conf changes only when the reader says yes, backed up first, and onl
 });
 
 test('setup twice leaves the same machine, and says what is left to do', async () => {
-  const data = mkdtempSync(join(tmpdir(), 'sidecar-data-'));
-  const kittyDir = mkdtempSync(join(tmpdir(), 'sidecar-kitty-'));
+  const data = tempDir('data');
+  const kittyDir = tempDir('kitty');
   writeFileSync(join(data, 'install.json'), JSON.stringify({ source: SOURCE, version: '0.4.0' }));
   const machine = agents({ vscode: '0.2.0' });
   const options = { run: machine.run, paths: { data, bin: join(data, 'bin') }, env: { KITTY_CONFIG_DIRECTORY: kittyDir } };
@@ -146,7 +147,7 @@ test('setup twice leaves the same machine, and says what is left to do', async (
 });
 
 test('setup leaves kitty alone where kitty is not installed', async () => {
-  const data = mkdtempSync(join(tmpdir(), 'sidecar-data-'));
+  const data = tempDir('data');
   writeFileSync(join(data, 'install.json'), JSON.stringify({ source: SOURCE, version: '0.4.0' }));
   const report = collect();
   let asked = false;
@@ -159,7 +160,7 @@ test('setup leaves kitty alone where kitty is not installed', async () => {
 
 test('uninstall removes the terminal version and keeps tickbird-state while VS Code uses it', async () => {
   for (const vscode of ['0.4.0', undefined]) {
-    const data = mkdtempSync(join(tmpdir(), 'sidecar-data-'));
+    const data = tempDir('data');
     const bin = join(data, 'bin');
     mkdirSync(bin);
     writeFileSync(join(bin, 'tickbird'), '#!/bin/sh\n');
