@@ -15,7 +15,13 @@ export type Runner = (command: string, args: string[]) => RunResult;
 export const MARKETPLACE = 'tickbird';
 export const STATE = `tickbird-state@${MARKETPLACE}`, SPLIT = `tickbird-split@${MARKETPLACE}`;
 export const EXTENSION = 'zchan0.tickbird';
-const CODE = '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+/**
+ * VS Code's command: TICKBIRD_CODE_CLI when set, the app's own on a Mac where
+ * it is installed, otherwise `code` on the PATH (what VS Code's "Install 'code'
+ * command in PATH" puts there, and what Linux and Windows installs provide).
+ */
+export const codeCli = (env: NodeJS.ProcessEnv = process.env, mac = '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code'): string =>
+  env.TICKBIRD_CODE_CLI || (existsSync(mac) ? mac : 'code');
 // Names used before: agent-sidecar-local until 2026-10-05, Agent Sidecar until 2026-10-12.
 // Removed on sight so a reinstall leaves one copy.
 export const OLD = {
@@ -92,7 +98,7 @@ export function codexPlugins(run: Runner, source: string, ids: string[], report:
 
 /** The VS Code extension's version, or undefined when it is not installed (or VS Code is not there). */
 export function vscodeExtension(run: Runner, env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const result = run(env.TICKBIRD_CODE_CLI || CODE, ['--list-extensions', '--show-versions']);
+  const result = run(codeCli(env), ['--list-extensions', '--show-versions']);
   if (!result.ok) return undefined;
   return result.out.split('\n').map(line => line.trim()).find(line => line.toLowerCase().startsWith(EXTENSION + '@'))?.split('@')[1];
 }

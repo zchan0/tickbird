@@ -1,0 +1,36 @@
+# A tag v<version> makes a GitHub release of that version: the tag must name
+# the version in package.json (npm run set-version), the tests must pass, and
+# the release carries the VS Code extension and the terminal program.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: The tag names package.json's version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME, package.json $version: run npm run set-version first"; exit 1; }
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run package:vscode
+      - run: npm run package:terminal
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          gh release create "$GITHUB_REF_NAME" "build/tickbird-$version.vsix" build/tickbird-cli.cjs \
+            --title "Tickbird $version" --notes "VS Code: code --install-extension tickbird-$version.vsix. The terminal version and the agents' plugins install from the repository: see README, 安装."

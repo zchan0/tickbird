@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, writeFile, readFile, readdir, access } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -36,7 +37,9 @@ await writeFile(join(userData, 'User', 'settings.json'), JSON.stringify({
   'chatgpt.openOnStartup': false, 'claudeCode.useTerminal': false,
 }));
 const resultFile = join(runRoot, 'result.json');
-const code = process.env.TICKBIRD_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+// VS Code's command: TICKBIRD_CODE_CLI, the Mac app's own, or `code` on the PATH.
+const macCode = '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+const code = process.env.TICKBIRD_CODE_CLI || (existsSync(macCode) ? macCode : 'code');
 const args = ['--new-window', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`, `--extensions-dir=${extensions}`,
   `--extensionDevelopmentPath=${root}`, ...agentExtensions.map(extension => `--extensionDevelopmentPath=${extension.path}`),
   `--extensionTestsPath=${join(root, 'dist/tests/host/coexistence.js')}`, root];

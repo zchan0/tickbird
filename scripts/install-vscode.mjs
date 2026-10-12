@@ -5,6 +5,7 @@
 // `--package-only` stops after step 1, `--extension-only` after step 2 (the terminal
 // install runs it, then installs the plugins itself). Runs after `npm run build`.
 // Nothing is published anywhere.
+import { existsSync } from 'node:fs';
 import { build } from 'esbuild';
 import { spawnSync } from 'node:child_process';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -41,7 +42,9 @@ report(packaged.ok, '打包 .vsix', packaged.ok ? vsix.replace(root + '/', '') :
 if (!packaged.ok || packageOnly) process.exit(packaged.ok ? 0 : 1);
 
 // 2. VS Code.
-const code = process.env.TICKBIRD_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+// VS Code's command: TICKBIRD_CODE_CLI, the Mac app's own, or `code` on the PATH.
+const macCode = '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+const code = process.env.TICKBIRD_CODE_CLI || (existsSync(macCode) ? macCode : 'code');
 // Earlier names of this extension: one copy stays installed.
 const { OLD } = createRequire(import.meta.url)(join(root, 'dist/packages/terminal/src/setup.js'));
 const listed = run(code, ['--list-extensions']).out.split('\n').map(line => line.trim().toLowerCase());

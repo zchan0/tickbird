@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -37,7 +38,9 @@ await writeFile(join(claudeProject, 'fixture.jsonl'), jsonl([
   { type: 'assistant', uuid: 'cl-call', sessionId: 'cl-fixture', cwd: fixture, message: { id: 'cl-msg', role: 'assistant', content: [{ type: 'tool_use', id: 'cl-tool', name: 'Bash', input: { command: 'fixture only, never executed' } }] } },
   { type: 'user', uuid: 'cl-output', sessionId: 'cl-fixture', cwd: fixture, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'cl-tool', is_error: false, content: 'Fixture completed. One known result.' }] } }
 ]));
-const code = process.env.TICKBIRD_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+// VS Code's command: TICKBIRD_CODE_CLI, the Mac app's own, or `code` on the PATH.
+const macCode = '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+const code = process.env.TICKBIRD_CODE_CLI || (existsSync(macCode) ? macCode : 'code');
 // Each run opens its own window: the project fixture, then a window with no folder.
 async function launch(name, tests, folder) {
   const resultFile = join(runRoot, `result-${name}.json`);

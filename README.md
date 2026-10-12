@@ -2,11 +2,44 @@
 
 VS Code 侧边栏里的只读过程观察器：读取当前项目的 Claude Code / Codex 本地会话记录，把 Agent 每一轮做了什么整理成章节，证据在编辑器区打开。原 Agent 负责对话和执行；Tickbird 不发送消息，也不执行记录里的任何命令。
 
-状态：私有使用中（0.5.0），未公开发布。现状、已知问题与待办见 [docs/STATUS.md](./docs/STATUS.md)，产品愿景与原则见 [docs/VISION.md](./docs/VISION.md)，终端版设计见 [docs/TERMINAL_DESIGN.md](./docs/TERMINAL_DESIGN.md)。
+状态：私有使用中（0.6.0），未公开发布。现状、已知问题与待办见 [docs/STATUS.md](./docs/STATUS.md)，产品愿景与原则见 [docs/VISION.md](./docs/VISION.md)，终端版设计见 [docs/TERMINAL_DESIGN.md](./docs/TERMINAL_DESIGN.md)。
 
-## 运行
+## 安装
 
-需要 Node.js 22+、npm、本机 VS Code，以及当前项目已有的 Claude Code 或 Codex 会话记录。开发验证平台为 macOS，其他平台尚未实测。
+需要 Node.js 22+ 和 npm，以及要接入的 Agent：Claude Code、Codex，有一个就行。VS Code 版需要 VS Code，安装脚本用 Mac 上 VS Code 自带的 `code` 命令，没有就用 PATH 里的 `code`（也可以用 `TICKBIRD_CODE_CLI` 指定）。终端版需要 kitty 或 tmux。开发验证平台为 macOS，其他平台尚未实测。
+
+```sh
+git clone git@github.com:zchan0/tickbird.git
+cd tickbird
+npm ci --ignore-scripts
+npm run install:all
+```
+
+`install:all` 装上 VS Code 版、终端版，以及两者在 Claude Code 和 Codex 里的接入。只要其中一个时：
+
+| 命令 | 装什么 |
+| --- | --- |
+| `npm run install:vscode` | VS Code 扩展（打成 `build/tickbird-<版本>.vsix` 后用 `code --install-extension` 安装），以及插件 `tickbird-state` |
+| `npm run install:terminal` | 终端版：程序 `~/.local/share/tickbird/cli.cjs` 和命令 `~/.local/bin/tickbird`，插件 `tickbird-state` 与 `tickbird-split`；VS Code 版已装且比它旧时一起更新 |
+
+插件装在 Agent 自己的插件管理里：本仓库登记为 Claude Code（`.claude-plugin/marketplace.json`）和 Codex（`.agents/plugins/marketplace.json`）的本地插件市场。
+
+- `tickbird-state`：一组只写会话状态的 hook。VS Code 版靠它自动跟随会话、在 Agent 等你批准时显示 Needs approval，终端版也用它。
+- `tickbird-split`：只属于终端版，在 kitty、tmux 里启动 Agent 时自动在旁边开一栏。不想自动开栏，在 Agent 的插件管理里停用它。
+
+装完还要做的：
+
+1. **Codex**：第一次启动会提示 **Hooks need review**，选 Trust all（或执行 `/hooks`，按 `t`）。不信任时 Codex 静默跳过这些 hook。
+2. **kitty**：要开启远程控制。安装时会说明要加的两行，在终端里运行时会问你要不要替你备份 kitty.conf 并加上；加上后要完全退出 kitty 再打开。tmux 不需要设置。
+3. 已开着的 Agent 会话不受影响，新开的会话生效；VS Code 已打开的窗口执行 **Developer: Reload Window**。
+
+**更新**：`git pull`，再运行一次同一个安装命令。安装可以重复运行，旧版本和旧名字（Agent Sidecar）的扩展、插件和命令会被移除。
+
+**卸载**：终端版用 `tickbird uninstall`（VS Code 版还装着时保留 `tickbird-state`）；VS Code 版在扩展面板里卸载。
+
+只用 VS Code 版、不想从源码构建时，也可以从 [GitHub Releases](https://github.com/zchan0/tickbird/releases) 下载 `.vsix`，用 `code --install-extension tickbird-<版本>.vsix` 安装；这样不会装上 Agent 里的插件，自动跟随会话和 Needs approval 不可用。
+
+## 开发
 
 ```sh
 npm ci --ignore-scripts
@@ -20,35 +53,9 @@ npm run dev
 
 也可以在本项目按 F5，选择 `Run Tickbird Development Host`。在 worktree 里开发时，用 `npm run dev -- <项目目录>` 打开有会话的项目。
 
-### 安装到自己的 VS Code（私有，不经过扩展市场）
+`npm run package:vscode`、`npm run package:terminal` 只打包，不安装。产品和接入用同一个版本号，用 `npm run set-version -- x.y.z` 修改；改了 `plugins/` 下的插件后必须升版本再安装，见 [plugins/tickbird-state/README.md](./plugins/tickbird-state/README.md)。
 
-```sh
-npm run install:vscode
-```
-
-它做三件事，每一步都会打印结果，可以重复运行来更新：
-
-1. 用 esbuild 把扩展打成单文件，打包为 `build/tickbird-<版本>.vsix`，用 `code --install-extension` 装进 VS Code。已打开的窗口执行 **Developer: Reload Window** 后生效。
-2. 把本仓库登记为 Claude Code 的本地插件市场（`.claude-plugin/marketplace.json`），装上插件 `tickbird-state@tickbird`。新开的会话生效，`/plugin` 里可以停用。
-3. 把本仓库登记为 Codex 的本地插件市场（`.agents/plugins/marketplace.json`），装上同一个接入。**还要在 Codex CLI 里执行一次 `/hooks`，按 `t` 信任它的 hook**，否则 Codex 会静默跳过。
-
-装进 Claude Code 和 Codex 的是插件 `tickbird-state`：一组只写会话状态的 hook，VS Code 版靠它自动跟随会话、在 Agent 等你批准时显示 Needs approval，终端版也用它。终端版另外还会装一个 `tickbird-split`，只负责在 kitty、tmux 里自动开栏；只装 VS Code 版时不会装它。
-
-### 安装终端版（私有）
-
-```sh
-npm run install:terminal
-```
-
-可以重复运行来更新：
-
-1. 把终端版打成单文件 `~/.local/share/tickbird/cli.cjs`，并放一个命令 `~/.local/bin/tickbird`。
-2. 已装的 VS Code 版比它旧时，一起更新 VS Code 扩展：两者读同一份会话状态。
-3. 运行 `tickbird setup`：给 Claude Code 和 Codex 装上 `tickbird-state` 和 `tickbird-split`；检查 tmux；装了 kitty、但它没开远程控制时，说明要加的两行，在终端里运行时会问你要不要替你备份并加上（加上后要完全退出并重新打开 kitty）。Codex 第一次启动会提示 **Hooks need review**，选 Trust all。
-
-之后在 kitty 或 tmux 里新开 Claude Code 或 Codex 会话，旁边会自动开一栏。不想自动开栏，在 Agent 的插件管理里停用 `tickbird-split`。卸载：`tickbird uninstall`（VS Code 版还装着时保留 `tickbird-state`）。
-
-`npm run package:vscode` 只打包，不安装。产品和接入用同一个版本号，用 `npm run set-version -- x.y.z` 修改；改了 `plugins/` 下的插件后必须升版本再安装，见 [plugins/tickbird-state/README.md](./plugins/tickbird-state/README.md)。
+GitHub Actions：每次推送到 `main` 和每个 PR 在 macOS、Linux（Node 22、24）上跑 `npm test` 并打包；推送标签 `v<版本>`（与 `package.json` 一致）时发布 GitHub Release，附带 `.vsix` 和终端版程序。真实 VS Code 的核对（`npm run test:host`）需要桌面环境，只在本机跑。
 
 ## 使用
 

@@ -1,0 +1,48 @@
+# Tests and packages every push and pull request: the unit tests on macOS and
+# Linux, then the VS Code extension and the terminal program built as they
+# would ship. The real-VS-Code checks (npm run test:host) need a desktop and
+# stay local.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm run package:vscode
+      - run: npm run package:terminal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tickbird-${{ github.sha }}
+          path: |
+            build/tickbird-*.vsix
+            build/tickbird-cli.cjs
+          if-no-files-found: error

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, writeFile, readdir, readFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -39,7 +40,9 @@ const add = id => {
   item.dependencies.forEach(add);
 };
 ['openai.chatgpt', 'Anthropic.claude-code'].forEach(add);
-const code = process.env.TICKBIRD_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+// VS Code's command: TICKBIRD_CODE_CLI, the Mac app's own, or `code` on the PATH.
+const macCode = '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+const code = process.env.TICKBIRD_CODE_CLI || (existsSync(macCode) ? macCode : 'code');
 const args = ['--new-window', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`, `--extensions-dir=${extensions}`,
   `--extensionDevelopmentPath=${root}`, ...selected.map(item => `--extensionDevelopmentPath=${item.path}`), folder];
 const child = spawn(code, args, { stdio: 'inherit' });
