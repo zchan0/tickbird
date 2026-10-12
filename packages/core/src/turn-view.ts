@@ -1,4 +1,4 @@
-import type { Provider, TimelineItem } from './model';
+import type { Provider, SessionData, TimelineItem } from './model';
 import type { TurnGroup } from './timeline';
 import { chapterTurn, type ChapterRow, type ChapterTurn, type RowOutcome, type TurnSegment } from './chapters';
 import { presentEvidence } from './presentation';
@@ -122,4 +122,10 @@ export function turnView(group: TurnGroup, latest: boolean, provider?: Provider)
     verb: statusVerb(provider, group.key),
     toolWidth: Math.min(7, Math.max(3, ...rows.map(row => (row.output ? 'OUT' : row.tool).length))),
   };
+}
+
+/** Tasks the agent left running in the background that have not reported back, in a line; nothing when there are none. */
+export function backgroundLine(session: SessionData): string | undefined {
+  const count = session.items.filter(item => item.backgroundTask?.state === 'running').length;
+  return count ? `${count} background task${count > 1 ? 's' : ''} running` : undefined;
 }

@@ -72,3 +72,18 @@ test('the page shows and hides the follow button and the hint as the host says, 
   send({ type: 'follow', paused: false }); send({ type: 'integrationHint', show: false });
   assert.equal(button.hidden, true); assert.equal(hint.hidden, true);
 });
+
+test('an ended turn with agents still out in the background says so under its answer, shown only while the agent reports its state', () => {
+  const row = (type: string, content: unknown, extra = {}) => ({ type, uuid: `b${Math.random()}`, timestamp: '2026-10-12T03:00:00.000Z', sessionId: 'cl', cwd: '/fixture', message: { role: type, content }, ...extra });
+  const records = [
+    row('user', '开一个 subagent'),
+    row('assistant', [{ type: 'tool_use', id: 'a1', name: 'Agent', input: { description: 'Brainstorm', prompt: 'p', run_in_background: true } }]),
+    row('user', [{ type: 'tool_result', tool_use_id: 'a1', content: 'launched' }], { toolUseResult: { status: 'async_launched', isAsync: true, agentId: 'agent-1', outputFile: '/tmp/x' } }),
+    { ...row('assistant', [{ type: 'text', text: '在后台跑。' }]), message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '在后台跑。' }] } },
+  ];
+  const session = parseClaude({ file: '/fixture/cl.jsonl', projectPath: '/fixture', text: records.map(r => JSON.stringify(r)).join('\n') + '\n' });
+  const html = projectSidecar({ projectName: 'p', session, locale: 'zh-CN' }).turns.at(-1)!.html;
+  assert.match(html, /<p class="tbackground"[^>]*>1 background task running<\/p>/);
+  // Hidden unless the client has heard the agent's state: a session that has gone claims nothing.
+  assert.match(renderSidecar({ projectName: 'p', nonce: 'n', session }), /\.tbackground \{ display: none;[^}]*\}\s*\[data-agent-known\] \.tbackground \{ display: block; \}/);
+});

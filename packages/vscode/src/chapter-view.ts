@@ -1,7 +1,7 @@
 import type { SessionData, TimelineItem } from '../../core/src/model';
 import type { TurnGroup } from '../../core/src/timeline';
 import type { ChapterRow, ChangedFile, TurnSegment } from '../../core/src/chapters';
-import { clock, rowView, turnView } from '../../core/src/turn-view';
+import { backgroundLine, clock, rowView, turnView } from '../../core/src/turn-view';
 import { announcedRow, callEnd, callSteps, callText, callTool } from '../../core/src/call-line';
 import { shortFileLabels } from '../../core/src/presentation';
 import { renderMarkdown } from './markdown';
@@ -169,12 +169,15 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { 
   const prompt = turn.request ? `<section class="tprompt" data-observation-key="prompt:${escapeHtml(group.key)}">${label('Prompt', 'blue')}${render.request(turn.request)}</section>` : '';
   const ordinal = group.ordinal ?? 0;
   const started = clock(turn.start);
+  const background = backgroundLine(session);
   return `<section class="turn-panel chapter-turn" data-turn-panel="${escapeHtml(group.key)}" data-ordinal="${ordinal}"${live ? ` data-last-at="${escapeHtml(turn.lastAt)}"` : ''} aria-label="${escapeHtml(view.label)}">`
     + `<header class="turn-heading">${group.turnId ? `<b>第 ${ordinal} 轮</b><span class="tsub"> / 共 <span data-turn-total>${ordinal}</span> 轮${started ? ` · ${started}` : ''}</span>` : '<span class="tsub">未归属回合的记录</span>'}</header>`
     + prompt
     + `<ol class="cstream">${stream}${draft}${announced}${end}</ol>`
     + closing
     + (open ? '' : changesHtml(turn.files, group.key))
+    // Over, but tasks it left running have not reported back. Shown only while the agent reports its state (live-client).
+    + (latest && !open && background ? `<p class="tbackground" data-observation-key="background:${escapeHtml(group.key)}">${escapeHtml(background)}</p>` : '')
     + (turn.segments.length || end ? '' : '<p class="empty">暂未取得本轮过程。</p>')
     + `<div class="turn-content-end" aria-hidden="true"></div></section>`;
 }
@@ -244,6 +247,8 @@ export const chapterStyles = `
   .live-tail .cquiet:empty { display: none; }
   .turn-panel:not([data-fresh]) .live-tail, .turn-panel[data-idle] .live-tail { display: none; }
   .turn-panel[data-stale] .live-tail .cbranch { display: none; }
+  .tbackground { display: none; margin: 12px 0 0; font-size: 12px; color: var(--ink-3); }
+  [data-agent-known] .tbackground { display: block; }
   .awaiting .cwait-what { font-size: 12px; overflow-wrap: anywhere; }
   .awaiting .cwait-what b { font-weight: 700; }
   .awaiting .cnote { font-size: 12px; color: var(--ink-3); }

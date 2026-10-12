@@ -106,6 +106,7 @@ export const liveClient = `
     const tickActivity = () => {
       const now = Date.now();
       const live = timeline.querySelector('[data-turn-panel][data-last-at]');
+      timeline.toggleAttribute('data-agent-known', agentState !== '');
       const quiet = live ? now - Date.parse(live.dataset.lastAt) : NaN;
       let gone = !(quiet < GONE), stale = !gone && quiet > QUIET;
       if (agentState === 'busy') { gone = false; stale = false; }

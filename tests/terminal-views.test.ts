@@ -245,6 +245,51 @@ test('the running turn shows no agent word or clock and no end; one spinner at i
   assert.doesNotMatch(header[0], /运行中|\d+s|Claude Code/);
   assert.match(header[0], /^  第 2 轮 \/ 共 2 轮 · \d\d:\d\d 开始$/);
 });
+// A turn that leaves two agents in the background, ends, and hears back from them one at a time.
+const BACKGROUND = [
+  rec('user', '开两个 subagent 想名字', 0),
+  call('a1', 'Agent', { description: 'Name brainstorm: companions', prompt: 'p', run_in_background: true }, 1),
+  result('a1', 1, false, 'launched'), 
+  call('a2', 'Agent', { description: 'Name brainstorm: reading', prompt: 'p', run_in_background: true }, 2),
+  result('a2', 2, false, 'launched'),
+  said('两个 subagent 在后台跑。', 3, true), done(4, 4_000),
+];
+// The launches as Claude Code records them: the result says the agent runs on in the background.
+for (const [index, id] of [[2, 'agent-1'], [4, 'agent-2']] as const) Object.assign(BACKGROUND[index], { toolUseResult: { status: 'async_launched', isAsync: true, agentId: id, outputFile: '/tmp/fixture-not-read' } });
+const heard = (id: string, tool: string, second: number) => rec('user', `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>${tool}</tool-use-id>\n<status>completed</status>\n<summary>Agent finished</summary>\n</task-notification>`, second, { origin: { kind: 'task-notification' } });
+
+test('an agent heard back from in the background reads as a row in the turn, and the answer after it closes the turn', () => {
+  const model = (records: unknown[], alive = true) => ({ ...modelOf(parse(records), { width: 80, height: 60 }), status: { kind: 'idle', ...(alive ? { alive: true } : {}) } as const });
+  // Over, both still out: the answer folds as ever, and a line under it says what has not reported back.
+  let lines = text(turnBody(ctxOf(model(BACKGROUND), 0)));
+  assert.ok(lines.includes('  Final Answer'));
+  assert.equal(lines.at(-1)!.trimEnd(), '  2 background tasks running');
+  // With no word from the agent, it may be gone: nothing is claimed to be running.
+  assert.ok(!text(turnBody(ctxOf(model(BACKGROUND, false), 0))).some(line => line.includes('background')));
+  // One reports back and the agent answers it: the row, then the new answer, which is now the Final Answer.
+  const first = [...BACKGROUND, heard('agent-1', 'a1', 30), said('第一个返回了：railbird。', 31, true), done(32, 2_000)];
+  lines = text(turnBody(ctxOf(model(first), 0)));
+  const earlier = lines.findIndex(line => line.includes('两个 subagent 在后台跑。'));
+  const row = lines.findIndex(line => /└ Name brainstorm: companions/.test(line) && !line.includes('reading'));
+  const final = lines.indexOf('  Final Answer');
+  assert.ok(earlier >= 0 && row > earlier && final > row, lines.join('\n'));
+  assert.match(lines[final + 1], /第一个返回了：railbird。/);
+  assert.equal(lines.at(-1)!.trimEnd(), '  1 background task running');
+  // Both back: the line goes.
+  const both = [...first, heard('agent-2', 'a2', 40), said('第二个也返回了。', 41, true), done(42, 2_000)];
+  lines = text(turnBody(ctxOf(model(both), 0)));
+  assert.match(lines[lines.indexOf('  Final Answer') + 1], /第二个也返回了。/);
+  assert.ok(!lines.some(line => line.includes('background')));
+});
+
+test('a background command stopped with TaskStop is not left running', () => {
+  const records = [rec('user', '跑个慢命令', 0), call('b1', 'Bash', { command: 'sleep 100', run_in_background: true }, 1),
+    { ...result('b1', 1), toolUseResult: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg-1' } }, said('在后台跑。', 2, true), done(3, 3_000)];
+  assert.equal(parse(records).items.find(item => item.backgroundTask)?.backgroundTask?.state, 'running');
+  const stopped = parse([...records, rec('user', '停掉', 10), call('s1', 'TaskStop', { task_id: 'bg-1' }, 11), result('s1', 11)]);
+  assert.equal(stopped.items.find(item => item.backgroundTask)?.backgroundTask?.state, 'stopped');
+});
+
 test('a quiet open turn is not called running', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]), { now: Date.parse(at(22)) + 11 * 60_000 });
   assert.equal(model.status.kind, 'quiet');

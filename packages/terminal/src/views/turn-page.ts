@@ -3,7 +3,7 @@ import type { TurnGroup } from '../../../core/src/timeline';
 import type { ChapterRow, TurnSegment } from '../../../core/src/chapters';
 import type { LiveExtras } from '../../../core/src/live-extras';
 import { plainPasted } from '../../../core/src/pasted';
-import { clock, publicBody, rowView, turnView, type TurnView } from '../../../core/src/turn-view';
+import { backgroundLine, clock, publicBody, rowView, turnView, type TurnView } from '../../../core/src/turn-view';
 import { symbol, type Capabilities } from '../caps';
 import { cutLine, plainText, row, spans, type Color, type Line, type Span, type Style } from '../screen';
 import { textWidth } from '../width';
@@ -28,7 +28,8 @@ export type SessionStatus =
   | { kind: 'running'; since?: string; verb: string }
   | { kind: 'waiting'; approval: { tool: string; summary: string } }
   | { kind: 'quiet'; lastAt?: string }
-  | { kind: 'idle' }
+  /** `alive`: the agent reports its state, so it is still there to hear back from tasks it left running. */
+  | { kind: 'idle'; alive?: boolean }
   | { kind: 'ended' };
 
 /** An open turn with no record for this long and no word from the agent is not shown as running. */
@@ -48,7 +49,7 @@ export function sessionStatus(latest: TurnView | undefined, extras: LiveExtras, 
     if (agent?.busy || now - lastAt < QUIET_MS) return { kind: 'running', since: latest.turn.start ?? latest.turn.lastAt, verb: latest.verb };
     return { kind: 'quiet', lastAt: latest.turn.lastAt };
   }
-  return { kind: 'idle' };
+  return { kind: 'idle', ...(agent?.state ? { alive: true } : {}) };
 }
 
 /** The agents' clock: 8s, 1m 05s, 1h 02m. */
@@ -517,5 +518,8 @@ export function turnBody(ctx: PageContext): Line[] {
   blocks.push(tailLines(view, latest, ctx));
   // What the turn changed, once it is over.
   if (closed) blocks.push(changesLines(view, ctx));
+  // Over, but tasks it left running have not reported back: the agent will answer them here.
+  const background = closed && latest && ctx.status.kind === 'idle' && ctx.status.alive ? backgroundLine(ctx.session) : undefined;
+  if (background) blocks.push([[{ text: ' '.repeat(MARGIN) }, { text: background, style: DIM }]]);
   return blocks.filter(block => block.length).flatMap((block, index) => index ? [[], ...block] : block);
 }

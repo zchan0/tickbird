@@ -85,6 +85,8 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
   const calls = new Map<string, TimelineItem>();
   const callInputs = new Map<string, string>();
   const agents = new Map<string, TimelineItem>();
+  // Calls that left a task running in the background, by the task's id.
+  const tasks = new Map<string, TimelineItem>();
   const messages = new Map<string, TimelineItem>();
   const seenBlocks = new Map<string, { item?: TimelineItem; text: string }>();
   const incomplete = new Set<string>();
@@ -163,6 +165,8 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
     const field = (name: string) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(raw)?.[1].trim();
     const id = field('task-id');
     const status = field('status');
+    const task = id ? tasks.get(id) : undefined;
+    if (task?.backgroundTask) task.backgroundTask.state = status === 'killed' ? 'stopped' : 'returned';
     const agent = id ? agents.get(id) : undefined;
     if (!agent) {
       // A background command or monitor reporting back: one row saying what
@@ -180,6 +184,14 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
       cover(ref, 'task-notification', 'displayed', '后台任务的结束通知；按通知自身的摘要与状态显示，不读取输出文件。', item);
       return;
     }
+    // Where the agent heard back, a row in the turn it heard in: what follows is the agent's answer to it.
+    let input: Obj = {};
+    try { input = object(JSON.parse(callInputs.get(field('tool-use-id') ?? '') ?? '{}')); } catch { /* No recorded input: the row says Agent. */ }
+    const back = add(ref, 'notice', short(string(input.description)) || 'Agent', field('summary') ?? '后台任务通知');
+    back.noticeType = 'task-notification'; back.taskTool = 'Agent';
+    back.status = status === 'failed' ? 'failed' : status === 'completed' ? 'completed' : 'unknown';
+    if (status === 'killed') back.interrupted = true;
+    append(back, [textBlock('后台任务通知', field('summary') || raw)]);
     const item = agent;
     observeResult(item, 'readable');
     addSource(item, ref); append(item, [textBlock('父会话收到的通知', raw)], '这里只核对父会话通知，不代表子任务内部过程完整。');
@@ -327,6 +339,9 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
         const summary = short(string(args.command) || string(args.file_path) || string(args.pattern) || string(args.description) || string(args.skill) || '已记录调用输入，尚未取得最终状态。');
         const item = add(ref, kind, name || '工具调用', summary); item.status = 'unknown'; item.result = 'not-observed'; calls.set(id, item);
         if (recordedInput) callInputs.set(id, recordedInput);
+        // Stopping a task is the record's only word that it will not report back.
+        const stopped = name === 'TaskStop' ? tasks.get(string(args.task_id) || string(args.shell_id))?.backgroundTask : undefined;
+        if (stopped) stopped.state = 'stopped';
         if (displayInput) append(item, Object.keys(displayInput).length ? [textBlock('当时调用参数', JSON.stringify(displayInput, null, 2), 'json')] : []);
         else unavailable(ref, `tool-input:${name}`, '新工具的参数展示范围未确认；不直接展示全部原始参数。', item);
         if (mcpInput?.extraFields) unavailable(ref, `tool-input:${name}:additional-fields`, '此工具还有未识别的参数字段；仅展示已盘点并通过结构验证的字段。', item);
@@ -412,6 +427,9 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
         else if (structured.status === 'async_launched' || structured.isAsync === true) { item.status = 'running'; append(item, [], '本次返回仅为异步启动记录；最终状态以另行取得的后续通知为准。'); }
         else if (item.status !== 'failed') item.status = block.is_error === false || structured.status === 'completed' || structured.success === true || exitCode === 0 ? 'completed' : 'unknown';
         if (item.kind === 'subagent' && typeof structured.agentId === 'string') agents.set(structured.agentId, item);
+        const backgroundId = structured.status === 'async_launched' && typeof structured.agentId === 'string' ? structured.agentId
+          : typeof structured.backgroundTaskId === 'string' ? structured.backgroundTaskId : undefined;
+        if (backgroundId) { item.backgroundTask = { id: backgroundId, state: 'running' }; tasks.set(backgroundId, item); }
         const raw = output.map(b => b.text ?? '').join('\n');
         if (/^(?:Warning: truncated output|\[output truncated\])/im.test(raw)) append(item, [], '来源输出已截断，只展示实际取得的片段。');
         if (returned.some(b => /^(?:Warning: truncated output|\[output truncated\])/im.test(b.text ?? ''))) observeResult(item, 'partial');

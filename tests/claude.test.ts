@@ -100,12 +100,16 @@ test('multi-record assistant message preserves later blocks rather than retainin
 });
 test('async start is running; completion notification is not a user request', () => {
   const data = parse([tool('task', 'Agent'), result('task', false, { toolUseResult: { status: 'async_launched', agentId: 'child' } }), row('user', '<task-notification><task-id>child</task-id><status>completed</status></task-notification>')]);
-  assert.equal(data.items.length, 1); assert.equal(data.items[0].kind, 'subagent'); assert.equal(data.items[0].status, 'completed');
+  // The call, and a row where the agent heard back: what follows is its answer to the notification.
+  assert.equal(data.items.length, 2); assert.equal(data.items[0].kind, 'subagent'); assert.equal(data.items[0].status, 'completed');
+  assert.deepEqual([data.items[1].kind, data.items[1].noticeType, data.items[1].taskTool, data.items[1].status], ['notice', 'task-notification', 'Agent', 'completed']);
+  assert.deepEqual(data.items[0].backgroundTask, { id: 'child', state: 'returned' });
   assert.match(data.items[0].summary, /完成通知/);
   assert.doesNotMatch(data.items[0].summary, /尚未完成/);
   assert.equal(data.items[0].availability, 'partial');
   const started = parse([tool('task', 'Agent'), result('task', false, { toolUseResult: { status: 'async_launched', agentId: 'child' } })]);
   assert.equal(started.items[0].status, 'running');
+  assert.deepEqual(started.items[0].backgroundTask, { id: 'child', state: 'running' });
 });
 test('AskUserQuestion preserves structured answers as read-only evidence', () => {
   const data = parse([tool('q', 'AskUserQuestion'), result('q', false, { toolUseResult: { questions: [{ question: 'Which option?' }], answers: { choice: 'A' } } })]);
@@ -283,7 +287,8 @@ test('ordinary internal words, quoted wrapper prose and unconfirmed async metada
 test('real completion return stays available after the launch wrapper is separated', () => {
   const notification = '<task-notification><task-id>fixture-child</task-id><status>completed</status><result>Visible finished result</result></task-notification>';
   const data = parse([tool('agent', 'Agent'), row('user', [{ type: 'tool_result', tool_use_id: 'agent', content: [{ type: 'text', text: asyncMetadataFixture }] }], { toolUseResult: { status: 'async_launched', isAsync: true, agentId: 'fixture-child', outputFile: '/tmp/fixture-not-opened.output' } }), row('user', notification)]);
-  assert.equal(data.items.length, 1);
+  assert.equal(data.items.length, 2);
+  assert.equal(data.items[1].noticeType, 'task-notification');
   assert.equal(data.items[0].status, 'completed');
   assert.ok(data.items[0].detail?.blocks.some(b => b.text === notification));
   assert.deepEqual(data.items[0].sources.map(s => s.line), [1, 2, 3]);
@@ -355,7 +360,7 @@ test('Claude launch wrapper metadata and later notification remain source-call o
   assert.equal(launch.items[0].status, 'running');
   assert.doesNotMatch(JSON.stringify(launch.items), /internal metadata/);
   const data = parse([...records, row('user', '<task-notification><task-id>fixture-child</task-id><status>completed</status><result>Public result</result></task-notification>')]);
-  assert.equal(data.items.length, 1);
+  assert.equal(data.items.length, 2);
   assert.equal(data.items[0].result, 'readable');
   assert.equal(data.items[0].status, 'completed');
 });
