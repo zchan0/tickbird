@@ -1,14 +1,14 @@
 {
-  "name": "agent-sidecar",
+  "name": "tickbird",
   "interface": {
-    "displayName": "Agent Sidecar"
+    "displayName": "Tickbird"
   },
   "plugins": [
     {
-      "name": "sidecar-state",
+      "name": "tickbird-state",
       "source": {
         "source": "local",
-        "path": "./plugins/sidecar-state"
+        "path": "./plugins/tickbird-state"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -17,10 +17,10 @@
       "category": "Productivity"
     },
     {
-      "name": "sidecar-split",
+      "name": "tickbird-split",
       "source": {
         "source": "local",
-        "path": "./plugins/sidecar-split"
+        "path": "./plugins/tickbird-split"
       },
       "policy": {
         "installation": "AVAILABLE",

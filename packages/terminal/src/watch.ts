@@ -134,7 +134,7 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
     return { session, groups, status, extras, caps, now: Date.now(), width: screen.width, height: screen.height, focusAgent: Boolean(focus), motion, frame: frames };
   };
   const waitingLines = (message: string): Line[] => {
-    const lines: Line[] = [row([{ text: ' Sidecar', style: { bold: true } }], '', screen.width), [], ...prose(message, screen.width - 1, { indent: 3, style: { dim: true } })];
+    const lines: Line[] = [row([{ text: ' Tickbird', style: { bold: true } }], '', screen.width), [], ...prose(message, screen.width - 1, { indent: 3, style: { dim: true } })];
     while (lines.length < screen.height - 1) lines.push([]);
     return [...lines.slice(0, screen.height - 1), row('', [{ text: (focus ? 'a 切回 Agent   ' : '') + 'q 退出 ', style: { dim: true } }], screen.width)];
   };
@@ -189,8 +189,8 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
   };
   const handle = (events: ReturnType<InputParser['feed']>) => {
     const current = model();
-    // SIDECAR_DEBUG_KEYS=<file>: every parsed key and the raw input, for tracking down terminal quirks.
-    if (process.env.SIDECAR_DEBUG_KEYS) appendFileSync(process.env.SIDECAR_DEBUG_KEYS, events.map(event => describe(event)).join(' ') + '\n');
+    // TICKBIRD_DEBUG_KEYS=<file>: every parsed key and the raw input, for tracking down terminal quirks.
+    if (process.env.TICKBIRD_DEBUG_KEYS) appendFileSync(process.env.TICKBIRD_DEBUG_KEYS, events.map(event => describe(event)).join(' ') + '\n');
     for (const event of events) {
       if (!current) {
         if (event.type === 'key' && (event.name === 'q' || (event.ctrl && event.name === 'c'))) finish();
@@ -210,7 +210,7 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
   input.resume();
   input.on('data', chunk => {
     if (timer) clearTimeout(timer);
-    if (process.env.SIDECAR_DEBUG_KEYS) appendFileSync(process.env.SIDECAR_DEBUG_KEYS, 'raw ' + JSON.stringify(chunk.toString('utf8')) + '\n');
+    if (process.env.TICKBIRD_DEBUG_KEYS) appendFileSync(process.env.TICKBIRD_DEBUG_KEYS, 'raw ' + JSON.stringify(chunk.toString('utf8')) + '\n');
     handle(parser.feed(chunk.toString('utf8')));
     if (parser.pending) timer = setTimeout(() => handle(parser.flush()), ESCAPE_GAP_MS);
   });

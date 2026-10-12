@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
   "configurations": [{
-    "name": "Run Agent Sidecar Development Host", "type": "extensionHost", "request": "launch",
+    "name": "Run Tickbird Development Host", "type": "extensionHost", "request": "launch",
     "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/.vscode/sidecar-development.code-workspace"],
-    "outFiles": ["${workspaceFolder}/dist/**/*.js"], "preLaunchTask": "Build Agent Sidecar"
+    "outFiles": ["${workspaceFolder}/dist/**/*.js"], "preLaunchTask": "Build Tickbird"
   }]
 }

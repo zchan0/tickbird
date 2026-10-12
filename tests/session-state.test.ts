@@ -73,7 +73,7 @@ test('an approval is over once the transcript records anything after it', () => 
 });
 
 test('a window follows its own most recently active live session', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'sidecar-state-'));
+  const directory = mkdtempSync(join(tmpdir(), 'tickbird-state-'));
   const write = (name: string, ...records: object[]) => writeFileSync(join(directory, name), lines(...records));
   write('claude-a.jsonl', start(1, { session: 'a', hostPid: 100 }), { t: 5, e: 'prompt' });
   write('codex-b.jsonl', start(2, { provider: 'codex', session: 'b', hostPid: 100 }), { t: 8, e: 'prompt' });
@@ -89,7 +89,7 @@ test('a window follows its own most recently active live session', async () => {
 });
 
 // The hook runs as the agents run it: a separate node process with JSON on stdin.
-const hook = resolve(__dirname, '../../plugins/sidecar-state/scripts/hook.mjs');
+const hook = resolve(__dirname, '../../plugins/tickbird-state/scripts/hook.mjs');
 function run(provider: string, input: object, env: NodeJS.ProcessEnv, pid = process.pid) {
   return spawnSync(process.execPath, [hook, provider, String(pid)], { input: JSON.stringify(input), env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env }, encoding: 'utf8' });
 }
@@ -149,14 +149,14 @@ test('the plugins hook only what the transcript lacks or has too late', () => {
     const manifest = JSON.parse(readFileSync(resolve(__dirname, '../..', file), 'utf8'));
     return Object.keys(manifest.hooks.hooks ?? manifest.hooks).sort();
   };
-  assert.deepEqual(events('plugins/sidecar-state/.claude-plugin/plugin.json'), ['MessageDisplay', 'PermissionRequest', 'PreToolUse', 'SessionStart']);
-  assert.deepEqual(events('plugins/sidecar-state/.codex-plugin/plugin.json'), ['PermissionRequest', 'SessionStart']);
-  assert.deepEqual(events('plugins/sidecar-split/.claude-plugin/plugin.json'), ['SessionStart']);
-  assert.deepEqual(events('plugins/sidecar-split/.codex-plugin/plugin.json'), ['SessionStart']);
+  assert.deepEqual(events('plugins/tickbird-state/.claude-plugin/plugin.json'), ['MessageDisplay', 'PermissionRequest', 'PreToolUse', 'SessionStart']);
+  assert.deepEqual(events('plugins/tickbird-state/.codex-plugin/plugin.json'), ['PermissionRequest', 'SessionStart']);
+  assert.deepEqual(events('plugins/tickbird-split/.claude-plugin/plugin.json'), ['SessionStart']);
+  assert.deepEqual(events('plugins/tickbird-split/.codex-plugin/plugin.json'), ['SessionStart']);
 });
 
 test('a session’s latest activity is its transcript’s last write', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'sidecar-state-'));
+  const directory = mkdtempSync(join(tmpdir(), 'tickbird-state-'));
   const transcript = join(directory, 'transcript.jsonl');
   writeFileSync(transcript, '{}\n');
   utimesSync(transcript, new Date(50_000), new Date(50_000));
@@ -180,7 +180,7 @@ test('the hook ignores what it cannot place and never fails the agent', () => {
   assert.equal(broken.status, 0);
   assert.equal(broken.stdout, '');
   // An unwritable state directory is not the agent's problem either.
-  writeFileSync(join(home, 'agent-sidecar'), 'a file where a directory should be');
+  writeFileSync(join(home, 'tickbird'), 'a file where a directory should be');
   assert.equal(run('claude', { hook_event_name: 'SessionStart', session_id: 'abc' }, { XDG_STATE_HOME: home }).status, 0);
 });
 
@@ -220,7 +220,7 @@ test('a draft shows until the transcript holds the same words, and never once id
 });
 
 test('a cached read skips unchanged files but still notices a dead agent', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'sidecar-state-'));
+  const directory = mkdtempSync(join(tmpdir(), 'tickbird-state-'));
   writeFileSync(join(directory, 'claude-a.jsonl'), lines(start(1, { session: 'a', agentPid: 4242 }), { t: 2, e: 'prompt' }));
   const cache: SessionStateCache = new Map();
   let alive = true;

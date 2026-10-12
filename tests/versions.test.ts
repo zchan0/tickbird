@@ -9,10 +9,10 @@ const version = (file: string) => JSON.parse(readFileSync(join(root, file), 'utf
 test('the products and their plugins carry one version', () => {
   const product = version('package.json');
   // Change it with `npm run set-version -- x.y.z`, never by hand in one file.
-  for (const plugin of ['sidecar-state', 'sidecar-split']) {
+  for (const plugin of ['tickbird-state', 'tickbird-split']) {
     assert.equal(version(`plugins/${plugin}/.claude-plugin/plugin.json`), product, plugin);
     assert.equal(version(`plugins/${plugin}/.codex-plugin/plugin.json`), product, plugin);
   }
-  assert.deepEqual(readdirSync(join(root, 'plugins')).sort(), ['sidecar-split', 'sidecar-state'], 'A new plugin is checked here too');
+  assert.deepEqual(readdirSync(join(root, 'plugins')).sort(), ['tickbird-split', 'tickbird-state'], 'A new plugin is checked here too');
   assert.equal(version('package-lock.json'), product);
 });

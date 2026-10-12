@@ -1,9 +1,9 @@
 {
-  "name": "agent-sidecar",
-  "displayName": "Agent Sidecar",
+  "name": "tickbird",
+  "displayName": "Tickbird",
   "description": "Read-only, project-scoped process evidence beside Codex and Claude Code.",
   "publisher": "zchan0",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "engines": {
     "vscode": "^1.96.0",
@@ -11,7 +11,7 @@
   },
   "main": "./dist/packages/vscode/src/extension.js",
   "activationEvents": [
-    "onView:agentSidecar.observer"
+    "onView:tickbird.observer"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -25,48 +25,48 @@
   "contributes": {
     "commands": [
       {
-        "command": "agentSidecar.open",
+        "command": "tickbird.open",
         "title": "Open Process Observer",
-        "category": "Agent Sidecar"
+        "category": "Tickbird"
       },
       {
-        "command": "agentSidecar.chooseSession",
+        "command": "tickbird.chooseSession",
         "title": "Choose Project Session",
-        "category": "Agent Sidecar",
+        "category": "Tickbird",
         "icon": "$(arrow-swap)"
       },
       {
-        "command": "agentSidecar.refresh",
+        "command": "tickbird.refresh",
         "title": "Refresh Selected Session",
-        "category": "Agent Sidecar",
+        "category": "Tickbird",
         "icon": "$(refresh)"
       },
       {
-        "command": "agentSidecar.keepEvidence",
+        "command": "tickbird.keepEvidence",
         "title": "Keep Evidence Preview",
-        "category": "Agent Sidecar"
+        "category": "Tickbird"
       },
       {
-        "command": "agentSidecar.coverage",
+        "command": "tickbird.coverage",
         "title": "Show Content Coverage Ledger",
-        "category": "Agent Sidecar"
+        "category": "Tickbird"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "agentSidecar.chooseSession",
-          "when": "view == agentSidecar.observer",
+          "command": "tickbird.chooseSession",
+          "when": "view == tickbird.observer",
           "group": "navigation@1"
         },
         {
-          "command": "agentSidecar.refresh",
-          "when": "view == agentSidecar.observer",
+          "command": "tickbird.refresh",
+          "when": "view == tickbird.observer",
           "group": "navigation@2"
         },
         {
-          "command": "agentSidecar.coverage",
-          "when": "view == agentSidecar.observer",
+          "command": "tickbird.coverage",
+          "when": "view == tickbird.observer",
           "group": "more@1"
         }
       ]
@@ -74,17 +74,17 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "agentSidecar",
-          "title": "Agent Sidecar",
+          "id": "tickbird",
+          "title": "Tickbird",
           "icon": "resources/sidecar.svg"
         }
       ]
     },
     "views": {
-      "agentSidecar": [
+      "tickbird": [
         {
           "type": "webview",
-          "id": "agentSidecar.observer",
+          "id": "tickbird.observer",
           "name": "过程"
         }
       ]

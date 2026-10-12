@@ -424,7 +424,7 @@ function toolActionInputs(rawName: string, input: unknown): Atom[] {
   if (['exec_command', 'Bash'].includes(name)) {
     const actions = commandActions(string(args.cmd) || string(args.command));
     // A recorded Bash description is the Agent's own stated purpose, not a
-    // Sidecar-generated summary. Use it only when static syntax stays opaque.
+    // Tickbird-generated summary. Use it only when static syntax stays opaque.
     if (name === 'Bash' && string(args.description).trim() && actions.length === 1 && actions[0].label.startsWith('命令')) {
       return [{ ...actions[0], label: `命令 · ${compact(string(args.description), 84)}` }];
     }

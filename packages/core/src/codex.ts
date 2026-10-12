@@ -495,7 +495,7 @@ export function* createCodexParser(input: ParserContext): SessionParser {
       if (call) { if (calls.has(call) && !previous && !waiting) data.warnings.push(`第 ${entry.line} 行重用了 call_id；作为新的调用保留。`); calls.set(call, item); cuaCalls.delete(call); }
       if (str(p.namespace) === 'mcp__cua_repl' && ['js', 'js_reset'].includes(str(p.name))) cuaCalls.add(call);
       append(item, argumentsText && !item.detail?.blocks.some(b => b.text === argumentsText) ? [textBlock(waiting ? '后续读取调用' : previous && item.detail?.blocks.some(b => b.label === '记录中的调用参数') ? '同一调用 ID 的另一组记录参数' : '记录中的调用参数', argumentsText, 'code')] : []);
-      if (item.kind === 'question') append(item, [], '这是记录中的提问和已知回复；Sidecar 不提供作答或批准入口。');
+      if (item.kind === 'question') append(item, [], '这是记录中的提问和已知回复；Tickbird 不提供作答或批准入口。');
       cover(entry, type, waiting || previous ? 'merged' : 'displayed', waiting ? '通过明确 cell_id 关联同一次长任务的后续读取。' : '只读展示调用输入；同 ID 的原生 MCP 记录合并保留。', item);
       continue;
     }

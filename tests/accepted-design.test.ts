@@ -14,7 +14,7 @@ const patch = '*** Begin Patch\n*** Update File: /fixture/a.ts\n@@\n-old\n+new\n
 const nativePatch = (text = '-old\n+new') => e({ type: 'item_completed', item: { type: 'FileChange', id: 'native-file', status: 'completed', changes: { '/fixture/a.ts': { type: 'update', unified_diff: text } } } });
 
 test('compound shell summary captures the requested four purposes and does not interpret quoted or dynamic scripts', () => {
-  const command = "git status --short\nrg --files --hidden -g '!node_modules/**' -g '!dist/**' -g 'AGENTS.md'\ncat package.json\nsed -n '1,120p' README.md\nrg -n 'agent-sidecar|实时|Bash' /Users/example/.codex/memories/MEMORY.md";
+  const command = "git status --short\nrg --files --hidden -g '!node_modules/**' -g '!dist/**' -g 'AGENTS.md'\ncat package.json\nsed -n '1,120p' README.md\nrg -n 'tickbird|实时|Bash' /Users/example/.codex/memories/MEMORY.md";
   assert.equal(summarizeShell(command), '检查 Git 状态；查找项目规范；读取 package.json / README.md；检索项目记忆');
   assert.equal(summarizeShell("echo 'git status; cat secrets'"), "输出文本 · git status; cat secrets");
   assert.match(summarizeShell('cat "$(resolve)"'), /动态参数/);

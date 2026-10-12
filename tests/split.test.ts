@@ -8,7 +8,7 @@ import type { SessionState } from '../packages/core/src/session-state';
 import { agentSession, parseWatchArgs, resolveSession } from '../packages/terminal/src/watch';
 
 // The plugin is plain ES modules with Node's own modules only; Node loads them with require.
-const pluginDir = resolve(__dirname, '../../plugins/sidecar-split/scripts');
+const pluginDir = resolve(__dirname, '../../plugins/tickbird-split/scripts');
 type Tools = { run(command: string, args: string[]): { status: number; stdout: string; stderr: string }; which(name: string): string | undefined; input?: (tty: string) => number };
 const split = require(join(pluginDir, 'split.mjs')) as {
   handle(provider: string, agentPid: number, input: object, env: NodeJS.ProcessEnv, tools: Tools): string | undefined;
@@ -21,7 +21,7 @@ const AGENT = 4242;
 const START = { hook_event_name: 'SessionStart', session_id: 's-1', source: 'startup', cwd: '/work/project' };
 const KITTY = { KITTY_WINDOW_ID: '19', KITTY_LISTEN_ON: 'unix:/tmp/kitty-1' };
 const TMUX = { TMUX: '/tmp/tmux-501/default,123,0', TMUX_PANE: '%3' };
-const CLI = { AGENT_SIDECAR_CLI: resolve(__dirname, '../packages/terminal/src/cli.js'), PATH: '/usr/bin', XDG_STATE_HOME: '/state' };
+const CLI = { TICKBIRD_CLI: resolve(__dirname, '../packages/terminal/src/cli.js'), PATH: '/usr/bin', XDG_STATE_HOME: '/state' };
 
 /**
  * Stands in for ps, kitten and tmux. Records every command; answers as a
@@ -75,12 +75,12 @@ test('kitty: a pane on the agent’s left, about 48 columns, focus kept, tagged 
   assert.match(outcome!, /kitty：在 19 旁开栏 21/);
   const launch = find('launch')!;
   assert.deepEqual(launch.slice(1, 4), ['@', '--to', 'unix:/tmp/kitty-1']);
-  for (const arg of ['--keep-focus', '--location=before', '--bias=34', `sidecar_agent=${AGENT}`, '/work/project', 'PATH=/usr/bin', 'XDG_STATE_HOME=/state']) assert.ok(launch.includes(arg), arg);
+  for (const arg of ['--keep-focus', '--location=before', '--bias=34', `tickbird_agent=${AGENT}`, '/work/project', 'PATH=/usr/bin', 'XDG_STATE_HOME=/state']) assert.ok(launch.includes(arg), arg);
   assert.equal(launch[launch.indexOf('--next-to') + 1], 'id:19');
   // Over remote control --next-to only works in the target tab; without --match that is whichever tab is active.
   assert.equal(launch[launch.indexOf('--match') + 1], 'window_id:19');
   const command = launch.slice(launch.indexOf(process.execPath));
-  assert.deepEqual(command, [process.execPath, CLI.AGENT_SIDECAR_CLI, 'watch', '--agent', String(AGENT), '--focus',
+  assert.deepEqual(command, [process.execPath, CLI.TICKBIRD_CLI, 'watch', '--agent', String(AGENT), '--focus',
     JSON.stringify(['/bin/kitten', '@', '--to', 'unix:/tmp/kitty-1', 'focus-window', '--match', 'id:19'])]);
 });
 
@@ -95,7 +95,7 @@ test('tmux: a detached split on the agent’s left, 48 columns, tagged afterward
   assert.equal(splitWindow[splitWindow.indexOf('-l') + 1], '48');
   assert.equal(splitWindow[splitWindow.indexOf('-t') + 1], '%3');
   assert.equal(splitWindow[splitWindow.indexOf('-c') + 1], '/work/project');
-  assert.deepEqual(calls.at(-1), ['/bin/tmux', '-S', '/tmp/tmux-501/default', 'set-option', '-p', '-t', '%7', '@sidecar_agent', String(AGENT)]);
+  assert.deepEqual(calls.at(-1), ['/bin/tmux', '-S', '/tmp/tmux-501/default', 'set-option', '-p', '-t', '%7', '@tickbird_agent', String(AGENT)]);
   const focus = JSON.parse(splitWindow.at(-1)!);
   assert.deepEqual(focus, ['/bin/tmux', '-S', '/tmp/tmux-501/default', 'select-window', '-t', '%3', ';', 'select-pane', '-t', '%3']);
 });
@@ -132,7 +132,7 @@ test('no pane where it would not belong', () => {
   none(split.handle('codex', AGENT, START, { ...KITTY, ...CLI }, fake.tools), /非交互/, fake.calls);
   fake = fakeTools();
   none(split.handle('claude', AGENT, { ...START, source: 'compact' }, { ...KITTY, ...CLI }, fake.tools), /压缩/, fake.calls);
-  none(split.handle('claude', AGENT, START, { ...KITTY, AGENT_SIDECAR_CLI: '/missing/cli.js' }, fake.tools), /找不到 agent-sidecar/, fake.calls);
+  none(split.handle('claude', AGENT, START, { ...KITTY, TICKBIRD_CLI: '/missing/cli.js' }, fake.tools), /找不到 tickbird/, fake.calls);
   none(split.handle('claude', AGENT, START, { KITTY_WINDOW_ID: '19', ...CLI }, fake.tools), /socket 远程控制/, fake.calls);
   none(split.handle('claude', AGENT, START, { ZELLIJ: '0', ...KITTY, ...CLI }, fake.tools), /Zellij 还不支持/, fake.calls);
   none(split.handle('claude', AGENT, START, { TERM_PROGRAM: 'Apple_Terminal', ...CLI }, fake.tools), /不在支持自动开栏的终端里/, fake.calls);
@@ -143,38 +143,38 @@ test('no pane where it would not belong', () => {
 
 // The hook as the agents run it: a separate node process with JSON on stdin.
 test('the hook prints nothing, never fails, and logs what it decided', () => {
-  const home = mkdtempSync(join(tmpdir(), 'sidecar-split-'));
+  const home = mkdtempSync(join(tmpdir(), 'tickbird-split-'));
   const hook = join(pluginDir, 'split.mjs');
-  const env = { PATH: process.env.PATH, HOME: process.env.HOME, XDG_STATE_HOME: home, TERM_PROGRAM: 'Apple_Terminal', AGENT_SIDECAR_CLI: CLI.AGENT_SIDECAR_CLI };
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, XDG_STATE_HOME: home, TERM_PROGRAM: 'Apple_Terminal', TICKBIRD_CLI: CLI.TICKBIRD_CLI };
   for (const input of [JSON.stringify(START), 'not json', '']) {
     const result = spawnSync(process.execPath, [hook, 'claude', String(process.pid)], { input, env, encoding: 'utf8' });
     assert.equal(result.status, 0);
     assert.equal(result.stdout, '', 'Nothing reaches the model');
     assert.equal(result.stderr, '');
   }
-  const log = readFileSync(join(home, 'agent-sidecar', 'split.log'), 'utf8').trim().split('\n');
+  const log = readFileSync(join(home, 'tickbird', 'split.log'), 'utf8').trim().split('\n');
   assert.equal(log.length, 1, 'Only the session start is logged');
   assert.match(log[0], /claude s-1 startup · /);
   // An unwritable log is not the agent's problem either.
-  const blocked = mkdtempSync(join(tmpdir(), 'sidecar-split-'));
-  writeFileSync(join(blocked, 'agent-sidecar'), 'a file where a directory should be');
+  const blocked = mkdtempSync(join(tmpdir(), 'tickbird-split-'));
+  writeFileSync(join(blocked, 'tickbird'), 'a file where a directory should be');
   const result = spawnSync(process.execPath, [hook, 'claude', '1'], { input: JSON.stringify(START), env: { ...env, XDG_STATE_HOME: blocked }, encoding: 'utf8' });
   assert.equal(result.status, 0);
   assert.equal(result.stdout, '');
 });
 
-test('the pane’s program: the named one, else agent-sidecar on PATH, else the install location', () => {
+test('the pane’s program: the named one, else tickbird on PATH, else the install location', () => {
   const paneProgram = (require(join(pluginDir, 'split.mjs')) as { paneProgram(env: NodeJS.ProcessEnv, tools: { which: (name: string, env: NodeJS.ProcessEnv) => string | undefined }): string[] | undefined }).paneProgram;
   const looked: string[] = [];
   const which = (name: string, env: NodeJS.ProcessEnv) => { looked.push(env.PATH ?? ''); return env.PATH === '/home/me/.local/bin' ? `${env.PATH}/${name}` : undefined; };
-  assert.deepEqual(paneProgram({ PATH: '/usr/bin', HOME: '/home/me' }, { which }), ['/home/me/.local/bin/agent-sidecar']);
+  assert.deepEqual(paneProgram({ PATH: '/usr/bin', HOME: '/home/me' }, { which }), ['/home/me/.local/bin/tickbird']);
   assert.deepEqual(looked, ['/usr/bin', '/home/me/.local/bin']);
-  assert.deepEqual(paneProgram({ AGENT_SIDECAR_CLI: CLI.AGENT_SIDECAR_CLI }, { which }), [process.execPath, CLI.AGENT_SIDECAR_CLI]);
+  assert.deepEqual(paneProgram({ TICKBIRD_CLI: CLI.TICKBIRD_CLI }, { which }), [process.execPath, CLI.TICKBIRD_CLI]);
 });
 
 test('the pane’s command line round-trips through watch’s arguments', () => {
   const focus = ['/bin/tmux', '-S', '/tmp/a b', 'select-window', '-t', '%3', ';', 'select-pane', '-t', '%3'];
-  const argv = split.paneArgv(['/usr/local/bin/agent-sidecar'], AGENT, focus);
+  const argv = split.paneArgv(['/usr/local/bin/tickbird'], AGENT, focus);
   assert.equal(argv[1], 'watch');
   assert.deepEqual(parseWatchArgs(argv.slice(2)), { agent: AGENT, focus });
   assert.deepEqual(parseWatchArgs(['abc-1']), { target: 'abc-1' });
@@ -206,8 +206,8 @@ const SERVER_ARGS = '/Users/me/.codex/packages/app-server-daemon/releases/0.161.
 /** A machine with Codex fronts: 501 and 502 in /work/project, 503 elsewhere, plus things that are not fronts. */
 function codexMachine(fronts = [[501, '/work/project'], [502, '/work/project'], [503, '/work/other']] as Array<[number, string]>) {
   const env: Record<number, string> = {
-    501: ' TERM=xterm-kitty TMUX=/tmp/tmux-501/default,1,0 TMUX_PANE=%3 PATH=/usr/bin EDITOR=code --wait AGENT_SIDECAR_CLI=' + CLI.AGENT_SIDECAR_CLI,
-    502: ' KITTY_WINDOW_ID=19 KITTY_LISTEN_ON=unix:/tmp/kitty-1 PATH=/usr/bin AGENT_SIDECAR_CLI=' + CLI.AGENT_SIDECAR_CLI,
+    501: ' TERM=xterm-kitty TMUX=/tmp/tmux-501/default,1,0 TMUX_PANE=%3 PATH=/usr/bin EDITOR=code --wait TICKBIRD_CLI=' + CLI.TICKBIRD_CLI,
+    502: ' KITTY_WINDOW_ID=19 KITTY_LISTEN_ON=unix:/tmp/kitty-1 PATH=/usr/bin TICKBIRD_CLI=' + CLI.TICKBIRD_CLI,
   };
   const calls: string[][] = [];
   const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
@@ -255,7 +255,7 @@ test('Codex through its server: the pane goes beside the front, in the front’s
     return terminal.tools.run(command, args);
   } };
   // The server was started from another kitty window long ago: its variables must not be used.
-  const stale = { KITTY_WINDOW_ID: '59', KITTY_LISTEN_ON: 'unix:/tmp/old', XDG_STATE_HOME: mkdtempSync(join(tmpdir(), 'sidecar-state-')) };
+  const stale = { KITTY_WINDOW_ID: '59', KITTY_LISTEN_ON: 'unix:/tmp/old', XDG_STATE_HOME: mkdtempSync(join(tmpdir(), 'tickbird-state-')) };
   const outcome = split.handle('codex', SERVER, START, stale, tools);
   assert.match(outcome!, /^tmux：在 %3 旁开栏 %7（Agent 501，Codex 前台，后台 900）/);
   const splitWindow = commands.find(call => call.includes('split-window'))!;
@@ -268,11 +268,11 @@ test('Codex through its server: the pane goes beside the front, in the front’s
 
 test('both plugins carry the same front.mjs', () => {
   const copy = (plugin: string) => readFileSync(resolve(__dirname, `../../plugins/${plugin}/scripts/front.mjs`), 'utf8');
-  assert.equal(copy('sidecar-state'), copy('sidecar-split'), 'Edit one, copy it to the other');
+  assert.equal(copy('tickbird-state'), copy('tickbird-split'), 'Edit one, copy it to the other');
 });
 
-test('sidecar-state records the front as the Codex session’s agent, with its window, and the server beside it', () => {
-  const state = require(resolve(__dirname, '../../plugins/sidecar-state/scripts/hook.mjs')) as {
+test('tickbird-state records the front as the Codex session’s agent, with its window, and the server beside it', () => {
+  const state = require(resolve(__dirname, '../../plugins/tickbird-state/scripts/hook.mjs')) as {
     record(provider: string, agentPid: number, input: object, now: number, env: NodeJS.ProcessEnv, front?: object): Record<string, unknown>;
   };
   const stale = { KITTY_WINDOW_ID: '59', KITTY_LISTEN_ON: 'unix:/tmp/old' };

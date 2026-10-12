@@ -66,7 +66,7 @@ for (const [name, provider, file, lines] of samples) {
   const text = (await readFile(file, 'utf8')).split('\n').slice(0, lines).join('\n') + '\n';
   const parsed = (provider === 'codex' ? parseCodex : parseClaude)({ text, file, projectPath });
   const session = provider === 'codex' ? await applyCodexSessionTitle(parsed) : parsed;
-  cases.set(`${name}-sidecar`, renderSidecar({ projectName: 'agent-sidecar · 实际渲染核对', session, nonce }));
+  cases.set(`${name}-sidecar`, renderSidecar({ projectName: 'tickbird · 实际渲染核对', session, nonce }));
   const rows = groupSessionTurns(session).flatMap(turn => outlineTurn(turn).nodes.flatMap(node => node.kind === 'actions' ? actionRows(node) : []));
   const repeated = rows.find(row => row.items.length > 1 && row.description.label !== 'Web · 来源结果');
   const evidence = repeated && resolveOutlineEvidence(session, repeated.id);

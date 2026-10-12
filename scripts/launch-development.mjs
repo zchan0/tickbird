@@ -39,7 +39,7 @@ const add = id => {
   item.dependencies.forEach(add);
 };
 ['openai.chatgpt', 'Anthropic.claude-code'].forEach(add);
-const code = process.env.SIDECAR_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+const code = process.env.TICKBIRD_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
 const args = ['--new-window', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`, `--extensions-dir=${extensions}`,
   `--extensionDevelopmentPath=${root}`, ...selected.map(item => `--extensionDevelopmentPath=${item.path}`), folder];
 const child = spawn(code, args, { stdio: 'inherit' });

@@ -1,6 +1,6 @@
 # 会话状态（接入 → 显示端）
 
-状态：已确认（2026-10-05）；2026-10-08 精简为三种事件（见「记录」）；2026-10-11 加 `call`（Claude Code 的 `PreToolUse`）。实现：插件 `sidecar-state`（`plugins/sidecar-state/`，hook 与两份插件清单）、`packages/core/src/session-state.ts`（读取与折叠）。
+状态：已确认（2026-10-05）；2026-10-08 精简为三种事件（见「记录」）；2026-10-11 加 `call`（Claude Code 的 `PreToolUse`）。实现：插件 `tickbird-state`（`plugins/tickbird-state/`，hook 与两份插件清单）、`packages/core/src/session-state.ts`（读取与折叠）。
 
 接入是给 Claude Code 和 Codex 的一组 hook。它只做一件事：把「当前有哪些会话、各自在做什么」写到本机。VS Code 版和终端版读这些文件，决定跟随哪个会话、显示什么状态。接入不显示任何东西，也不改变 Agent 的任何行为。
 
@@ -14,7 +14,7 @@
 ## 位置
 
 ```
-$XDG_STATE_HOME/agent-sidecar/sessions/     默认 ~/.local/state/agent-sidecar/sessions/
+$XDG_STATE_HOME/tickbird/sessions/     默认 ~/.local/state/tickbird/sessions/
   claude-<session_id>.jsonl
   codex-<session_id>.jsonl
 ```

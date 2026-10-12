@@ -126,14 +126,14 @@ function harness(initialOrientation = 0) {
   const panels: Array<{ receive: FixtureEmitter<unknown>; viewColumn: number; disposed: boolean; viewType: string }> = [];
   let viewProvider: { resolveWebviewView(view: unknown): Promise<void> } | undefined;
   let sidebar: any;
-  // The Sidecar is a sidebar view: column 0 here only marks "not an editor group".
+  // The Tickbird is a sidebar view: column 0 here only marks "not an editor group".
   const createSidebarView = () => {
     const receive = new FixtureEmitter<unknown>();
     const dispose = new FixtureEmitter<void>();
     const visibility = new FixtureEmitter<void>();
     let html = '', htmlWrites = 0;
     const messages: unknown[] = [];
-    const view = { receive, viewType: 'agentSidecar.observer', viewColumn: 0, disposed: false, visible: true, showCalls: 0,
+    const view = { receive, viewType: 'tickbird.observer', viewColumn: 0, disposed: false, visible: true, showCalls: 0,
       webview: {
         get html() { return html; }, set html(value: string) { html = value; ++htmlWrites; },
         get htmlWrites() { return htmlWrites; }, messages,
@@ -208,7 +208,7 @@ function harness(initialOrientation = 0) {
       registerCommand: (name: string, callback: () => Promise<void>) => { commands.set(name, callback); return { dispose() {} }; },
       executeCommand: async (name: string, value?: Layout) => {
         executed.push(name);
-        if (name === 'agentSidecar.observer.focus') {
+        if (name === 'tickbird.observer.focus') {
           if (!sidebar || sidebar.disposed) { sidebar = createSidebarView(); void viewProvider!.resolveWebviewView(sidebar); }
           return undefined;
         }
@@ -363,8 +363,8 @@ for (const [gap, folders, text] of [
     assert.ok(html.includes(text));
     assert.equal(html.includes('data-action="openFolder"'), gap === 'empty');
     // Palette commands land on the same explanation rather than a warning.
-    await host.command('agentSidecar.chooseSession');
-    await host.command('agentSidecar.refresh');
+    await host.command('tickbird.chooseSession');
+    await host.command('tickbird.refresh');
     assert.equal(host.pickers.length, 0);
     assert.equal(host.discoveries, 0);
     assert.deepEqual(host.warnings, []);
@@ -421,7 +421,7 @@ test('the session picker enriches title, log update time and latest conversation
     await host.ready();
     const listing = deferred<SessionPickerEntry[]>();
     host.metadata.list = () => listing.promise;
-    const choosing = host.command('agentSidecar.chooseSession');
+    const choosing = host.command('tickbird.chooseSession');
     await new Promise(resolve => setImmediate(resolve));
     const picker = host.pickers.at(-1)!;
     assert.ok(picker.shown);
@@ -456,7 +456,7 @@ test('cancelled session picking leaves selection intact and late metadata cannot
     const active = deferred<SessionPickerEntry>();
     host.metadata.list = () => listing.promise;
     host.metadata.read = () => active.promise;
-    const choosing = host.command('agentSidecar.chooseSession');
+    const choosing = host.command('tickbird.chooseSession');
     await new Promise(resolve => setImmediate(resolve));
     const picker = host.pickers.at(-1)!;
     picker.activate('claude:b');
@@ -483,7 +483,7 @@ test('lazy active metadata preserves its identity and cannot be downgraded by a 
     const reads: string[] = [];
     host.metadata.list = () => listing.promise;
     host.metadata.read = candidate => { reads.push(`${candidate.provider}:${candidate.id}`); return active.promise; };
-    const choosing = host.command('agentSidecar.chooseSession');
+    const choosing = host.command('tickbird.chooseSession');
     await new Promise(resolve => setImmediate(resolve));
     const picker = host.pickers.at(-1)!;
     picker.activate('claude:b');
@@ -509,7 +509,7 @@ test('a stale picker cannot repaint or accept an old identity after an explicit 
     await host.ready();
     const listing = deferred<SessionPickerEntry[]>();
     host.metadata.list = () => listing.promise;
-    const choosing = host.command('agentSidecar.chooseSession');
+    const choosing = host.command('tickbird.chooseSession');
     await new Promise(resolve => setImmediate(resolve));
     const picker = host.pickers.at(-1)!;
     await host.api.selectSession('claude:b');
@@ -533,7 +533,7 @@ test('extension disposal settles the chooser, removes listeners and ignores all 
     host.metadata.list = () => listing.promise;
     host.metadata.read = () => active.promise;
     let settled = false;
-    const choosing = host.command('agentSidecar.chooseSession').then(() => { settled = true; });
+    const choosing = host.command('tickbird.chooseSession').then(() => { settled = true; });
     await new Promise(resolve => setImmediate(resolve));
     picker = host.pickers.at(-1)!;
     picker.activate('claude:b');
@@ -551,7 +551,7 @@ test('extension disposal settles the chooser, removes listeners and ignores all 
   } finally { picker?.hide(); host.dispose(); }
 });
 
-test('the sidebar Sidecar and its details never read or change the editor layout, and Keep survives reuse', async () => {
+test('the sidebar Tickbird and its details never read or change the editor layout, and Keep survives reuse', async () => {
   const host = harness();
   try {
     await host.ready();
@@ -583,7 +583,7 @@ test('coverage opens in the editor area for either provider without touching the
   try {
     await host.ready();
     await host.api.selectSession('claude:b');
-    await host.command('agentSidecar.coverage');
+    await host.command('tickbird.coverage');
     assert.deepEqual(host.warnings, []);
     assert.equal(host.documents.size, 1);
     assert.match([...host.documents.values()][0].text, /一页一轮/);
@@ -640,7 +640,7 @@ test('refresh emits a coverage-provider update for an already-open same-session 
   const host = harness();
   try {
     await host.ready();
-    await host.command('agentSidecar.coverage');
+    await host.command('tickbird.coverage');
     const doc = [...host.documents.values()][0];
     assert.ok(doc);
     host.sources.load = async candidate => ({ ...data(candidate), warnings: ['新快照包含源截断说明'] });
@@ -650,7 +650,7 @@ test('refresh emits a coverage-provider update for an already-open same-session 
   } finally { host.dispose(); }
 });
 
-test('Keep confirms the existing detail page without replacing HTML or returning focus to Sidecar', async () => {
+test('Keep confirms the existing detail page without replacing HTML or returning focus to Tickbird', async () => {
   const host = harness();
   try {
     await host.ready();
@@ -814,7 +814,7 @@ test('coverage report links each original action to semantic detail rows without
   try {
     host.sources.load = async candidate => aggregateData(candidate);
     await host.ready();
-    await host.command('agentSidecar.coverage');
+    await host.command('tickbird.coverage');
     const doc = [...host.documents.values()][0];
     const report = JSON.parse(doc.text) as { presentation: { items: Array<{ itemId: string; surface: string; rowIds: string[] }> } };
     assert.equal(report.presentation.items.length, host.api.session!.items.length);
@@ -872,7 +872,7 @@ test('choosing another session pauses following until the reader resumes it', as
     host.sessionStates.list = [liveState('b')];
     await host.api.refreshStates();
     assert.equal(host.api.session?.id, 'b');
-    const choosing = host.command('agentSidecar.chooseSession');
+    const choosing = host.command('tickbird.chooseSession');
     await tick();
     host.pickers.at(-1)!.accept('codex:a');
     await choosing;

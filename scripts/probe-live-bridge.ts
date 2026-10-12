@@ -15,7 +15,7 @@ async function main() {
   const started = performance.now();
   const live = await openLiveSession(candidate);
   try {
-    const loaded = performance.now(), view = new LiveView('agent-sidecar', live.session), projected = performance.now();
+    const loaded = performance.now(), view = new LiveView('tickbird', live.session), projected = performance.now();
     const entries: unknown[] = [{ kind: 'initial', observedAt: new Date().toISOString(), provider, sessionId: id,
       readBytes: live.health.readBytes, items: live.session.items.length, turns: view.current.turns.length,
       loadMs: Math.round(loaded - started), projectionMs: Math.round(projected - loaded), htmlBytes: Buffer.byteLength(JSON.stringify(view.current)) }];

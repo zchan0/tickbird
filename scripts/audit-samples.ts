@@ -36,7 +36,7 @@ async function main() {
   }
   await mkdir('.test-artifacts', { recursive: true });
   await writeFile('.test-artifacts/sample-audit.json', JSON.stringify({ kind: 'real-log-parser-invariants-not-ui-coverage',
-    generatedAt: new Date().toISOString(), limitations: ['No original Agent UI or rendered Sidecar comparison in this script.',
+    generatedAt: new Date().toISOString(), limitations: ['No original Agent UI or rendered Tickbird comparison in this script.',
       'Coverage disposition does not imply supported rendering. Child file is audited independently, not proof of parent-child integration.'], results }, null, 2) + '\n');
   console.log(JSON.stringify(results.map(({ name, itemCount, dispositions, missing, invalidDetails, duplicateIds, invariantChecksPassed }) => ({ name, itemCount, dispositions, missing, invalidDetails, duplicateIds, invariantChecksPassed })), null, 2));
   if (results.some(result => !result.invariantChecksPassed)) process.exitCode = 1;

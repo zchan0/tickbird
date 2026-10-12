@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-// SIDECAR_EXTENSION_PATH runs the same checks against another build, such as the packaged build/vsix.
-const extensionPath = process.env.SIDECAR_EXTENSION_PATH || root;
+// TICKBIRD_EXTENSION_PATH runs the same checks against another build, such as the packaged build/vsix.
+const extensionPath = process.env.TICKBIRD_EXTENSION_PATH || root;
 const runRoot = await mkdtemp(join(tmpdir(), 'sidecar-product-host-'));
 const fixture = join(runRoot, 'workspace');
 const userData = join(runRoot, 'user-data');
@@ -37,14 +37,14 @@ await writeFile(join(claudeProject, 'fixture.jsonl'), jsonl([
   { type: 'assistant', uuid: 'cl-call', sessionId: 'cl-fixture', cwd: fixture, message: { id: 'cl-msg', role: 'assistant', content: [{ type: 'tool_use', id: 'cl-tool', name: 'Bash', input: { command: 'fixture only, never executed' } }] } },
   { type: 'user', uuid: 'cl-output', sessionId: 'cl-fixture', cwd: fixture, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'cl-tool', is_error: false, content: 'Fixture completed. One known result.' }] } }
 ]));
-const code = process.env.SIDECAR_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+const code = process.env.TICKBIRD_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
 // Each run opens its own window: the project fixture, then a window with no folder.
 async function launch(name, tests, folder) {
   const resultFile = join(runRoot, `result-${name}.json`);
   const args = ['--new-window', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`, `--extensions-dir=${extensions}`,
     `--extensionDevelopmentPath=${extensionPath}`, `--extensionTestsPath=${join(root, tests)}`, ...(folder ? [folder] : [])];
-  const child = spawn(code, args, { stdio: 'inherit', env: { ...process.env, SIDECAR_TEST_RESULT: resultFile,
-    SIDECAR_TEST_CODEX_ROOT: codex, SIDECAR_TEST_CLAUDE_ROOT: claude, XDG_STATE_HOME: join(runRoot, 'state') } });
+  const child = spawn(code, args, { stdio: 'inherit', env: { ...process.env, TICKBIRD_TEST_RESULT: resultFile,
+    TICKBIRD_TEST_CODEX_ROOT: codex, TICKBIRD_TEST_CLAUDE_ROOT: claude, XDG_STATE_HOME: join(runRoot, 'state') } });
   console.log(JSON.stringify({ run: name, runRoot, resultFile, launcherPid: child.pid }));
   const exitCode = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });
   let result;

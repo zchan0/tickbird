@@ -4,14 +4,16 @@
 
 ## 产品与组件
 
+2026-10-12 改名：Agent Sidecar → Tickbird（0.6.0）。旧名字的扩展、插件、插件市场和命令由安装脚本自动移除（`OLD`，`packages/terminal/src/setup.ts`）。本地文件夹仍叫 `agent-sidecar`。
+
 整个仓库用一个版本号（当前 0.5.0），用 `npm run set-version -- x.y.z` 修改。
 
 | 组件 | 状态 | 说明 |
 | --- | --- | --- |
-| VS Code 版（`zchan0.agent-sidecar`） | 可用 | 左侧主侧栏视图，一页一轮，与终端版同一套排法（设计稿 v8）；点开调用打开它指向的文件、图片、网址或 diff |
-| 终端版（`agent-sidecar`） | 可用 | kitty、tmux 里自动开一栏；设计见 [TERMINAL_DESIGN.md](./TERMINAL_DESIGN.md)，之后的改动记在 [TODO.md](./TODO.md) |
-| 插件 `sidecar-state` | 可用 | Claude Code 与 Codex 的 hook，写会话状态。格式见 [SESSION_STATE.md](./SESSION_STATE.md) |
-| 插件 `sidecar-split` | 可用 | 终端版的自动分屏，只随终端版安装 |
+| VS Code 版（`zchan0.tickbird`） | 可用 | 左侧主侧栏视图，一页一轮，与终端版同一套排法（设计稿 v8）；点开调用打开它指向的文件、图片、网址或 diff |
+| 终端版（`tickbird`） | 可用 | kitty、tmux 里自动开一栏；设计见 [TERMINAL_DESIGN.md](./TERMINAL_DESIGN.md)，之后的改动记在 [TODO.md](./TODO.md) |
+| 插件 `tickbird-state` | 可用 | Claude Code 与 Codex 的 hook，写会话状态。格式见 [SESSION_STATE.md](./SESSION_STATE.md) |
+| 插件 `tickbird-split` | 可用 | 终端版的自动分屏，只随终端版安装 |
 
 安装：`npm run install:vscode`、`npm run install:terminal`（见 README）。未在任何市场公开发布。
 

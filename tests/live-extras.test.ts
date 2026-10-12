@@ -49,7 +49,7 @@ test('the follow button and the integration hint render hidden unless asked for'
   assert.match(panel(page({})), /<div class="integration-hint follow-session" hidden>/);
   assert.match(panel(page({})), /<div class="integration-hint" hidden>/);
   assert.match(panel(page({ followPaused: true })), /<div class="integration-hint follow-session"><span>自动跟随已暂停/);
-  assert.match(panel(page({ integrationHint: true })), /<div class="integration-hint"><span>装上 Agent Sidecar 接入后/);
+  assert.match(panel(page({ integrationHint: true })), /<div class="integration-hint"><span>装上 Tickbird 接入后/);
 });
 
 test('the page shows and hides the follow button and the hint as the host says, and posts the reader’s choices', async t => {

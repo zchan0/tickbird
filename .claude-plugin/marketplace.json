@@ -1,21 +1,21 @@
 {
-  "name": "agent-sidecar",
+  "name": "tickbird",
   "owner": {
     "name": "zchan0"
   },
   "metadata": {
-    "description": "Agent Sidecar 的接入：sidecar-state 由 npm run install:vscode 安装；sidecar-split 属于终端版。"
+    "description": "Tickbird 的接入：tickbird-state 由 npm run install:vscode 安装；tickbird-split 属于终端版。"
   },
   "plugins": [
     {
-      "name": "sidecar-state",
-      "source": "./plugins/sidecar-state",
-      "description": "Agent Sidecar 的接入：把会话属于哪个窗口、是否在等你批准、屏幕上正在显示的长回答写到本机文件，供 Agent Sidecar 的 VS Code 版和终端版读取。只记录会话记录里没有或来得太晚的信息；本身不显示界面，不改变 Agent 的行为。"
+      "name": "tickbird-state",
+      "source": "./plugins/tickbird-state",
+      "description": "Tickbird 的接入：把会话属于哪个窗口、是否在等你批准、屏幕上正在显示的长回答写到本机文件，供 Tickbird 的 VS Code 版和终端版读取。只记录会话记录里没有或来得太晚的信息；本身不显示界面，不改变 Agent 的行为。"
     },
     {
-      "name": "sidecar-split",
-      "source": "./plugins/sidecar-split",
-      "description": "Agent Sidecar 终端版的自动分屏：在 kitty 或 tmux 里启动 Agent 时，在旁边开一栏 Sidecar，显示这个会话的过程。/clear 后同一栏显示新会话，Agent 退出时栏自己关闭。不显示其它界面，不改变 Agent 的行为。"
+      "name": "tickbird-split",
+      "source": "./plugins/tickbird-split",
+      "description": "Tickbird 终端版的自动分屏：在 kitty 或 tmux 里启动 Agent 时，在旁边开一栏 Tickbird，显示这个会话的过程。/clear 后同一栏显示新会话，Agent 退出时栏自己关闭。不显示其它界面，不改变 Agent 的行为。"
     }
   ]
 }

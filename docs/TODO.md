@@ -32,19 +32,19 @@
 
 进展（2026-10-10，未提交，待审对照表）：命令解析移到 `packages/core/src/command-line.ts`，终端改用它。2340 个调用行里 1000 多行有变化。已定（与用户确认）：只读的命令两边都显示成 Read / Search / List（Codex 记录里的 `parsed_cmd` 就是这么分的）；脚本只标改动（`python3 · edits x.ts`）。还没做：Codex 网页调用里的 `turn1view2` 这类引用，要从之前的结果里查出网址（7 行）。
 
-### 2. Sidecar 比 Agent 晚出内容，而且思考和工具一起出现（已完成，0.4.5）
+### 2. Tickbird 比 Agent 晚出内容，而且思考和工具一起出现（已完成，0.4.5）
 
-测量（2026-10-10，Claude Code 2.1.29x、Codex 0.162.0，tmux 里每 100ms 记录 Agent 屏幕、会话记录、Sidecar 窗格）：
+测量（2026-10-10，Claude Code 2.1.29x、Codex 0.162.0，tmux 里每 100ms 记录 Agent 屏幕、会话记录、Tickbird 窗格）：
 
 | | Claude Code | Codex |
 | --- | --- | --- |
 | 调用：会话记录比 Agent 屏幕晚 | 通常 0.3–0.6s；10 次里有 1 次 3.5s（命令已经开始跑） | 早 4s：Codex 屏幕要等命令跑完才显示 `• Ran` |
-| 文字：Sidecar 比 Agent 屏幕晚 | 0–0.1s（靠 `MessageDisplay` 提前显示） | 0–0.1s（会话记录和屏幕同时） |
-| Sidecar 自己：会话记录写入 → 窗格画出 | ≤ 0.1s | ≤ 0.1s |
+| 文字：Tickbird 比 Agent 屏幕晚 | 0–0.1s（靠 `MessageDisplay` 提前显示） | 0–0.1s（会话记录和屏幕同时） |
+| Tickbird 自己：会话记录写入 → 窗格画出 | ≤ 0.1s | ≤ 0.1s |
 | `PreToolUse` hook（async）比屏幕晚 | 0–0.1s，每次都准 | 不需要 |
 
 结论：
-- 延迟来自 Claude Code 写会话记录的时机，不在 Sidecar。用户看到的「Bash 跑了一会儿才出现」是那次 3.5s 的情况。
+- 延迟来自 Claude Code 写会话记录的时机，不在 Tickbird。用户看到的「Bash 跑了一会儿才出现」是那次 3.5s 的情况。
 - 「文字和调用一下子出现」Claude Code 自己也这样：它等调用参数生成完，才把前面那句话和调用一起显示。这一点靠第 5 项的动效缓和。
 - 修法：Claude Code 订阅 `PreToolUse`（`async: true`，不拖慢 Agent），把将要运行的调用写进会话状态；会话记录出现同一个调用后丢弃，和 `MessageDisplay` 的提前文字一样处理。用户确认后已实现（02a6ccb）：SESSION_STATE.md 改为四种 hook，`call` 只记几个短字段。复测：调用比 Agent 屏幕晚 0.1–0.2s 出现在窗格，比会话记录早约 0.4s。
 - Codex 不用改。
@@ -65,7 +65,7 @@
 
 依赖第 2 项的测量结果。
 
-- 新到的内容依次出现：文字逐段出现，工具一行一行出现；一批的总时长设上限（例如 300ms），不能让 Sidecar 比实际更慢。
+- 新到的内容依次出现：文字逐段出现，工具一行一行出现；一批的总时长设上限（例如 300ms），不能让 Tickbird 比实际更慢。
 - 运行中的调用：~~在树杈那一格放单格动画~~ 2026-10-12 去掉：整页只在末尾转圈。
 - 只给新到的内容做动效；翻回旧的一轮、重画、改窗口宽度时不播放。
 - 先出设计稿（动效用 HTML 模拟），确认后再开发。

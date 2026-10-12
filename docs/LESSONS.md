@@ -1,6 +1,6 @@
 # 开发中的问题与解决
 
-本文收集 Agent Sidecar 开发中每一次「发现问题 → 弄清原因 → 解决」的经过。
+本文收集 Tickbird 开发中每一次「发现问题 → 弄清原因 → 解决」的经过。
 每条场景写明现象、发现方式、原因、解决、经验和出处。
 先读「通用规律」，再按主题查具体场景。
 遇到类似问题时，先搜关键词（如 `$PPID`、DA1、hook 信任）。
@@ -21,7 +21,7 @@
 9. **先复现，再修。** 用修复前的代码跑一遍新检查，确认它能抓到问题。见场景 50、51、72。
 10. **按版本缓存的东西，改了就升版本。** 见场景 80、89、90。
 11. **工具的「成功」和「无输出」不一定可信。** 静默跳过、静默退出、对不存在的对象报成功，都要另行核对。见场景 7、81、91。
-12. **Sidecar 不能挡 Agent 的路。** hook 静默、快速、绝不失败；任何情况都不往 Agent 输入。见场景 2、8、18。
+12. **Tickbird 不能挡 Agent 的路。** hook 静默、快速、绝不失败；任何情况都不往 Agent 输入。见场景 2、8、18。
 13. **向交互程序输入前，先读屏幕。** 见场景 83、86。
 14. **用户说「去掉」就是删掉。** 反馈针对的是结构和占地，不是颜色深浅。见场景 97、100。
 
@@ -39,9 +39,9 @@
 - **现象**：hook 打印的任何东西都会被模型读到。
 - **发现方式**：终端原型实测。
 - **原因**：SessionStart hook 的输出按设计会注入上下文。
-- **解决**：hook 完全静默，决定写进日志（`~/.local/state/agent-sidecar/hook.log`，后来是 `split.log`）。hook 捕获所有异常，日志失败也不影响 Agent。
+- **解决**：hook 完全静默，决定写进日志（`~/.local/state/tickbird/hook.log`，后来是 `split.log`）。hook 捕获所有异常，日志失败也不影响 Agent。
 - **经验**：给 Agent 写 hook，先查清它的输出去哪。观察工具不能改变被观察者。
-- **出处**：a3a65e4；`plugins/sidecar-state/scripts/hook.mjs`、`plugins/sidecar-split/scripts/split.mjs` 注释；记忆 terminal-sidecar-hooks。
+- **出处**：a3a65e4；`plugins/tickbird-state/scripts/hook.mjs`、`plugins/tickbird-split/scripts/split.mjs` 注释；记忆 terminal-sidecar-hooks。
 
 ### 3. Claude Code 的会话记录在第一条消息后才出现
 - **现象**：会话开始时，`transcript_path` 指向的文件还不存在。
@@ -92,7 +92,7 @@
 - **出处**：65ad932；记忆 terminal-sidecar-hooks、sidecar-private-install。
 
 ### 9. 「等你批准」不在会话记录里
-- **现象**：Agent 停在批准提示时，会话记录没有任何变化，Sidecar 看起来像卡住。
+- **现象**：Agent 停在批准提示时，会话记录没有任何变化，Tickbird 看起来像卡住。
 - **发现方式**：hook 能力实测，对比 hook 输入与会话记录的写入时间。
 - **原因**：`PermissionRequest`（两边都有）在调用写入后 0.05–0.09 秒触发，带工具名和参数。会话记录里没有这段状态。Claude 的 `Notification(permission_prompt)` 晚约 6 秒，只适合提醒。两个 Agent 都不通知「批准已处理」。
 - **解决**：用 `PermissionRequest` 写 `approval` 事件。会话记录里出现批准之后的新记录，就算已处理（`awaitingApproval(state, 会话记录最后时间)`），不能只看 `phase`。
@@ -124,7 +124,7 @@
 - **出处**：`DEVELOPMENT_LOG` B2；`docs/STATUS.md`「已知问题」。
 
 ### 13. 回应前按 Esc，会话记录里什么都不写
-- **现象**：中断后 Sidecar 仍在计时，显示「暂未取得本轮过程」。
+- **现象**：中断后 Tickbird 仍在计时，显示「暂未取得本轮过程」。
 - **发现方式**：实时显示的使用中发现。
 - **原因**：Claude Code 在回应前被中断时不写中断记录，只把提示放回输入框。重发的请求和前一条有同一个 `parentUuid`。
 - **解决**：读 Claude Code 自己的 `~/.claude/sessions/<pid>.json`（`sessionId`、`busy`/`idle`），并校验进程存活；idle 时立即停止计时。同一父记录下再次提问时，把前一轮标为「回合中断」。
@@ -140,10 +140,10 @@
 - **出处**：`docs/TERMINAL_PLAN.md` C2-5「已核实」；2026-10-08 实测（Claude Code 2.1.293）。
 
 ### 15. Claude Code 写会话记录有固定的滞后
-- **现象**：Sidecar 比 Claude Code 界面慢几秒。
+- **现象**：Tickbird 比 Claude Code 界面慢几秒。
 - **发现方式**：监听本会话 JSONL 的写入时间。
-- **原因**：调用记录在工具开始时写入（晚约 150ms），结果在结束时写入。但同一响应里调用前的思考和正文，要等调用参数生成完才一起写入，实测晚 1.1 秒、3.2 秒，长参数可达十几秒。Sidecar 自身每次更新 14–85ms。
-- **解决**：不在 Sidecar 侧优化；用 `MessageDisplay` 补长回答（场景 10）。
+- **原因**：调用记录在工具开始时写入（晚约 150ms），结果在结束时写入。但同一响应里调用前的思考和正文，要等调用参数生成完才一起写入，实测晚 1.1 秒、3.2 秒，长参数可达十几秒。Tickbird 自身每次更新 14–85ms。
+- **解决**：不在 Tickbird 侧优化；用 `MessageDisplay` 补长回答（场景 10）。
 - **经验**：先量清延迟在谁那里，再决定改哪里。
 - **出处**：`DEVELOPMENT_LOG` 2026-09-23（五）；记忆 turn-semantics-cross-harness。
 
@@ -156,7 +156,7 @@
 - **出处**：记忆 turn-semantics-cross-harness；`DEVELOPMENT_LOG` 2026-09-23（二）。
 
 ### 17. Claude 的思考摘要开始有正文
-- **现象**：用户说 Sidecar 里「中间的对话丢了」。
+- **现象**：用户说 Tickbird 里「中间的对话丢了」。
 - **发现方式**：用户反馈，再查会话记录。
 - **原因**：Claude Code 2.1.280 起间歇写入思考摘要，并在界面上显示。解析器沿用旧结论，把 `thinking` 一律当隐藏推理。同版本别的会话也可能全空。
 - **解决**：有正文就显示为「思考摘要」，签名和 `redacted_thinking` 仍排除。Codex 的 `reasoning.summary` 同样显示。
@@ -193,7 +193,7 @@
 - **现象**：Codex 的栏开不出来，或日志里的 kitty 窗口不对。
 - **发现方式**：C2-4 端到端测试。
 - **原因**：Codex 0.157+ 在共用的 app-server 后台里运行所有 hook：一个监管进程（`codex app-server daemon pid-update-loop`）加一个工作进程（`codex app-server --listen unix:// --managed-daemon`）。`$PPID` 是后台。后台的环境变量来自第一个启动它的终端，和当前窗格无关。
-- **解决**：增加 Agent 层 `front.mjs`：识别到后台时，找终端里的 `codex` 前台，读前台的环境变量（macOS `ps -E`，Linux `/proc/<pid>/environ`）。`sidecar-state` 把前台记为 `agentPid`，另记 `serverPid` 供排查。berthd、cmux、openrig 等工具也遇到了同样的问题。
+- **解决**：增加 Agent 层 `front.mjs`：识别到后台时，找终端里的 `codex` 前台，读前台的环境变量（macOS `ps -E`，Linux `/proc/<pid>/environ`）。`tickbird-state` 把前台记为 `agentPid`，另记 `serverPid` 供排查。berthd、cmux、openrig 等工具也遇到了同样的问题。
 - **经验**：hook 在哪个进程里运行，决定了它知道什么。场景 1 的结论要按运行方式重新核实。
 - **出处**：89c63fa；`docs/TERMINAL_PLAN.md` C2-4 结果；`docs/TERMINAL_DESIGN.md` 第 9 节；2026-10-08。
 
@@ -211,7 +211,7 @@
 - **原因**：任何 `-c`、`--enable`、`--disable`、`--search` 或 `--no-daemon` 都让 Codex 以 embedded 方式运行。
 - **解决**：两种方式都测。测共用后台时，用单独的 `CODEX_HOME` 和其中的 `hooks.json`，后台从没有终端的 shell 启动，保证环境变量与任何窗格无关。
 - **经验**：测试手段本身可能改变被测对象的运行方式。
-- **出处**：`plugins/sidecar-split/README.md`「本地试用」；C2-4 审阅页说明；2026-10-08 C2-4 端到端实测（本机进程列表与 `codex app-server daemon` 命令）。
+- **出处**：`plugins/tickbird-split/README.md`「本地试用」；C2-4 审阅页说明；2026-10-08 C2-4 端到端实测（本机进程列表与 `codex app-server daemon` 命令）。
 
 ### 24. 协议里没有「哪个客户端拥有这个会话」
 - **现象**：想直接问 app-server「这个会话显示在哪个终端」。
@@ -227,7 +227,7 @@
 - **原因**：曾想用「前台已有别的会话」来排除。但 Codex 的 `/new` 不触发 SessionEnd，旧会话还在，这条规则分不清。
 - **解决**：取终端设备的访问时间（`w` 的空闲时间也用它），即最近收到输入的终端。它必须在 30 秒内，且比第二个早至少 2 秒，否则不开栏，原因写进日志。
 - **经验**：找一个和「刚发出消息」直接相关的信号。分不清时宁可不做。
-- **出处**：89c63fa；`docs/TERMINAL_PLAN.md` C2-4；`plugins/sidecar-state/scripts/front.mjs`；C2-4 审阅表「同一目录两个 Codex」。
+- **出处**：89c63fa；`docs/TERMINAL_PLAN.md` C2-4；`plugins/tickbird-state/scripts/front.mjs`；C2-4 审阅表「同一目录两个 Codex」。
 
 ### 26. 自定义 `CODEX_HOME` 时栏找不到会话记录
 - **现象**：测共用后台时，栏一直等不到内容。
@@ -317,10 +317,10 @@
 - **原因**：从 kitty 的 shell 里启动的 Terminal.app 继承了 `KITTY_WINDOW_ID`。
 - **解决**：kitty 适配器还要求 `TERM=xterm-kitty` 或没有 `TERM_PROGRAM`。每个适配器都核实 Agent 真在它的窗格里：kitty 看窗口的前台进程，tmux 看 `pane_tty`。
 - **经验**：环境变量只说明「祖先是谁」，不说明「现在在哪」。要用进程或终端设备核实。
-- **出处**：89c63fa；`docs/TERMINAL_PLAN.md` C2-4；`plugins/sidecar-split/scripts/adapters/` 注释；2026-10-08 Terminal.app 实测（`local/review/c2-4/terminal-app.txt`）。
+- **出处**：89c63fa；`docs/TERMINAL_PLAN.md` C2-4；`plugins/tickbird-split/scripts/adapters/` 注释；2026-10-08 Terminal.app 实测（`local/review/c2-4/terminal-app.txt`）。
 
 ### 37. kitty 的新窗口只有 kitty 自己的环境
-- **现象**：栏里找不到 `agent-sidecar`，或状态目录、编辑器不对。
+- **现象**：栏里找不到 `tickbird`，或状态目录、编辑器不对。
 - **发现方式**：C2-4 实现。
 - **原因**：kitty 新开的窗口不继承 Agent 的环境。
 - **解决**：栏从 Agent（前台）的环境带上 `PATH`、`XDG_STATE_HOME`、`VISUAL`、`EDITOR`。
@@ -409,7 +409,7 @@
 - **原因**：这些命令回答一次就退出。
 - **解决**：识别 `-p`/`--print` 和 `exec`/`e`，不开栏。
 - **经验**：先判断场景值不值得做，再做。
-- **出处**：`plugins/sidecar-split/scripts/split.mjs`。
+- **出处**：`plugins/tickbird-split/scripts/split.mjs`。
 
 ### 48. 详情统一成一种面板，按键统一成 vim / less
 - **现象**：读文件、diff、命令各有一种排版；按键在各页意思不一致。
@@ -421,11 +421,11 @@
 
 ## VS Code 宿主与 webview
 
-### 49. Sidecar 被别的扩展打开的文件盖住
-- **现象**：用户报告 Sidecar 偶尔被遮住。
+### 49. Tickbird 被别的扩展打开的文件盖住
+- **现象**：用户报告 Tickbird 偶尔被遮住。
 - **发现方式**：用户反馈。
-- **原因**：Sidecar 放在最左侧锁定的编辑器组里。别的扩展按「活动列」开文件时，会塞进这一组。维持这个组还要建组、锁组、调列宽。
-- **解决**：改为左侧主侧栏的 WebviewView，详情在编辑器区打开。不再写任何编辑器组布局代码。宿主测试新增「文件按活动列打开时 Sidecar 仍可见」。Claude Code 和 Codex 都占右侧辅助侧栏，放左侧才能对照。
+- **原因**：Tickbird 放在最左侧锁定的编辑器组里。别的扩展按「活动列」开文件时，会塞进这一组。维持这个组还要建组、锁组、调列宽。
+- **解决**：改为左侧主侧栏的 WebviewView，详情在编辑器区打开。不再写任何编辑器组布局代码。宿主测试新增「文件按活动列打开时 Tickbird 仍可见」。Claude Code 和 Codex 都占右侧辅助侧栏，放左侧才能对照。
 - **经验**：与宿主的布局机制对抗，代价会不断累积。换一个宿主原生支持的位置。
 - **出处**：2fd11bc；`DEVELOPMENT_LOG` 2026-09-23；记忆 sidecar-host-placement；`tests/host/run.ts`。
 
@@ -433,12 +433,12 @@
 - **现象**：真实 Agent 扩展共存测试在 CL1 失败；回查发现旧的「总绿」报告里，首次打开预览时也短暂失焦。
 - **发现方式**：共存回归测试。
 - **原因**：首次从两列展开三列时，公开布局命令把焦点转到中间组。旧报告只在末尾检查，焦点已恢复，所以没判失败。
-- **解决**：等 `focusFirstEditorGroup` 完成后再建详情，只在 Sidecar 原本持有焦点的动作内恢复，不持续抢焦点。测试在每个关键阶段按 0/100/200ms 取样断言。
+- **解决**：等 `focusFirstEditorGroup` 完成后再建详情，只在 Tickbird 原本持有焦点的动作内恢复，不持续抢焦点。测试在每个关键阶段按 0/100/200ms 取样断言。
 - **经验**：只看终态的测试会漏掉中间状态。关键阶段都要断言。
 - **出处**：`DEVELOPMENT_LOG`「Session／turn 粒度修正（2026-09-06）」及「当前证据」后的说明。
 
 ### 51. 空窗口弹警告，侧栏留空
-- **现象**：在没有文件夹的窗口里，Sidecar 弹出「只接入普通本地单文件夹」警告，侧栏空白。
+- **现象**：在没有文件夹的窗口里，Tickbird 弹出「只接入普通本地单文件夹」警告，侧栏空白。
 - **发现方式**：用户在开发环境里打开空窗口。
 - **原因**：不支持的工作区只走了警告分支。
 - **解决**：空窗口、多文件夹、远程、未信任的工作区都在侧栏里说明原因；空窗口带「打开文件夹…」。`test:host` 增加真实 VS Code 空窗口运行。用修复前的代码跑这项检查，能报出同一句错误。
@@ -465,7 +465,7 @@
 - **现象**：在 worktree 里开发时，开发窗口里看不到任何会话。
 - **发现方式**：B1 回归。
 - **原因**：会话按项目路径归属，worktree 是另一个路径。
-- **解决**：`npm run dev -- <项目>` 打开指定文件夹；`verify:sessions` 用 `SIDECAR_PROJECT_PATH` 指定项目。
+- **解决**：`npm run dev -- <项目>` 打开指定文件夹；`verify:sessions` 用 `TICKBIRD_PROJECT_PATH` 指定项目。
 - **经验**：按路径归属的数据，换目录就要显式指定。
 - **出处**：829d714；`scripts/launch-development.mjs` 注释。
 
@@ -488,8 +488,8 @@
 ### 57. 「必须先开 Agent 编辑器才能看详情」被取消
 - **现象**：没有并排的 Agent 面板时，详情打不开，只提示去开 Agent。
 - **发现方式**：用户反馈（09-07 八项反馈）。
-- **原因**：早期规格要求「Sidecar｜Agent 对话｜详情」三列。
-- **解决**：没有并排内容时在 Sidecar 右侧开详情；已有其他编辑器时保留它，详情放在其右侧。不自动创建 Agent。
+- **原因**：早期规格要求「Tickbird｜Agent 对话｜详情」三列。
+- **解决**：没有并排内容时在 Tickbird 右侧开详情；已有其他编辑器时保留它，详情放在其右侧。不自动创建 Agent。
 - **经验**：前置条件会让功能在常见场景下不可用。先问它是否必要。
 - **出处**：`archived/IMPLEMENTATION_SPEC.md`（2026-09-07）；`archived/ACTION_PRESENTATION_REVIEW.md`。
 
@@ -626,7 +626,7 @@
 ## 测试方法与陷阱
 
 ### 74. 从 Agent 会话里启动的终端不写会话记录
-- **现象**：测试终端里的 Claude 没有会话记录，Sidecar 一直等。C2-4 在 Terminal.app 里测试时又出现：Claude Code 提示「Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker」。
+- **现象**：测试终端里的 Claude 没有会话记录，Tickbird 一直等。C2-4 在 Terminal.app 里测试时又出现：Claude Code 提示「Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker」。
 - **发现方式**：终端原型测试；C2-4 测试记录。
 - **原因**：从 Claude Code 会话里启动的终端继承 `CLAUDE_CODE_CHILD_SESSION` 等变量，里面的 Claude 认为自己是子会话。
 - **解决**：测试前用 `env -u` 清掉这些变量。
@@ -709,7 +709,7 @@
 - **现象**：多次出现「测试全绿，但真实宿主里行为不同」的风险。
 - **发现方式**：验证计划的制定与多轮验收。
 - **原因**：每层测试只证明它那一层：浏览器替身不证明宿主焦点，合成日志不证明真实内容。
-- **解决**：每次报告写明「不代表什么」。真实 VS Code 宿主测试（`test:host`）、真实 Agent 端到端测试单独列出。打包后的版本也跑一遍（`SIDECAR_EXTENSION_PATH=build/vsix`）。
+- **解决**：每次报告写明「不代表什么」。真实 VS Code 宿主测试（`test:host`）、真实 Agent 端到端测试单独列出。打包后的版本也跑一遍（`TICKBIRD_EXTENSION_PATH=build/vsix`）。
 - **经验**：证据和结论的范围要对齐，部分通过就写部分通过。
 - **出处**：`archived/VERIFICATION_PLAN.md`；`DEVELOPMENT_LOG`「当前证据」表；65ad932。
 
@@ -753,7 +753,7 @@
 - **原因**：Claude Code 和 Codex 都按插件 `version` 缓存已装的插件。
 - **解决**：改插件目录里任何文件，都用 `npm run set-version` 升版本再安装。
 - **经验**：遇到「改了没生效」，先查缓存的键。
-- **出处**：65ad932；`plugins/sidecar-state/README.md`「版本」；记忆 sidecar-private-install。
+- **出处**：65ad932；`plugins/tickbird-state/README.md`「版本」；记忆 sidecar-private-install。
 
 ### 90. 扩展和接入各有一个版本号
 - **现象**：VS Code 扩展还在初始的 0.0.1，接入已到 0.1.2。
@@ -772,7 +772,7 @@
 - **出处**：8367eff；`scripts/install-vscode.mjs` 注释；记忆 sidecar-private-install。
 
 ### 92. 两个插件各带一份 `front.mjs`
-- **现象**：`sidecar-state` 和 `sidecar-split` 都需要「找前台」的逻辑。
+- **现象**：`tickbird-state` 和 `tickbird-split` 都需要「找前台」的逻辑。
 - **发现方式**：C2-4 实现。
 - **原因**：两个插件分开安装，不能互相引用。
 - **解决**：两边各放一份相同的文件，测试检查两份一致。
@@ -783,7 +783,7 @@
 - **现象**：会话状态两个产品都要，自动分屏只有终端版要。
 - **发现方式**：插件设计，用户确认方案 C。
 - **原因**：按产品拆会重复，合在一起又不能单独停用分屏。
-- **解决**：`sidecar-state`（共用）和 `sidecar-split`（终端版）。不想自动分屏，就在 Agent 的插件管理里停用它。
+- **解决**：`tickbird-state`（共用）和 `tickbird-split`（终端版）。不想自动分屏，就在 Agent 的插件管理里停用它。
 - **经验**：拆分边界放在用户想单独开关的地方。
 - **出处**：8367eff；`DEVELOPMENT_LOG`「插件拆分与改名」。
 
@@ -843,7 +843,7 @@
 - **原因**：常驻占地；隐藏后又难以发现位置。
 - **解决**：v8 恢复常驻，「刻度长度 = action 量」，取消扫光脉冲；之后 VS Code 版用细目录，终端版用 `t` 目录。
 - **经验**：可视化编码要说清它代表什么，否则会被反复推翻。
-- **出处**：记忆 agent-sidecar-prototype-line；`docs/VISION.md` 开头的现状说明。
+- **出处**：记忆 tickbird-prototype-line；`docs/VISION.md` 开头的现状说明。
 
 ### 101. 不为不存在的规模设计
 - **现象**：曾考虑「200 轮」的会话界面。
@@ -883,7 +883,7 @@
 - **原因**：导出工具的问题，两套浅色正常。
 - **解决**：记录在案，移植前重新导出。
 - **经验**：导出的设计变量要检查自引用和空值。
-- **出处**：记忆 agent-sidecar-prototype-line。
+- **出处**：记忆 tickbird-prototype-line。
 
 ### 106. 去掉一个事件来源，默认它存在的代码会悄悄失效
 - **现象**：精简 hook 时去掉了 `UserPromptSubmit` 和 `Stop`。单元测试先失败在「空闲时不保留显示文字」上。

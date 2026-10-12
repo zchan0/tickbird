@@ -36,15 +36,15 @@ await writeFile(join(userData, 'User', 'settings.json'), JSON.stringify({
   'chatgpt.openOnStartup': false, 'claudeCode.useTerminal': false,
 }));
 const resultFile = join(runRoot, 'result.json');
-const code = process.env.SIDECAR_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
+const code = process.env.TICKBIRD_CODE_CLI || '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
 const args = ['--new-window', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`, `--extensions-dir=${extensions}`,
   `--extensionDevelopmentPath=${root}`, ...agentExtensions.map(extension => `--extensionDevelopmentPath=${extension.path}`),
   `--extensionTestsPath=${join(root, 'dist/tests/host/coexistence.js')}`, root];
-const childEnvironment = { ...process.env, SIDECAR_COEXISTENCE_RESULT: resultFile, SIDECAR_COEXISTENCE_PROJECT: root };
+const childEnvironment = { ...process.env, TICKBIRD_COEXISTENCE_RESULT: resultFile, TICKBIRD_COEXISTENCE_PROJECT: root };
 // Production source discovery only. Do not copy profile state, secrets or Agent credential files.
-delete childEnvironment.SIDECAR_TEST_CODEX_ROOT;
-delete childEnvironment.SIDECAR_TEST_CLAUDE_ROOT;
-delete childEnvironment.SIDECAR_TEST_RESULT;
+delete childEnvironment.TICKBIRD_TEST_CODEX_ROOT;
+delete childEnvironment.TICKBIRD_TEST_CLAUDE_ROOT;
+delete childEnvironment.TICKBIRD_TEST_RESULT;
 const child = spawn(code, args, { stdio: 'inherit', env: childEnvironment });
 console.log(JSON.stringify({ runRoot, resultFile, launcherPid: child.pid, agentExtensions: agentExtensions.map(({ id, version }) => ({ id, version })) }));
 const exitCode = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });

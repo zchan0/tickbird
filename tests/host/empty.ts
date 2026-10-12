@@ -17,7 +17,7 @@ export async function run() {
     catch (error) { result.checks.push({ name, passed: false, error: String(error) }); throw error; }
   };
   try {
-    const extension = vscode.extensions.getExtension('zchan0.agent-sidecar');
+    const extension = vscode.extensions.getExtension('zchan0.tickbird');
     assert.ok(extension);
     const api = await extension.activate();
     await check('an empty window opens the sidebar view with its reason and an Open Folder action', async () => {
@@ -31,8 +31,8 @@ export async function run() {
       assert.deepEqual(warnings, []);
     });
     await check('choose and refresh commands land on the same explanation without a warning', async () => {
-      await vscode.commands.executeCommand('agentSidecar.chooseSession');
-      await vscode.commands.executeCommand('agentSidecar.refresh'); await settle();
+      await vscode.commands.executeCommand('tickbird.chooseSession');
+      await vscode.commands.executeCommand('tickbird.refresh'); await settle();
       assert.match(api.observer.webview.html, /data-workspace-gap="empty"/);
       assert.equal(api.session, undefined);
       assert.deepEqual(warnings, []);
@@ -43,7 +43,7 @@ export async function run() {
     (vscode.window as any).showWarningMessage = originalWarning;
     result.warnings = warnings;
     result.finishedAt = new Date().toISOString();
-    if (process.env.SIDECAR_TEST_RESULT) writeFileSync(process.env.SIDECAR_TEST_RESULT, JSON.stringify(result, null, 2) + '\n');
+    if (process.env.TICKBIRD_TEST_RESULT) writeFileSync(process.env.TICKBIRD_TEST_RESULT, JSON.stringify(result, null, 2) + '\n');
     console.log(JSON.stringify({ passed: result.passed, checks: result.checks.map((check: any) => ({ name: check.name, passed: check.passed })) }));
   }
 }

@@ -12,7 +12,7 @@
 
 ## C2-1 渲染与输入底座
 
-- 内容：宽度与断行（沿用原型）；单元格缓冲与逐行比较刷新（支持时整帧同步刷新）；按键（含 kitty 键盘协议）与 SGR 鼠标解析；能力探测；两个调试命令：`agent-sidecar caps` 打印探测结果，`agent-sidecar demo` 显示一幅测试画面并回显按键。
+- 内容：宽度与断行（沿用原型）；单元格缓冲与逐行比较刷新（支持时整帧同步刷新）；按键（含 kitty 键盘协议）与 SGR 鼠标解析；能力探测；两个调试命令：`tickbird caps` 打印探测结果，`tickbird demo` 显示一幅测试画面并回显按键。
 - 单元测试：宽度与断行；刷新只输出变化的行；按键与鼠标序列解析；用脚本模拟终端的回答测探测，包括不回答、超时、tmux 包装。
 - 端到端：
   1. 测试 kitty 里运行 `caps`：期望防闪烁、链接、图片、通知、增强键盘、背景色、剪贴板都探测为可用，符号宽度全是 1 格。
@@ -28,7 +28,7 @@
 
 ## C2-2 一屏一轮
 
-- 内容：轮页（请求、Changed、章节、末尾状态）；跟随与暂停；`[` `]`；目录；读取 `sidecar-state`（等你批准、显示中的文字）；新一轮开始的提示；`agent-sidecar watch`（参数绑定会话，或取当前目录最新会话）。
+- 内容：轮页（请求、Changed、章节、末尾状态）；跟随与暂停；`[` `]`；目录；读取 `tickbird-state`（等你批准、显示中的文字）；新一轮开始的提示；`tickbird watch`（参数绑定会话，或取当前目录最新会话）。
 - 单元测试：用合成会话测排版（每行不超过栏宽、块间空行、调用行缩进）、目录条目、跟随与暂停的状态切换、等你批准的判断。
 - 端到端：
   1. 测试 kitty 里开一个真实 Claude Code 会话，另一个窗口运行 `watch`；发一条会调用工具的消息，过程中每隔几秒截图。
@@ -60,7 +60,7 @@
   - 发现并修复：读到的文件末尾空行被丢掉；底部按键提示过长被截断（改为放不下就省略靠后的提示）；只重复描述的参数块。
   - 设计调整（审阅后）：详情统一成一种面板，左栏只有行号、`+` `-` 或空白，diff 不显示行号；能打开的调用行右端加 `→`；按键统一成 vim / less 习惯（见设计文档第 5、7 节）。
 
-## C2-4 插件 `sidecar-split`
+## C2-4 插件 `tickbird-split`
 
 - 内容：kitty 与 tmux 适配器：开栏、`/clear` 后改绑、退出关栏、Agent 进程消失时自动退出、`a` 切回 Agent；其它终端不开栏。
 - 单元测试：适配器选择（环境变量组合、kitty 里套 tmux）；hook 输出为空；命令参数。
@@ -70,7 +70,7 @@
   - kitty 和 tmux 里，Claude Code、Codex（embedded 和共用后台两种方式）都通过：自动开栏且焦点留在 Agent、`/clear` 或 `/new` 后同一栏改绑、`a` 切回、正常退出和 `kill -9` 后栏关闭。Terminal.app 不开栏、无报错。
   - 同一目录两个 Codex（共用后台）：栏开在刚发消息的那个旁边；另一个 `/new` 后各自的栏只跟自己的会话。
   - 端到端发现并修复：
-    - Codex 0.157 起 hook 在共用后台里运行，`$PPID` 是后台、环境变量来自第一个启动它的终端 → 增加 Agent 层（`front.mjs`）：找终端里的 `codex` 前台；`sidecar-state` 也记录前台（新增 `serverPid`）。
+    - Codex 0.157 起 hook 在共用后台里运行，`$PPID` 是后台、环境变量来自第一个启动它的终端 → 增加 Agent 层（`front.mjs`）：找终端里的 `codex` 前台；`tickbird-state` 也记录前台（新增 `serverPid`）。
     - "前台已有别的会话"不能用来区分同目录的几个 Codex（`/new` 不结束旧会话）→ 改用终端最近收到输入的时间。
     - 栏只在默认目录找会话记录，自定义 `CODEX_HOME` 找不到 → 按状态文件里的 `transcript` 打开。
     - 从 kitty 里启动的 Terminal.app 带着 `KITTY_WINDOW_ID`，日志误报为 kitty 没开远程控制 → kitty 还要求 `TERM=xterm-kitty` 或没有 `TERM_PROGRAM`。
@@ -88,7 +88,7 @@
 | 等你批准 | PermissionRequest | `status: waiting`、`waitingFor: "permission prompt"`；工具取自会话记录 | 后台协议 `activeFlags: waitingOnApproval`（待验证） |
 | 提前显示长回答 | MessageDisplay | 没有替代 | Codex 本来就没有 |
 | 会话结束 | SessionEnd | 进程消失、文件删除 | 前台进程消失 |
-| 自动开栏 | SessionStart（sidecar-split） | 要有触发：hook、包一层启动命令，或我们自己的常驻进程 | 同左 |
+| 自动开栏 | SessionStart（tickbird-split） | 要有触发：hook、包一层启动命令，或我们自己的常驻进程 | 同左 |
 
 - 已核实（2026-10-08）：
   - Claude Code 2.1.293 为每个进程写 `~/.claude/sessions/<pid>.json`（未公开）：`sessionId`（`/clear` 后变）、`cwd`、`kind`、`entrypoint`、`status`（`idle` → `busy` → `waiting` + `waitingFor: "permission prompt"`，拒绝后回到 `idle`），在 tmux 里还有自己的窗格（`tmux: "<会话>:@<窗口>.%<窗格>"`）；进程退出时删除。
@@ -117,15 +117,15 @@
 
 ## C3 私有安装
 
-- 内容：`npm run install:terminal`、`agent-sidecar setup`（装 `sidecar-state` 与 `sidecar-split`，引导 Codex 信任 hook）；卸载时不误删 VS Code 版仍在用的 `sidecar-state`。
-- 端到端：在你本机安装；新开 kitty 窗口启动 Claude Code，检查自动分屏；运行 `setup` 两遍，检查结果相同；卸载终端版，检查 `sidecar-state` 仍在。
+- 内容：`npm run install:terminal`、`tickbird setup`（装 `tickbird-state` 与 `tickbird-split`，引导 Codex 信任 hook）；卸载时不误删 VS Code 版仍在用的 `tickbird-state`。
+- 端到端：在你本机安装；新开 kitty 窗口启动 Claude Code，检查自动分屏；运行 `setup` 两遍，检查结果相同；卸载终端版，检查 `tickbird-state` 仍在。
 - 审阅产物：安装输出和一张实际使用中的截图。
 - 结果（2026-10-08，0.4.1）：
-  - `npm run install:terminal`：打包 `~/.local/share/agent-sidecar/cli.cjs`，命令 `~/.local/bin/agent-sidecar`（先用 PATH 上的 node，没有就用安装时的 node）；VS Code 扩展 0.2.0 → 0.4.1 一起更新；`setup` 给 Claude Code 和 Codex 装上 `sidecar-state`、`sidecar-split`（0.4.1）。装插件的代码由 `install:vscode` 和 `setup` 共用（`packages/terminal/src/setup.ts`）。
+  - `npm run install:terminal`：打包 `~/.local/share/tickbird/cli.cjs`，命令 `~/.local/bin/tickbird`（先用 PATH 上的 node，没有就用安装时的 node）；VS Code 扩展 0.2.0 → 0.4.1 一起更新；`setup` 给 Claude Code 和 Codex 装上 `tickbird-state`、`tickbird-split`（0.4.1）。装插件的代码由 `install:vscode` 和 `setup` 共用（`packages/terminal/src/setup.ts`）。
   - `setup` 运行两遍：两个 Agent 里的插件和版本相同，没有重复安装。
   - 实际使用：tmux 里直接运行 `claude`（不加任何参数），自动开栏，栏里运行的是装好的 `cli.cjs`；一轮内容正常；`/exit` 后栏关闭。
-  - `agent-sidecar uninstall`：移除两个 Agent 里的 `sidecar-split`、命令和程序文件；VS Code 版还在，所以保留 `sidecar-state`。之后重新安装，VS Code 扩展已是同一版本，不再重装。
-  - hook 的 PATH 可能来自别的程序（Codex 共用后台）：找不到 `agent-sidecar` 时，退回到 `~/.local/bin/agent-sidecar`。
+  - `tickbird uninstall`：移除两个 Agent 里的 `tickbird-split`、命令和程序文件；VS Code 版还在，所以保留 `tickbird-state`。之后重新安装，VS Code 扩展已是同一版本，不再重装。
+  - hook 的 PATH 可能来自别的程序（Codex 共用后台）：找不到 `tickbird` 时，退回到 `~/.local/bin/tickbird`。
   - kitty：用户运行 `setup` 并同意，kitty.conf 已备份并加上远程控制两行；完全重启 kitty 后，在 kitty 里启动 Claude Code 自动分屏，栏里运行的是装好的 `cli.cjs`（2026-10-08）。
   - 待用户完成：Codex 共用后台重启后（Codex 会提示），在 Hooks need review 里选 Trust all。
 - 审阅产物：`local/review/c3/`（安装、卸载输出，tmux 里实际使用的栏）。

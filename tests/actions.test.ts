@@ -128,7 +128,7 @@ test('opaque web references stay out of labels but retain exact link identity', 
   assert.equal(describeAction(call('Web 来源')).label, 'Web · 来源结果');
 });
 test('search display omits home paths and bounds patterns without weakening identity', () => {
-  const pattern = 'agent-sidecar|sidecar|codex|claude|longer|pattern|more';
+  const pattern = 'tickbird|sidecar|codex|claude|longer|pattern|more';
   const first = describeAction(call('exec_command', {cmd:`rg -n '${pattern}' /Users/example/.codex/memories/MEMORY.md`}));
   assert.ok(!first.label.includes('/Users/'));
   assert.ok(first.label.includes('MEMORY.md'));
@@ -142,7 +142,7 @@ test('search display omits home paths and bounds patterns without weakening iden
   assert.ok(web.targets![0].startsWith('site:developers.openai.com'));
 });
 test('complex commands identify purpose or executable without dumping shell input', () => {
-  const command = 'rg -n "agent-sidecar|sidecar|codex|claude" /Users/example/.codex/memories/MEMORY.md | head -80';
+  const command = 'rg -n "tickbird|sidecar|codex|claude" /Users/example/.codex/memories/MEMORY.md | head -80';
   const action = describeAction(call('exec_command', {cmd: command}));
   assert.equal(action.label, '搜索代码（含管道）');
   assert.deepEqual(action.targets, [command]);

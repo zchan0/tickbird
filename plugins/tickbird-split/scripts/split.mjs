@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Agent Sidecar split hook, shared by Claude Code and Codex.
+// Tickbird split hook, shared by Claude Code and Codex.
 //   split.mjs <claude|codex> <agent pid>        (the SessionStart hook's JSON arrives on stdin)
 //
-// Opens the Sidecar pane beside the agent, once per agent process. The pane
+// Opens the Tickbird pane beside the agent, once per agent process. The pane
 // follows that process by itself: after /clear it shows the new session, and
 // it exits when the agent does. So nothing here runs at the session's end.
 //
@@ -25,18 +25,18 @@ const LOG_LIMIT = 256 * 1024;
 const PASSED = ['PATH', 'XDG_STATE_HOME', 'VISUAL', 'EDITOR'];
 
 /**
- * The pane's program: $AGENT_SIDECAR_CLI (a script run with this node, or a
- * program), else agent-sidecar on PATH, else where `npm run install:terminal`
+ * The pane's program: $TICKBIRD_CLI (a script run with this node, or a
+ * program), else tickbird on PATH, else where `npm run install:terminal`
  * puts it: a hook's PATH may be another program's (Codex's background server).
  */
 export function paneProgram(env, tools = { which }) {
-  const named = env.AGENT_SIDECAR_CLI;
+  const named = env.TICKBIRD_CLI;
   if (named) {
     const file = isAbsolute(named) ? named : resolve(named);
     if (!existsSync(file)) return undefined;
     return /\.[cm]?js$/.test(file) ? [process.execPath, file] : [file];
   }
-  const found = tools.which('agent-sidecar', env) ?? tools.which('agent-sidecar', { PATH: join(env.HOME || homedir(), '.local', 'bin') });
+  const found = tools.which('tickbird', env) ?? tools.which('tickbird', { PATH: join(env.HOME || homedir(), '.local', 'bin') });
   return found ? [found] : undefined;
 }
 
@@ -68,7 +68,7 @@ export function handle(provider, hookPid, input, hookEnv = process.env, tools = 
   if (!info?.tty) return 'Agent 不在终端里（例如 VS Code 里的 Agent）：不开栏';
   if (!interactive(provider, info.args)) return '非交互运行：不开栏';
   const program = paneProgram(env, tools);
-  if (!program) return '找不到 agent-sidecar：不开栏';
+  if (!program) return '找不到 tickbird：不开栏';
   for (const adapter of candidates(env)) {
     const place = adapter.locate(env, tools);
     if (place.skip) return `${adapter.name}：${place.skip}`;
@@ -76,17 +76,17 @@ export function handle(provider, hookPid, input, hookEnv = process.env, tools = 
     const open = place.find(agentPid);
     if (open.length) return `${place.name}：Agent ${agentPid} 已有栏 ${open.join(',')}，它会自己改绑`;
     const extra = Object.fromEntries(PASSED.filter(key => env[key]).map(key => [key, env[key]]));
-    // The state files are where sidecar-state writes them: it runs beside this hook, in the hook's environment.
+    // The state files are where tickbird-state writes them: it runs beside this hook, in the hook's environment.
     if (hookEnv.XDG_STATE_HOME) extra.XDG_STATE_HOME = hookEnv.XDG_STATE_HOME;
     else if (extra.XDG_STATE_HOME) extra.XDG_STATE_HOME = '';
     const result = place.open({ argv: paneArgv(program, agentPid, place.focus), cwd: input.cwd || process.cwd(), env: extra, tag: agentPid });
     const via = front.server ? `，Codex 前台，后台 ${front.server}` : '';
     return result.error ? `${place.name}：开栏失败：${result.error}` : `${place.name}：在 ${place.pane} 旁开栏 ${result.pane}（Agent ${agentPid}${via}）`;
   }
-  return '不在支持自动开栏的终端里：不开栏，可以手动运行 agent-sidecar watch';
+  return '不在支持自动开栏的终端里：不开栏，可以手动运行 tickbird watch';
 }
 
-const stateRoot = env => join(env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'agent-sidecar');
+const stateRoot = env => join(env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'tickbird');
 export const logFile = (env = process.env) => join(stateRoot(env), 'split.log');
 
 function log(line, env = process.env) {

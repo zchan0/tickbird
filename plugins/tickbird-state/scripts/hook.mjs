@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Agent Sidecar integration hook, shared by Claude Code and Codex.
+// Tickbird integration hook, shared by Claude Code and Codex.
 //   hook.mjs <claude|codex> <agent pid>        (the hook's JSON arrives on stdin)
 //
 // Appends one line per event to the session's state file; see SESSION_STATE.md.
@@ -10,7 +10,7 @@
 // When a turn starts or ends, and when the session ends, come from the
 // transcript and from the agent's process instead.
 // It prints nothing, because a SessionStart hook's stdout becomes the model's
-// context, and it never fails: a broken Sidecar must not get in the agent's way.
+// context, and it never fails: a broken Tickbird must not get in the agent's way.
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -23,7 +23,7 @@ const KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const TEXT_LIMIT = 3000;
 
 export function stateDirectory(env = process.env) {
-  return join(env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'agent-sidecar', 'sessions');
+  return join(env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'tickbird', 'sessions');
 }
 
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };

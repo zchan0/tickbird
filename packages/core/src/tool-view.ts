@@ -70,7 +70,7 @@ function unknownLabel(args: Record<string, unknown>): string {
   const verbs = ['action', 'operation', 'intent', 'mode'].map(key => text(args[key])).filter(value => value && value.length <= 24);
   const url = text(args.url), file = text(args.file_path) || text(args.path);
   const words = ['title', 'name', 'query', 'description', 'target', 'command', 'cmd', 'prompt'].map(key => text(args[key])).find(Boolean) || '';
-  // A page or a file, and the words that say what it is: v4.html · 终端 Sidecar 的设计稿.
+  // A page or a file, and the words that say what it is: v4.html · 终端 Tickbird 的设计稿.
   const target = [(url && site(url)) || (file && basename(file)), words].filter(Boolean).join(' · ');
   if (verbs.length || target) return [...verbs.slice(0, 2), target].filter(Boolean).join(' · ');
   const first = Object.entries(args).find(([, value]) => typeof value === 'string' && value.trim() || typeof value === 'number');

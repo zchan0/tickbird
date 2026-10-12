@@ -868,30 +868,30 @@ export function projectSidecar({ projectName, session, locale, live }: Pick<Side
 export function renderSidecar({ projectName, session, nonce, streamId = '', locale, live, followPaused = false, integrationHint = false }: SidecarRenderOptions, projection?: SidecarProjection): string {
   const p = projection ?? projectSidecar({ projectName, session, locale, live });
   const nav = (action: string, label: string, glyph: string) => `<button type="button" class="icon-button ph-nav" data-nav="${action}" aria-label="${label}" title="${label}">${glyph}</button>`;
-  const body = `<main class="sidecar" data-observation-stream="${escapeHtml(streamId)}" aria-label="Sidecar 过程观察">
-    <div class="integration-hint"${integrationHint ? '' : ' hidden'}><span>装上 Agent Sidecar 接入后，可以自动跟随当前会话，Agent 等你批准时会显示出来。</span><button type="button" data-action="dismissHint">不再提示</button></div>
+  const body = `<main class="sidecar" data-observation-stream="${escapeHtml(streamId)}" aria-label="Tickbird 过程观察">
+    <div class="integration-hint"${integrationHint ? '' : ' hidden'}><span>装上 Tickbird 接入后，可以自动跟随当前会话，Agent 等你批准时会显示出来。</span><button type="button" data-action="dismissHint">不再提示</button></div>
     <div class="integration-hint follow-session"${followPaused ? '' : ' hidden'}><span>自动跟随已暂停：你选了另一个会话。</span><button type="button" data-action="resumeFollow">跟随当前会话</button></div>
     <div class="observation-problem" hidden></div>
     <header class="page-head"><span class="ph-turn"></span><span class="ph-aside">${streamId ? '<button type="button" class="ph-follow" data-follow-toggle aria-pressed="true"></button>' : ''}${nav('older', '上一轮 [', '‹')}${nav('newer', '下一轮 ]', '›')}${nav('toc', '目录 t', '☰')}</span></header>
     <nav class="toc" aria-label="目录（从新到旧）" hidden><div class="toc-head"><b>目录</b><span class="tsub"> 共 <span data-turn-total></span> 轮</span></div><div class="toc-list">${p.lens}</div></nav>
     <section class="timeline" tabindex="0" aria-label="这一轮的过程"><div data-live-warnings>${p.warnings}</div><div data-live-empty>${p.empty}</div>${p.turns.map(turn => turn.html).join('')}</section>
     <button type="button" class="new-turn" data-nav="newest" hidden><span class="tlabel" data-tone="yellow">New turn</span><span class="nt-text"></span></button></main>`;
-  return documentHtml('Agent Sidecar', body, nonce, p.sessionKey, locale);
+  return documentHtml('Tickbird', body, nonce, p.sessionKey, locale);
 }
 
-/** Workspaces the Sidecar cannot map to one local project directory. */
+/** Workspaces the Tickbird cannot map to one local project directory. */
 export type WorkspaceGap = 'untrusted' | 'empty' | 'multi' | 'remote';
 export const workspaceGaps: Readonly<Record<WorkspaceGap, { title: string; body: string; openFolder?: boolean }>> = {
-  empty: { title: '打开一个项目文件夹', body: 'Sidecar 按项目目录查找 Claude Code 和 Codex 的会话记录；当前窗口还没有打开文件夹。', openFolder: true },
-  multi: { title: '暂不支持多文件夹工作区', body: 'Sidecar 按单个项目目录匹配会话。请在单独的窗口里打开要观察的项目文件夹。' },
-  remote: { title: '暂不支持远程工作区', body: 'Sidecar 目前只读取本机的会话记录，远程工作区的记录在远程机器上。' },
-  untrusted: { title: '需要先信任此工作区', body: '信任后 Sidecar 才读取这个项目的本地会话记录。' },
+  empty: { title: '打开一个项目文件夹', body: 'Tickbird 按项目目录查找 Claude Code 和 Codex 的会话记录；当前窗口还没有打开文件夹。', openFolder: true },
+  multi: { title: '暂不支持多文件夹工作区', body: 'Tickbird 按单个项目目录匹配会话。请在单独的窗口里打开要观察的项目文件夹。' },
+  remote: { title: '暂不支持远程工作区', body: 'Tickbird 目前只读取本机的会话记录，远程工作区的记录在远程机器上。' },
+  untrusted: { title: '需要先信任此工作区', body: '信任后 Tickbird 才读取这个项目的本地会话记录。' },
 };
 
 export function renderWorkspaceGap(gap: WorkspaceGap, nonce: string, locale?: string): string {
   const copy = workspaceGaps[gap];
   const body = `<main class="workspace-gap" data-workspace-gap="${gap}"><div class="empty"><h2>${escapeHtml(copy.title)}</h2><p>${escapeHtml(copy.body)}</p>${copy.openFolder ? '<button type="button" class="gap-action" data-action="openFolder">打开文件夹…</button>' : ''}</div></main>`;
-  return documentHtml('Agent Sidecar', body, nonce, '', locale);
+  return documentHtml('Tickbird', body, nonce, '', locale);
 }
 
 function displayValue(value: unknown): string {

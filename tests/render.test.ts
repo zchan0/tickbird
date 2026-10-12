@@ -307,8 +307,8 @@ test('the page head names the turn and steps through turns; session actions and 
   // No toolbar of its own: the name, switching and refreshing are VS Code's view title bar.
   assert.ok(!html.includes('class="toolbar"') && !html.includes('session-title') && !html.includes('检查回合目录的阅读体验'));
   const manifest = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
-  const menu = manifest.contributes.menus['view/title'].filter((entry: any) => entry.when === 'view == agentSidecar.observer').map((entry: any) => entry.command);
-  assert.deepEqual(menu, ['agentSidecar.chooseSession', 'agentSidecar.refresh', 'agentSidecar.coverage']);
+  const menu = manifest.contributes.menus['view/title'].filter((entry: any) => entry.when === 'view == tickbird.observer').map((entry: any) => entry.command);
+  assert.deepEqual(menu, ['tickbird.chooseSession', 'tickbird.refresh', 'tickbird.coverage']);
 });
 
 test('目录 lists each turn by its request, latest first, two lines each, without generated titles', () => {

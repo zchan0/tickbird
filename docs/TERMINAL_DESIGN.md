@@ -1,14 +1,14 @@
-# Sidecar 终端版设计
+# Tickbird 终端版设计
 
 状态：定稿（2026-10-06，用户确认）。带模拟画面的完整设计稿：<https://claude.ai/artifact/Pj5sM7ucJYbRxy6iZroPf4>（私有）。本文是实现时的依据，与设计稿冲突时以本文为准。
 
-在终端里，紧挨着 Claude Code 或 Codex，按章节显示 Agent 每一轮做了什么。只读：不发消息、不执行记录里的命令。数据来自 core（解析、章节、视图模型）和插件 `sidecar-state`，与 VS Code 版共用。
+在终端里，紧挨着 Claude Code 或 Codex，按章节显示 Agent 每一轮做了什么。只读：不发消息、不执行记录里的命令。数据来自 core（解析、章节、视图模型）和插件 `tickbird-state`，与 VS Code 版共用。
 
 ## 1. 三层，不绑定任何终端
 
 - **基础层**：任何 xterm 兼容终端都能用（含 tmux、SSH、Terminal.app、VS Code 内置终端）。只用 16 色调色板编号、粗体、暗淡、备用屏幕、SGR 鼠标。
 - **增强层**：启动时向终端发查询，最后跟一个 DA1；DA1 先回答而某项没回答，就是不支持。等 DA1 最多 1 秒：通常几毫秒就回答，但 kitty 窗口在后台时要约 190ms（2026-10-06 实测）。不按终端名字判断。
-- **分屏适配器**：插件 `sidecar-split` 按环境变量从内到外选适配器（kitty 里跑 tmux 时用 tmux）。都不匹配就不自动开栏，手动运行 `agent-sidecar watch`。
+- **分屏适配器**：插件 `tickbird-split` 按环境变量从内到外选适配器（kitty 里跑 tmux 时用 tmux）。都不匹配就不自动开栏，手动运行 `tickbird watch`。
 
 ## 2. 一屏一轮
 
@@ -24,7 +24,7 @@
 - 块与块之间空一行；同一章节的调用行连着写。左边留 2 列。
 - 第一行：Agent 名（粗体）、会话标题（暗淡）、右侧状态（`● 运行中 4m 05s`、`⏸ 等你批准`）。第二行：`第 N 轮 / 共 M`、右侧开始时间。
 - 请求：左侧蓝色竖线 `┃` 加粗体。Agent 的话：`●` 开头，正常色，完整显示。调用行：缩进在章节下，工具名暗淡，同一工具连续出现只写一次。
-- 显示中的文字（`sidecar-state` 的 draft）：暗淡，终端支持时加斜体。
+- 显示中的文字（`tickbird-state` 的 draft）：暗淡，终端支持时加斜体。
 - 底部只有右下角一行暗淡提示：`t 目录   ⏎ 详情   ? 帮助`。没有填色横条。
 - 颜色只用调色板编号：红只给真失败；黄只给进行中和等你批准；蓝只给请求竖线和链接；其余次要信息用暗淡。
 
@@ -92,17 +92,17 @@ TUI 不能选字体，只保证任何字体下都对齐、分得清。
 
 tmux 里：图片和通知需要 `allow-passthrough on`，链接需要 `terminal-features` 含 `hyperlinks`；探测穿过 tmux 问外层终端，没放行的按不支持处理。
 
-## 9. 分屏适配器（插件 `sidecar-split`）
+## 9. 分屏适配器（插件 `tickbird-split`）
 
 会话开始时开栏，焦点留在 Agent；`/clear`（Codex 是 `/new`）后同一栏改绑新会话；Agent 退出或被强杀时栏自己退出；栏里按 `a` 切回 Agent。
 
-插件只有一个 `SessionStart` hook。栏按 **Agent 进程**绑定（`watch --agent <pid>`），不按会话：同一进程的新会话在 `sidecar-state` 里有新的 `start`，栏自己改绑；进程消失，栏 1 秒内退出。所以不需要 `SessionEnd` hook。切回 Agent 的命令由插件算好，用 `--focus <JSON 参数数组>` 传给栏，栏不需要认识终端。
+插件只有一个 `SessionStart` hook。栏按 **Agent 进程**绑定（`watch --agent <pid>`），不按会话：同一进程的新会话在 `tickbird-state` 里有新的 `start`，栏自己改绑；进程消失，栏 1 秒内退出。所以不需要 `SessionEnd` hook。切回 Agent 的命令由插件算好，用 `--focus <JSON 参数数组>` 传给栏，栏不需要认识终端。
 
 ### 两层适配
 
 hook 只能知道三样东西：谁启动了它、启动者的环境变量、Agent 发来的会话信息。hook 在哪个进程里运行，决定了它知道什么。所以适配分两层：
 
-1. **Agent 层：找到会话的前台**（`scripts/front.mjs`，`sidecar-state` 里有同一份）。
+1. **Agent 层：找到会话的前台**（`scripts/front.mjs`，`tickbird-state` 里有同一份）。
 2. **终端层：在前台旁边开栏**（`scripts/adapters/`）。只用第 1 层给出的进程和环境变量，不关心是哪个 Agent。
 
 | Agent 的结构 | 例子 | 前台 | 怎么得到 |
@@ -124,16 +124,16 @@ hook 只能知道三样东西：谁启动了它、启动者的环境变量、Age
 
 | 终端或复用器 | 识别 | 确认 Agent 就在这里 | 开栏 | 切回 Agent | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| tmux | `TMUX`、`TMUX_PANE` | 前台的终端等于窗格的 `pane_tty` | `split-window -h -d -l 35%`，窗格选项 `@sidecar_agent` | `select-window` + `select-pane` | 已做 |
-| kitty | `KITTY_WINDOW_ID`，且 `TERM=xterm-kitty` 或没有 `TERM_PROGRAM`；需要 `KITTY_LISTEN_ON` | 前台在窗口的前台进程里 | `launch --location=vsplit --keep-focus --bias=35`，用户变量 `sidecar_agent` | `focus-window` | 已做 |
+| tmux | `TMUX`、`TMUX_PANE` | 前台的终端等于窗格的 `pane_tty` | `split-window -h -d -l 35%`，窗格选项 `@tickbird_agent` | `select-window` + `select-pane` | 已做 |
+| kitty | `KITTY_WINDOW_ID`，且 `TERM=xterm-kitty` 或没有 `TERM_PROGRAM`；需要 `KITTY_LISTEN_ON` | 前台在窗口的前台进程里 | `launch --location=vsplit --keep-focus --bias=35`，用户变量 `tickbird_agent` | `focus-window` | 已做 |
 | Zellij、WezTerm、iTerm2 | `ZELLIJ`、`WEZTERM_PANE`、`ITERM_SESSION_ID` | | | | 识别，不开栏 |
-| 其它 | 不匹配 | | 不开栏；手动 `agent-sidecar watch` | 不显示 `a` | |
+| 其它 | 不匹配 | | 不开栏；手动 `tickbird watch` | 不显示 `a` | |
 
 按从内到外的顺序试（tmux 先于 kitty）。环境变量可能是从别的终端继承来的（比如从 kitty 里启动的 Terminal.app 带着 `KITTY_WINDOW_ID`），所以每个适配器都要确认 Agent 真在它的窗格里；不确定就不开栏，绝不开到别的窗口旁边。
 
-不开栏时，原因写进 `~/.local/state/agent-sidecar/split.log`；hook 没有任何输出。栏从 Agent 的环境里带上 `PATH`、`XDG_STATE_HOME`、`VISUAL`、`EDITOR`（kitty 的新窗口只有 kitty 自己的环境）。栏的程序：`$AGENT_SIDECAR_CLI`（脚本或程序），否则 PATH 上的 `agent-sidecar`。
+不开栏时，原因写进 `~/.local/state/tickbird/split.log`；hook 没有任何输出。栏从 Agent 的环境里带上 `PATH`、`XDG_STATE_HOME`、`VISUAL`、`EDITOR`（kitty 的新窗口只有 kitty 自己的环境）。栏的程序：`$TICKBIRD_CLI`（脚本或程序），否则 PATH 上的 `tickbird`。
 
-不想自动分屏：在 Agent 的插件管理里停用 `sidecar-split`。
+不想自动分屏：在 Agent 的插件管理里停用 `tickbird-split`。
 
 ## 10. 代码结构
 
@@ -145,8 +145,8 @@ packages/terminal/
   input/                keys (legacy + kitty protocol), SGR mouse
   views/                turn page, contents, detail (file, diff, output), search, picker, help
   app.ts                selection, follow, binding from session state
-plugins/sidecar-state/  session state hooks                  shared with VS Code
-plugins/sidecar-split/  open the pane beside the session's front (front.mjs), tell it how to focus the agent
+plugins/tickbird-state/  session state hooks                  shared with VS Code
+plugins/tickbird-split/  open the pane beside the session's front (front.mjs), tell it how to focus the agent
   adapters/             tmux, kitty; zellij, wezterm, iterm2 recognised only
 ```
 

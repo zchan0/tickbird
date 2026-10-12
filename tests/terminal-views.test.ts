@@ -175,7 +175,7 @@ test('a command that only looks at files goes by Read, Search or List; one that 
   assert.deepEqual(exploreText('grep -rn -e "131072" -e "128 \\* 1024" packages | grep -v node_modules'), { tool: 'Search', text: '131072|128 * 1024 in packages', more: 0 });
   assert.deepEqual(exploreText('rg --files -g AGENTS.md -g README.md /x/ios-agent-build'), { tool: 'List', text: 'AGENTS.md, README.md in ios-agent-build', more: 0 });
   assert.deepEqual(exploreText('find src -name "*.ts" -type f | head'), { tool: 'List', text: '*.ts in src', more: 0 });
-  assert.deepEqual(exploreText('ls -la plugins/sidecar-split/'), { tool: 'List', text: 'sidecar-split', more: 0 });
+  assert.deepEqual(exploreText('ls -la plugins/tickbird-split/'), { tool: 'List', text: 'tickbird-split', more: 0 });
   // Looks of one kind together, then the rest counted.
   assert.deepEqual(exploreText('sed -n 110,150p /m/MEMORY.md; cat a/b.md; rg -n x src'), { tool: 'Read', text: 'MEMORY.md:110-150, b.md', more: 1 });
   // Anything that writes, runs, counts or expands is not a look.

@@ -20,7 +20,7 @@ const agents = [
 ] as const;
 
 /**
- * Sidecar beside the real Claude Code and Codex extensions: it is a side bar
+ * Tickbird beside the real Claude Code and Codex extensions: it is a side bar
  * view, so opening it and its details must leave the Agents' own editor tabs
  * where they are. Samples are this project's newest sessions of each agent.
  */
@@ -28,7 +28,7 @@ export async function run() {
   const result: Record<string, any> = {
     kind: 'real-extensions-coexistence-public-host-api', vscode: vscode.version,
     startedAt: new Date().toISOString(), passed: false, checks: [], extensions: [], samples: [],
-    authorizationBoundary: 'Only public no-argument UI-opening commands and read-only Sidecar APIs; no prompt, login, approval or Agent execution requested.',
+    authorizationBoundary: 'Only public no-argument UI-opening commands and read-only Tickbird APIs; no prompt, login, approval or Agent execution requested.',
     sourceScope: 'Production discovery in the real project; the newest current-project sessions of each agent at the time of the run.',
     limitations: [
       'New Agent webview tabs are real extension surfaces, but their content is NOT inspected; they may be login, onboarding or empty-conversation screens.',
@@ -56,15 +56,15 @@ export async function run() {
   };
   let api: SidecarApi | undefined;
   try {
-    assert.equal(process.env.SIDECAR_TEST_CODEX_ROOT, undefined, 'Real-source test must not use Codex fixture overrides');
-    assert.equal(process.env.SIDECAR_TEST_CLAUDE_ROOT, undefined, 'Real-source test must not use Claude fixture overrides');
+    assert.equal(process.env.TICKBIRD_TEST_CODEX_ROOT, undefined, 'Real-source test must not use Codex fixture overrides');
+    assert.equal(process.env.TICKBIRD_TEST_CLAUDE_ROOT, undefined, 'Real-source test must not use Claude fixture overrides');
     assert.equal(vscode.workspace.workspaceFolders?.length, 1);
-    assert.equal(vscode.workspace.workspaceFolders?.[0].uri.fsPath, process.env.SIDECAR_COEXISTENCE_PROJECT);
-    const sidecar = vscode.extensions.getExtension<SidecarApi>('zchan0.agent-sidecar');
+    assert.equal(vscode.workspace.workspaceFolders?.[0].uri.fsPath, process.env.TICKBIRD_COEXISTENCE_PROJECT);
+    const sidecar = vscode.extensions.getExtension<SidecarApi>('zchan0.tickbird');
     assert.ok(sidecar);
     api = await sidecar.activate();
     const ownApi = api;
-    // Where each Agent's own tab is: column and view type. Sidecar must not move or replace them.
+    // Where each Agent's own tab is: column and view type. Tickbird must not move or replace them.
     const agentTabs = new Map<string, vscode.ViewColumn>();
     for (const target of agents) {
       await check(`public command opens the real ${target.id} editor surface`, async () => {
@@ -89,13 +89,13 @@ export async function run() {
         assert.equal(tab.group.viewColumn, column, `${phase}: the Agent tab ${type} moved out of its group`);
       }
     };
-    await check('the Sidecar side bar view opens without touching the editor groups', async () => {
+    await check('the Tickbird side bar view opens without touching the editor groups', async () => {
       assert.ok(agentTabs.size >= 2, 'Both providers must expose distinct real webview types');
       const groups = vscode.window.tabGroups.all.length;
       await ownApi.openObserver();
-      await waitFor(() => Boolean(ownApi.observer?.visible), 'The Sidecar view did not become visible');
+      await waitFor(() => Boolean(ownApi.observer?.visible), 'The Tickbird view did not become visible');
       assert.equal(vscode.window.tabGroups.all.length, groups, 'Opening the side bar view added or removed an editor group');
-      assertAgentsPreserved('after opening Sidecar');
+      assertAgentsPreserved('after opening Tickbird');
     });
     const samples: SessionCandidate[] = [];
     await check('production source discovery finds this project\'s sessions of both agents', async () => {
@@ -140,7 +140,7 @@ export async function run() {
         assert.notEqual(ownApi.preview!.panel, kept.panel);
         assert.equal(ownApi.evidence.length, 2);
         assert.equal(ownApi.preview!.provider, sample.provider);
-        await waitFor(() => webviewTabs().filter(tab => webviewType(tab)?.endsWith('agentSidecar.evidence')).length === 2,
+        await waitFor(() => webviewTabs().filter(tab => webviewType(tab)?.endsWith('tickbird.evidence')).length === 2,
           'Keep and preview must be two publicly observable tabs');
         assertAgentsPreserved('kept and preview tabs present');
         result.samples.push({ name, provider: sample.provider, sessionId: selected.id, observedItems: selected.items.length,
@@ -155,7 +155,7 @@ export async function run() {
   } catch (error) { result.error = String(error); throw error; }
   finally {
     result.finishedAt = new Date().toISOString();
-    if (process.env.SIDECAR_COEXISTENCE_RESULT) writeFileSync(process.env.SIDECAR_COEXISTENCE_RESULT, JSON.stringify(result, null, 2) + '\n');
+    if (process.env.TICKBIRD_COEXISTENCE_RESULT) writeFileSync(process.env.TICKBIRD_COEXISTENCE_RESULT, JSON.stringify(result, null, 2) + '\n');
     console.log(JSON.stringify({ kind: result.kind, passed: result.passed, checks: result.checks.map((value: any) => ({ name: value.name, passed: value.passed })) }));
     for (const view of api?.evidence ?? []) view.panel.dispose();
   }

@@ -21,7 +21,7 @@ interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?:
   call?: { tool: string; label: string; word?: string };
   /** A change shown as its diff: every change to the file in the turn, the one on screen, its path as shown. */
   change?: { steps: PatchFile[]; index: number; path: string; title: string } }
-const observerType = 'agentSidecar.observer';
+const observerType = 'tickbird.observer';
 
 export function activate(context: vscode.ExtensionContext) {
   let observer: vscode.WebviewView | undefined;
@@ -55,7 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
   const nonce = () => randomBytes(18).toString('base64');
   const coverageDocuments = new Map<string, string>();
   const coverageChanged = new vscode.EventEmitter<vscode.Uri>();
-  const reportError = (error: unknown) => vscode.window.showWarningMessage(`Agent Sidecar：${error instanceof Error ? error.message : String(error)}`);
+  const reportError = (error: unknown) => vscode.window.showWarningMessage(`Tickbird：${error instanceof Error ? error.message : String(error)}`);
 
   /** Sessions are matched by one local project directory; any other workspace is explained in the view itself. */
   function workspaceGap(): WorkspaceGap | undefined {
@@ -74,8 +74,8 @@ export function activate(context: vscode.ExtensionContext) {
   function discoveryOptions(): DiscoveryOptions {
     const test = context.extensionMode === vscode.ExtensionMode.Test;
     return { projectPath: projectPath(),
-      codexRoot: test ? process.env.SIDECAR_TEST_CODEX_ROOT : undefined,
-      claudeRoot: test ? process.env.SIDECAR_TEST_CLAUDE_ROOT : undefined };
+      codexRoot: test ? process.env.TICKBIRD_TEST_CODEX_ROOT : undefined,
+      claudeRoot: test ? process.env.TICKBIRD_TEST_CLAUDE_ROOT : undefined };
   }
   async function scan() {
     const token = ++scanGeneration;
@@ -267,7 +267,7 @@ export function activate(context: vscode.ExtensionContext) {
     else renderObserver();
   }
 
-  /** The Sidecar is a sidebar view: it owns no editor group and never changes the editor layout. */
+  /** The Tickbird is a sidebar view: it owns no editor group and never changes the editor layout. */
   function attachObserver(view: vscode.WebviewView) {
     observer = view;
     view.webview.options = { enableScripts: true, localResourceRoots: [] };
@@ -365,7 +365,7 @@ export function activate(context: vscode.ExtensionContext) {
       const { item, items } = snapshot;
       const column = detailColumn();
       if (!preview) {
-        const panel = vscode.window.createWebviewPanel('agentSidecar.evidence', '证据预览',
+        const panel = vscode.window.createWebviewPanel('tickbird.evidence', '证据预览',
           { viewColumn: column, preserveFocus: true }, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
         const view: EvidenceView = { panel, item: structuredClone(item), ...(items ? { items: structuredClone(items) } : {}), provider: boundSession.provider, kept: false, ...(change ? { change } : {}), ...(call ? { call } : {}) };
         preview = view;
@@ -396,7 +396,7 @@ export function activate(context: vscode.ExtensionContext) {
     void Promise.resolve(kept.panel.webview.postMessage({ type: 'kept' })).catch(reportError);
   }
   function coverageUri(snapshot: SessionData): vscode.Uri {
-    return vscode.Uri.parse(`agent-sidecar-coverage:/${encodeURIComponent(snapshot.provider + '-' + snapshot.id)}.json`);
+    return vscode.Uri.parse(`tickbird-coverage:/${encodeURIComponent(snapshot.provider + '-' + snapshot.id)}.json`);
   }
   function updateCoverageDocument(snapshot: SessionData): vscode.Uri {
     const uri = coverageUri(snapshot);
@@ -417,13 +417,13 @@ export function activate(context: vscode.ExtensionContext) {
     await vscode.window.showTextDocument(doc, { viewColumn: column, preserveFocus: true, preview: false });
   }
   context.subscriptions.push(coverageChanged);
-  context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('agent-sidecar-coverage', {
+  context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('tickbird-coverage', {
     onDidChange: coverageChanged.event,
     provideTextDocumentContent: uri => coverageDocuments.get(uri.toString()) ?? 'Coverage is not loaded for this source.'
   }));
   const commands: Array<[string, () => Promise<unknown> | void]> = [
-    ['agentSidecar.open', openObserver], ['agentSidecar.chooseSession', chooseSession],
-    ['agentSidecar.refresh', refresh], ['agentSidecar.keepEvidence', keepEvidence], ['agentSidecar.coverage', showCoverage]
+    ['tickbird.open', openObserver], ['tickbird.chooseSession', chooseSession],
+    ['tickbird.refresh', refresh], ['tickbird.keepEvidence', keepEvidence], ['tickbird.coverage', showCoverage]
   ];
   for (const [name, handler] of commands) context.subscriptions.push(vscode.commands.registerCommand(name, async () => {
     try { return await handler(); } catch (error) { await reportError(error); }

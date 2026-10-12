@@ -59,7 +59,7 @@ export function viewImage(image: { name: string; data?: string; mime?: string; p
   let path = image.path;
   if (image.data) {
     const extension = extname(image.name) || '.' + (image.mime ?? 'image/png').split('/')[1];
-    const directory = join(tmpdir(), 'agent-sidecar');
+    const directory = join(tmpdir(), 'tickbird');
     mkdirSync(directory, { recursive: true });
     path = join(directory, createHash('sha256').update(image.data).digest('hex').slice(0, 12) + '-' + basename(image.name, extname(image.name)) + extension);
     if (!existsSync(path)) writeFileSync(path, Buffer.from(image.data, 'base64'));

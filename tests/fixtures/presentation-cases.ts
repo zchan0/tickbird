@@ -10,14 +10,14 @@ const call = (title: string, input: unknown, output?: string): TimelineItem => (
 const envelope = (output: string) => JSON.stringify({ chunk_id: 'sample', wall_time_seconds: 0.1, exit_code: 0, output });
 const patch = '*** Begin Patch\n*** Update File: packages/core/src/model.ts\n@@\n-export type View = "raw";\n+export type View = "input" | "output";\n*** Add File: tests/view.test.ts\n+assert.equal(view.kind, "output");\n*** End Patch';
 const cases: Array<[string, string, TimelineItem[]]> = [
-  ['bash', '01 · Bash：命令、参数与输出', [call('exec_command', { cmd: 'npm test', workdir: '/workspace/agent-sidecar' }, 'PASS render.test.ts\nPASS live-view.test.ts\n12 tests passed')]],
+  ['bash', '01 · Bash：命令、参数与输出', [call('exec_command', { cmd: 'npm test', workdir: '/workspace/tickbird' }, 'PASS render.test.ts\nPASS live-view.test.ts\n12 tests passed')]],
   ['bash-read', '02 · Read：识别纯读取，详情保留命令', [call('exec_command', { cmd: "sed -n '1,80p' packages/core/src/model.ts" }, 'export interface SessionData {\n  id: string;\n}')]],
   ['wrapper', '03 · 两个 Bash 与一个调用级 Output', [call('exec', 'text(await tools.exec_command({cmd:"npm run check"}));\ntext(await tools.exec_command({cmd:"npm test"}));', 'Script completed\nWall time 0.1 seconds\nOutput:\n' + envelope('Type check passed') + envelope('12 tests passed'))]],
-  ['bash-sequence', '03b · 独立 Bash 逐项顺排，IN / OUT 各限三行', [call('Bash', { command: "python3 - <<'PY'\nfrom pathlib import Path\nprint(Path('README.md').read_text())\nprint('done')\nPY", description: '检查说明文档' }, '# Agent Sidecar\n\nRead-only process observer.\nSupports Codex and Claude Code.\nMore output after the third line.'), { ...call('Bash', { command: 'npm test', description: '验证修改' }, 'PASS render.test.ts\nPASS live-view.test.ts\nPASS presentation.test.ts\n20 tests passed\n0 failed'), id: 'test' }]],
+  ['bash-sequence', '03b · 独立 Bash 逐项顺排，IN / OUT 各限三行', [call('Bash', { command: "python3 - <<'PY'\nfrom pathlib import Path\nprint(Path('README.md').read_text())\nprint('done')\nPY", description: '检查说明文档' }, '# Tickbird\n\nRead-only process observer.\nSupports Codex and Claude Code.\nMore output after the third line.'), { ...call('Bash', { command: 'npm test', description: '验证修改' }, 'PASS render.test.ts\nPASS live-view.test.ts\nPASS presentation.test.ts\n20 tests passed\n0 failed'), id: 'test' }]],
   ['patch', '04 · apply_patch：完整路径与逐文件 diff', [call('apply_patch', patch, 'Success. Updated the following files:\nM packages/core/src/model.ts\nA tests/view.test.ts')]],
   ['nested-patch', '05 · exec 包装里的 apply_patch', [call('exec', `text(await tools.apply_patch(${JSON.stringify(patch)}));`, 'Script completed\nWall time 0.1 seconds\nOutput:\nSuccess.')]],
   ['edit', '06 · Edit：替换片段与附加参数', [call('Edit', { file_path: 'packages/core/src/model.ts', old_string: 'const mode = "raw";', new_string: 'const mode = "output";', replace_all: false }, 'Updated')]],
-  ['tools', '07 · Read / Grep / WebSearch 是不同工具', [call('Read', { file_path: 'README.md', offset: 1, limit: 60 }, '# Agent Sidecar\nA read-only observer.'), { ...call('Grep', { pattern: 'renderDetail', path: 'packages' }, 'packages/vscode/src/render.ts:820'), id: 'grep' }, { ...call('WebSearch', { query: 'VS Code webview syntax highlighting' }, 'VS Code Extension API'), id: 'web' }]],
+  ['tools', '07 · Read / Grep / WebSearch 是不同工具', [call('Read', { file_path: 'README.md', offset: 1, limit: 60 }, '# Tickbird\nA read-only observer.'), { ...call('Grep', { pattern: 'renderDetail', path: 'packages' }, 'packages/vscode/src/render.ts:820'), id: 'grep' }, { ...call('WebSearch', { query: 'VS Code webview syntax highlighting' }, 'VS Code Extension API'), id: 'web' }]],
   ['no-output', '08 · 只有 Input：没有空 Output 框', [call('Bash', { command: 'npm test' })]],
   ['markdown', '09 · 公开正文与围栏代码', [{ ...call('过程说明', ''), kind: 'message', status: 'info', result: undefined, detail: { title: '过程说明', blocks: [{ kind: 'text', label: '用户请求或公开正文', text: '**先核对数据归属**，然后调整展示。\n\n- 工具是动作\n- 结果放入 Output\n\n```ts\nconst view = { kind: "output", text: result };\n```' }] } }]],
   ['compaction', '10 · 压缩占位只有一句', [{ ...call('上下文已压缩', ''), kind: 'notice', availability: 'none', status: 'info', result: undefined, detail: undefined }]],
@@ -31,7 +31,7 @@ const cases: Array<[string, string, TimelineItem[]]> = [
     { ...call('web__run', { search_query: [{ q: 'VS Code webview' }] }, 'VS Code Extension API'), id: 'web-search' },
     { ...call('web__run', { open: [{ ref_id: 'https://code.visualstudio.com/api' }] }, 'Extension API'), id: 'web-open' },
     { ...call('get_goal', {}, '{"objective":"核对工具展示","status":"active"}'), id: 'goal' },
-    { ...call('mcp__cua_repl/js', { title: '检查窄栏样例', code: 'await tab.getState();' }, '{"title":"Sidecar 展示样例"}'), id: 'computer' },
+    { ...call('mcp__cua_repl/js', { title: '检查窄栏样例', code: 'await tab.getState();' }, '{"title":"Tickbird 展示样例"}'), id: 'computer' },
     { ...call('mcp__example__lookup_document', { query: 'Workspace guide', limit: 3 }, '{"matches":[]}'), id: 'mcp' },
   ]],
   ['turn-preview', '14 · 目录：只显示对应 turn，问题最多三行', [

@@ -28,25 +28,25 @@ export async function run() {
     catch (error) { result.checks.push({ name, passed: false, error: String(error), groups: snapshot() }); throw error; }
   };
   try {
-    const extension = vscode.extensions.getExtension('zchan0.agent-sidecar');
+    const extension = vscode.extensions.getExtension('zchan0.tickbird');
     assert.ok(extension);
     const api = await extension.activate();
     const placeholder = await vscode.workspace.openTextDocument(join(vscode.workspace.workspaceFolders![0].uri.fsPath, 'AGENT_PLACEHOLDER.txt'));
     await vscode.window.showTextDocument(placeholder, { preview: false });
     await settle();
     const editorLayout = () => snapshot().map(group => ({ column: group.column, tabs: group.tabs.map(tab => tab.label) }));
-    await check('the Sidecar opens as a sidebar view without adding, locking or resizing any editor group', async () => {
+    await check('the Tickbird opens as a sidebar view without adding, locking or resizing any editor group', async () => {
       const before = editorLayout();
       assert.equal(api.observer, undefined);
       await api.openObserver(); await settle();
       assert.ok(api.observer, 'The sidebar view resolved');
       assert.equal(api.observer.visible, true);
       assert.deepEqual(editorLayout(), before, 'Editor groups and their tabs are exactly as they were');
-      assert.ok(!snapshot().some(group => group.tabs.some(tab => /agentSidecar/.test(tab.viewType ?? ''))), 'No Sidecar editor tab exists');
+      assert.ok(!snapshot().some(group => group.tabs.some(tab => /tickbird/.test(tab.viewType ?? ''))), 'No Tickbird editor tab exists');
     });
-    await check('another editor opened into the active column cannot cover the sidebar Sidecar', async () => {
+    await check('another editor opened into the active column cannot cover the sidebar Tickbird', async () => {
       // The reported bug: extensions that open into the active column used to land
-      // in the Sidecar's own locked group. A sidebar view has no group to land in.
+      // in the Tickbird's own locked group. A sidebar view has no group to land in.
       const doc = await vscode.workspace.openTextDocument({ content: 'Opened into the active column', language: 'plaintext' });
       await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Active, preview: true });
       await settle();
@@ -232,7 +232,7 @@ export async function run() {
       await settle();
       await api.selectSession(provider === 'claude' ? 'claude:cl-fixture' : 'codex:cx-fixture');
       const source = api.candidates.find((candidate: any) => candidate.provider === provider);
-      assert.ok(source && source.file.startsWith(process.env[provider === 'codex' ? 'SIDECAR_TEST_CODEX_ROOT' : 'SIDECAR_TEST_CLAUDE_ROOT']!), 'Append only to this run\'s synthetic fixture');
+      assert.ok(source && source.file.startsWith(process.env[provider === 'codex' ? 'TICKBIRD_TEST_CODEX_ROOT' : 'TICKBIRD_TEST_CLAUDE_ROOT']!), 'Append only to this run\'s synthetic fixture');
       const item = available()[0]; await api.openDetail(item.id); api.keepEvidence();
       const kept = api.evidence[0], keptSnapshot = JSON.stringify(kept.item), keptHtml = kept.panel.webview.html;
       const webview = api.observer.webview as vscode.Webview;
@@ -257,7 +257,7 @@ export async function run() {
     });
     await check('the window follows the session the integration says is its current one, and shows what it waits for', async () => {
       // A state file as the integration hook writes it, naming this extension host as the window.
-      const directory = join(process.env.XDG_STATE_HOME!, 'agent-sidecar', 'sessions');
+      const directory = join(process.env.XDG_STATE_HOME!, 'tickbird', 'sessions');
       assert.ok(directory.startsWith(process.env.XDG_STATE_HOME!) && process.env.XDG_STATE_HOME!.includes('sidecar-product-host-'), 'Only this run\'s state directory');
       const claude = api.candidates.find((candidate: any) => candidate.provider === 'claude');
       await api.selectSession('codex:cx-fixture');
@@ -291,7 +291,7 @@ export async function run() {
   } catch (error) { result.error = String(error); throw error; }
   finally {
     result.finishedAt = new Date().toISOString();
-    if (process.env.SIDECAR_TEST_RESULT) writeFileSync(process.env.SIDECAR_TEST_RESULT, JSON.stringify(result, null, 2) + '\n');
+    if (process.env.TICKBIRD_TEST_RESULT) writeFileSync(process.env.TICKBIRD_TEST_RESULT, JSON.stringify(result, null, 2) + '\n');
     console.log(JSON.stringify({ passed: result.passed, checks: result.checks.map((check: any) => ({ name: check.name, passed: check.passed })) }));
   }
 }

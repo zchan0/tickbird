@@ -7,7 +7,7 @@
 // among several there, by the terminal that just took input: Codex starts a
 // session when its first message is sent.
 //
-// This file is the same in sidecar-state and sidecar-split (a test checks):
+// This file is the same in tickbird-state and tickbird-split (a test checks):
 // each plugin is installed on its own and cannot import the other.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs';

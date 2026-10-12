@@ -59,7 +59,7 @@ export function demoLines(caps: Capabilities, width: number, height: number, key
   const s = (ch: string) => symbol(caps, ch);
   const dim = { dim: true };
   const lines: Line[] = [
-    row([{ text: ' Sidecar demo', style: { bold: true } }], [{ text: `${width}×${height} `, style: dim }], width),
+    row([{ text: ' Tickbird demo', style: { bold: true } }], [{ text: `${width}×${height} `, style: dim }], width),
     [{ text: ' 每行右端的 | 应该对齐成一列', style: dim }],
     '',
   ];
@@ -152,7 +152,7 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
   if (command === 'uninstall') { process.exitCode = uninstall() ? 0 : 1; return; }
-  process.stderr.write('用法：agent-sidecar watch [会话 ID 或记录文件] [--agent 进程号 [--focus 命令]] | setup [--source 仓库] | uninstall | caps [--json] | demo\n');
+  process.stderr.write('用法：tickbird watch [会话 ID 或记录文件] [--agent 进程号 [--focus 命令]] | setup [--source 仓库] | uninstall | caps [--json] | demo\n');
   process.exitCode = 2;
 }
 

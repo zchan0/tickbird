@@ -446,10 +446,10 @@ test('a background task reporting back is one notice in its own words, not an em
   const data = parse([row('user', 'question', { uuid: 'u1' }),
     notify('completed', 'Background command "Run real VS Code host tests" completed (exit code 0)'),
     notify('failed', 'Background command "Render replay page" failed with exit code 144'),
-    notify('completed', 'Stopped watching Artifact: "Sidecar notes" (connection lost)')]);
+    notify('completed', 'Stopped watching Artifact: "Tickbird notes" (connection lost)')]);
   const notes = data.items.filter(item => item.noticeType === 'task-notification');
   assert.deepEqual(notes.map(item => [item.taskTool, item.title, item.status, item.exitCode]), [
-    ['Bash', 'Run real VS Code host tests', 'completed', 0], ['Bash', 'Render replay page', 'failed', 144], ['Artifact', 'Sidecar notes', 'completed', undefined]]);
+    ['Bash', 'Run real VS Code host tests', 'completed', 0], ['Bash', 'Render replay page', 'failed', 144], ['Artifact', 'Tickbird notes', 'completed', undefined]]);
   assert.ok(!data.items.some(item => item.kind === 'subagent'));
   assert.doesNotMatch(JSON.stringify(notes.map(item => item.detail?.blocks.map(block => block.text))), /<task-notification>/);
 });

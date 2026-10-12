@@ -12,12 +12,18 @@ import { join } from 'node:path';
 export interface RunResult { ok: boolean; out: string; missing?: boolean }
 export type Runner = (command: string, args: string[]) => RunResult;
 
-export const MARKETPLACE = 'agent-sidecar';
-export const STATE = `sidecar-state@${MARKETPLACE}`, SPLIT = `sidecar-split@${MARKETPLACE}`;
-export const EXTENSION = 'zchan0.agent-sidecar';
+export const MARKETPLACE = 'tickbird';
+export const STATE = `tickbird-state@${MARKETPLACE}`, SPLIT = `tickbird-split@${MARKETPLACE}`;
+export const EXTENSION = 'zchan0.tickbird';
 const CODE = '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
-// Names used before 2026-10-05; removed on sight so a reinstall leaves one copy.
-const OLD = { marketplace: 'agent-sidecar-local', id: 'agent-sidecar@agent-sidecar-local' };
+// Names used before: agent-sidecar-local until 2026-10-05, Agent Sidecar until 2026-10-12.
+// Removed on sight so a reinstall leaves one copy.
+export const OLD = {
+  marketplaces: ['agent-sidecar-local', 'agent-sidecar'],
+  plugins: ['agent-sidecar@agent-sidecar-local', 'sidecar-state@agent-sidecar', 'sidecar-split@agent-sidecar'],
+  extensions: ['agent-sidecar-local.agent-sidecar', 'zchan0.agent-sidecar'],
+  command: 'agent-sidecar',
+};
 
 export const spawnRunner: Runner = (command, args) => {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: 120_000 });
@@ -46,8 +52,9 @@ export function consoleReport(write: (line: string) => void = line => console.lo
 export function claudePlugins(run: Runner, source: string, ids: string[], report: Report): boolean {
   const markets = json(run, 'claude', ['plugin', 'marketplace', 'list', '--json']);
   if (!markets) { report.fail('Claude Code', '没有找到 claude 命令，跳过'); return false; }
-  if ((json(run, 'claude', ['plugin', 'list', '--json']) ?? []).some((item: any) => item.id === OLD.id)) run('claude', ['plugin', 'uninstall', OLD.id]);
-  if (markets.some((item: any) => item.name === OLD.marketplace)) run('claude', ['plugin', 'marketplace', 'remove', OLD.marketplace]);
+  const before = new Set((json(run, 'claude', ['plugin', 'list', '--json']) ?? []).map((item: any) => item.id));
+  for (const id of OLD.plugins) if (before.has(id)) { run('claude', ['plugin', 'uninstall', id]); report.ok(`Claude Code：移除旧插件 ${id}`); }
+  for (const name of OLD.marketplaces) if (markets.some((item: any) => item.name === name)) run('claude', ['plugin', 'marketplace', 'remove', name]);
   const market = markets.some((item: any) => item.name === MARKETPLACE)
     ? run('claude', ['plugin', 'marketplace', 'update', MARKETPLACE]) : run('claude', ['plugin', 'marketplace', 'add', source]);
   if (!market.ok) { report.fail('Claude Code 插件市场', lastLine(market.out)); return false; }
@@ -66,8 +73,9 @@ export function codexPlugins(run: Runner, source: string, ids: string[], report:
   const markets = json(run, 'codex', ['plugin', 'marketplace', 'list', '--json']);
   if (!markets) { report.fail('Codex', '没有找到 codex 命令，跳过'); return false; }
   // `codex plugin remove` reports success even for a plugin that is not there: run it, do not report it.
-  run('codex', ['plugin', 'remove', OLD.id]);
-  run('codex', ['plugin', 'marketplace', 'remove', OLD.marketplace]);
+  // codex plugin remove reports success for a plugin that is not there: no report, just the removal.
+  for (const id of OLD.plugins) run('codex', ['plugin', 'remove', id]);
+  for (const name of OLD.marketplaces) run('codex', ['plugin', 'marketplace', 'remove', name]);
   const known = (markets.marketplaces ?? []).some((item: any) => item.name === MARKETPLACE);
   const market = known ? { ok: true, out: '' } : run('codex', ['plugin', 'marketplace', 'add', source]);
   if (!market.ok) { report.fail('Codex 插件市场', lastLine(market.out)); return false; }
@@ -82,7 +90,7 @@ export function codexPlugins(run: Runner, source: string, ids: string[], report:
 
 /** The VS Code extension's version, or undefined when it is not installed (or VS Code is not there). */
 export function vscodeExtension(run: Runner, env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const result = run(env.SIDECAR_CODE_CLI || CODE, ['--list-extensions', '--show-versions']);
+  const result = run(env.TICKBIRD_CODE_CLI || CODE, ['--list-extensions', '--show-versions']);
   if (!result.ok) return undefined;
   return result.out.split('\n').map(line => line.trim()).find(line => line.toLowerCase().startsWith(EXTENSION + '@'))?.split('@')[1];
 }
@@ -113,7 +121,7 @@ export function kittyRemote(text: string): { remote: boolean; listen: boolean; s
 }
 
 /** The lines setup appends: kitty listens on a socket per instance, and only that socket controls it. */
-export const KITTY_LINES = ['# Agent Sidecar: open the Sidecar pane beside an agent (agent-sidecar setup)', 'allow_remote_control socket-only', 'listen_on unix:${TMPDIR}/kitty-{kitty_pid}'];
+export const KITTY_LINES = ['# Tickbird: open the Tickbird pane beside an agent (tickbird setup)', 'allow_remote_control socket-only', 'listen_on unix:${TMPDIR}/kitty-{kitty_pid}'];
 
 export interface KittyOptions { env?: NodeJS.ProcessEnv; ask?: (question: string) => Promise<boolean>; now?: Date; kittyApp?: string }
 
@@ -149,8 +157,8 @@ export async function kitty(report: Report, { env = process.env, ask, now = new 
 
 export interface Paths { data: string; bin: string }
 export const installPaths = (env: NodeJS.ProcessEnv = process.env): Paths => ({
-  data: env.AGENT_SIDECAR_DATA || join(env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'agent-sidecar'),
-  bin: env.AGENT_SIDECAR_BIN || join(homedir(), '.local', 'bin'),
+  data: env.TICKBIRD_DATA || join(env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'tickbird'),
+  bin: env.TICKBIRD_BIN || join(homedir(), '.local', 'bin'),
 });
 
 /** Written by `npm run install:terminal`: where the plugins come from, and which version is installed. */
@@ -161,7 +169,7 @@ export function installRecord(paths: Paths): InstallRecord | undefined {
 
 export interface SetupOptions extends KittyOptions { run?: Runner; report?: Report; source?: string; version?: string; paths?: Paths }
 
-/** `agent-sidecar setup`: the plugins in both agents, kitty, and what is left for the reader to do. */
+/** `tickbird setup`: the plugins in both agents, kitty, and what is left for the reader to do. */
 export async function setup(options: SetupOptions = {}): Promise<boolean> {
   const { run = spawnRunner, report = consoleReport(), env = process.env } = options;
   const paths = options.paths ?? installPaths(env);
@@ -169,7 +177,7 @@ export async function setup(options: SetupOptions = {}): Promise<boolean> {
   const source = options.source ?? record?.source;
   const version = options.version ?? record?.version;
   if (!source || !existsSync(join(source, '.claude-plugin', 'marketplace.json'))) {
-    report.fail('找不到插件来源', '在仓库里运行 npm run install:terminal，或用 agent-sidecar setup --source <仓库>');
+    report.fail('找不到插件来源', '在仓库里运行 npm run install:terminal，或用 tickbird setup --source <仓库>');
     return false;
   }
   claudePlugins(run, source, [STATE, SPLIT], report);
@@ -187,7 +195,7 @@ export async function setup(options: SetupOptions = {}): Promise<boolean> {
 export interface UninstallOptions { run?: Runner; report?: Report; env?: NodeJS.ProcessEnv; paths?: Paths }
 
 /**
- * `agent-sidecar uninstall`: the terminal version only. sidecar-state stays
+ * `tickbird uninstall`: the terminal version only. tickbird-state stays
  * while the VS Code version is installed: it reads the same state files.
  */
 export function uninstall({ run = spawnRunner, report = consoleReport(), env = process.env, paths = installPaths(env) }: UninstallOptions = {}): boolean {
@@ -209,8 +217,8 @@ export function uninstall({ run = spawnRunner, report = consoleReport(), env = p
     }
     if (!keepState) run('codex', ['plugin', 'marketplace', 'remove', MARKETPLACE]);
   }
-  if (keepState) report.info('VS Code 版还在用 sidecar-state，保留它');
-  const launcher = join(paths.bin, 'agent-sidecar');
+  if (keepState) report.info('VS Code 版还在用 tickbird-state，保留它');
+  const launcher = join(paths.bin, 'tickbird');
   if (existsSync(launcher)) { rmSync(launcher); report.ok('移除命令', launcher); }
   if (existsSync(paths.data)) { rmSync(paths.data, { recursive: true, force: true }); report.ok('移除程序文件', paths.data); }
   report.info('kitty.conf 里的远程控制设置没有改动；不需要时可以自己删掉');
