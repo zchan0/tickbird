@@ -96,6 +96,7 @@
     "package:vscode": "node scripts/install-vscode.mjs --package-only",
     "install:vscode": "npm run build && node scripts/install-vscode.mjs",
     "set-version": "node scripts/set-version.mjs",
+    "release": "node scripts/release.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "build:realtime": "tsc -p tsconfig.realtime.json",
     "test:realtime": "npm run build:realtime && node --test .test-artifacts/realtime-build/tests/*.test.js",

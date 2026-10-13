@@ -1,6 +1,7 @@
-# A tag v<version> makes a GitHub release of that version: the tag must name
-# the version in package.json (npm run set-version), the tests must pass, and
-# the release carries the VS Code extension and the terminal program.
+# A tag v<version> makes a GitHub release of that version (npm run release
+# does it all): the tag must name the version in package.json, the tests must
+# pass, and the release carries the VS Code extension and the terminal
+# program. Its notes list the commits since the release before.
 name: Release
 
 on:
@@ -15,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -36,5 +39,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(node -p "require('./package.json').version")
+          previous=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          {
+            echo "## Changes"
+            echo
+            # Every commit's title since the release before, but the bare version commit npm run release makes.
+            git log --no-merges --format='- %s' ${previous:+$previous..}"$GITHUB_REF_NAME" | grep -vE '^- [0-9]+\.[0-9]+\.[0-9]+$' || true
+            echo
+            echo "## Install"
+            echo
+            echo "VS Code: \`code --install-extension tickbird-$version.vsix\`. The terminal version and the agents' plugins install from the repository: see README, 安装."
+          } > build/notes.md
           gh release create "$GITHUB_REF_NAME" "build/tickbird-$version.vsix" build/tickbird-cli.cjs \
-            --title "Tickbird $version" --notes "VS Code: code --install-extension tickbird-$version.vsix. The terminal version and the agents' plugins install from the repository: see README, 安装."
+            --title "Tickbird $version" --notes-file build/notes.md

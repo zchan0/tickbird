@@ -79,7 +79,9 @@ npm run dev
 
 `npm run package:vscode`、`npm run package:terminal` 只打包，不安装。产品和接入用同一个版本号，用 `npm run set-version -- x.y.z` 修改，它同时重新打包 `plugins/tickbird-split/program/tickbird.cjs`（插件自带的程序）；改了 `plugins/` 下的插件后必须升版本，Agent 才会取更新，见 [plugins/tickbird-state/README.md](./plugins/tickbird-state/README.md)。
 
-GitHub Actions：每次推送到 `main` 和每个 PR 在 macOS、Linux（Node 22、24）上跑 `npm test` 并打包；推送标签 `v<版本>`（与 `package.json` 一致）时发布 GitHub Release，附带 `.vsix` 和终端版程序。真实 VS Code 的核对（`npm run test:host`）需要桌面环境，只在本机跑。
+GitHub Actions：每次推送到 `main` 和每个 PR 在 macOS、Linux（Node 22、24）上跑 `npm test` 并打包；推送标签 `v<版本>`（与 `package.json` 一致）时发布 GitHub Release，附带 `.vsix` 和终端版程序，发布说明列出上一版以来的提交。
+
+发版：`npm run release -- x.y.z`。它检查在 `main` 上、没有未提交的改动，然后改版本号、跑测试、提交、推送、等 CI 通过、打标签、等发布完成，最后装到本机。哪一步失败就停在哪一步并说明原因；修好后再运行同一条命令，已经完成的步骤会跳过。真实 VS Code 的核对（`npm run test:host`）需要桌面环境，只在本机跑。
 
 ## 使用
 
