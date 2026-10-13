@@ -200,7 +200,7 @@ export interface DetailInput {
 /**
  * An Agent call whose subagent kept its own record: that record's one turn, set
  * as a turn page is, with the task (the first lines of it) as the prompt and
- * the answer open. While the subagent runs, the spinner turns at its end.
+ * the answer open. While the subagent runs, the waiting dot breathes at its end.
  */
 /** A subagent's task shows this many lines until opened. */
 const PROMPT_LINES = 3;

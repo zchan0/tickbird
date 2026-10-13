@@ -66,7 +66,7 @@ function callHtml(row: ChapterRow, key: string, session: SessionData, live: bool
 }
 
 /**
- * A step's calls on a band, under the words that explain them, as a tree: the
+ * A step's calls under the words that explain them, on the page itself, as a tree: the
  * tool's name once for a run of one tool, each call hung from it. Every call is
  * shown: the reader is here for the process. Keyed by position, not by row id:
  * rows only ever append, while an id changes when a repeated call raises its
@@ -76,7 +76,7 @@ function callsHtml(all: ChapterRow[], key: string, session: SessionData, live: b
   const rows = callSteps(all);
   if (!rows.length) return '';
   const names = rows.map(row => callTool(row, session));
-  // Agent calls are other agents set to work, not tools: off the band, each with a magenta bar, as in the terminal.
+  // Agent calls are other agents set to work, not tools: set off from them, each with a dot for its state, as in the terminal.
   const agent = (row: ChapterRow) => row.items[0]?.kind === 'subagent';
   let html = '', block = '', start = 0;
   const close = (end: number) => {
@@ -124,7 +124,7 @@ function agentsHtml(rows: ChapterRow[], key: string, rowKey: string, session: Se
   return `<div class="crun" data-observation-key="${escapeHtml(key)}"><div class="ctool">${escapeHtml(callTool(rows[0], session))}${group.lead ? `<span class="clead"> · ${escapeHtml(group.lead)}</span>` : ''}</div><ol class="cagent-list">${items}</ol></div>`;
 }
 
-/** The label over a block, as in the terminal: a coloured word on a line of its own. */
+/** The label over a block, as in the terminal: a small grey word on a line of its own; coloured only for what is going on (Needs approval, Interrupted). */
 const label = (text: string, tone = ''): string => `<div class="tlabel"${tone ? ` data-tone="${tone}"` : ''}>${text}</div>`;
 
 /** The answer folded: its opening lines run together, as words: marks of headings, lists, emphasis, code and links dropped. */
@@ -157,11 +157,12 @@ const waitingFor = ({ tool, summary }: { tool: string; summary: string }): strin
 export interface TurnContext { latest: boolean; session: SessionData; extras?: LiveExtras }
 
 /**
- * The whole turn, top to bottom, as the terminal sets it: what was asked under
- * a Prompt label; the agent's words with the calls each explains on a band
- * under them; then how the turn ended. While it runs, a spinner at the end when
- * no call turns; waiting on you, Needs approval. Over, the answer and the
- * changes fold to a line each; the process stays open.
+ * The whole turn, top to bottom, as the terminal sets it (design v11 B): what
+ * was asked, raised on a sheet under a Prompt label; the agent's words with the
+ * calls each explains under them, on the page itself; then, under a rule, how
+ * the turn ended. While it runs, a dot breathes at the end; waiting on you,
+ * Needs approval. Over, the answer and the changes fold to a line each; the
+ * process stays open.
  */
 export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { latest, session, extras = {} }: TurnContext): string {
   const view = turnView(group, latest, session.provider);
@@ -174,7 +175,7 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { 
   const segmentHtml = (segment: TurnSegment) => {
     if (segment.kind === 'answer') return `<li class="cseg" data-observation-key="${escapeHtml(segment.item.id)}">${words(segment.item)}</li>`;
     // Your own words sent during the turn: a prompt too.
-    if (segment.kind === 'interjection') return `<li class="cseg tprompt" data-observation-key="${escapeHtml(segment.item.id)}">${label('Prompt', 'blue')}${render.request(segment.item)}</li>`;
+    if (segment.kind === 'interjection') return `<li class="cseg tprompt" data-observation-key="${escapeHtml(segment.item.id)}">${label('Prompt')}${render.request(segment.item)}</li>`;
     const { chapter } = segment;
     return `<li class="chapter" data-observation-key="${escapeHtml(chapter.key)}">${chapter.headings.map(words).join('')}`
       + callsHtml(chapter.rows, chapter.key, session, open, Boolean(waiting), render.unavailable)
@@ -194,17 +195,17 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { 
       + `${tool ? `<div class="cwait-what"><b>${escapeHtml(tool)}</b>${what ? ` · ${escapeHtml(what.replace(/\s+/g, ' '))}` : ''}</div>` : ''}`
       + `<div class="cnote">在 ${session.provider === 'claude' ? 'Claude Code' : 'Codex'} 里选择批准或拒绝。</div></li>`;
   } else if (live) {
-    // The agent works out its next step: the spinner turns where the answer will come. The client hides it while a call turns.
+    // The agent works out its next step: a dot breathes where the answer will come. The client hides it while what came last is still appearing.
     end = `<li class="cseg tend live-tail" data-observation-key="live-tail:${escapeHtml(group.key)}"><span class="cbranch"><span class="cspin"></span></span><span class="cquiet" data-live-verb=""></span><span class="cquiet" data-since=""></span></li>`;
   }
   const answers = open ? [] : view.answers.map(segment => segment.kind === 'answer' ? render.publicBody(segment.item) : '').filter(Boolean);
   const answerItems = open ? [] : view.answers.flatMap(segment => segment.kind === 'answer' ? [segment.item] : []);
   const closing = answers.length
-    ? `<details class="cfold fanswer" data-fold="answer:${escapeHtml(group.key)}" data-observation-key="answer:${escapeHtml(group.key)}"><summary>${label('Final Answer', 'green')}`
+    ? `<details class="cfold fanswer" data-fold="answer:${escapeHtml(group.key)}" data-observation-key="answer:${escapeHtml(group.key)}"><summary>${label('Final Answer')}`
       + `<span class="fline"><span class="ftext">${escapeHtml(flatAnswer(answers.join('\n')))}</span><span class="fchev" aria-hidden="true">▾</span></span></summary>`
       + `<div class="fbody">${answerItems.map(words).join('')}</div></details>`
     : !open && turn.aborted ? `<div class="tend" data-observation-key="interrupted:${escapeHtml(group.key)}">${label('Interrupted', 'red')}</div>` : '';
-  const prompt = turn.request ? `<section class="tprompt" data-observation-key="prompt:${escapeHtml(group.key)}">${label('Prompt', 'blue')}${render.request(turn.request)}</section>` : '';
+  const prompt = turn.request ? `<section class="tprompt" data-observation-key="prompt:${escapeHtml(group.key)}">${label('Prompt')}${render.request(turn.request)}</section>` : '';
   const ordinal = group.ordinal ?? 0;
   const started = clock(turn.start);
   const background = backgroundLine(session);
@@ -221,49 +222,60 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { 
 }
 
 /**
- * Colours come only from the VS Code theme. As in the terminal: words in the
- * body colour; a tool's name bold; what a call worked on in grey, in the
- * editor font; colour only where it means something: red a failure, green and
- * red a change's size, gold a call still out and the line under the pointer.
+ * Colours come only from the VS Code theme (design v11 B, v12). The greys are
+ * one ladder mixed from the theme's text and side-bar colours, opaque, so a
+ * grey reads the same wherever it sits: words in the body colour, the next
+ * steps at 78 and 58 percent, lines at 16. Two sizes, 13px for words and 12px
+ * for the rest; gaps of 4, 8 and 16. Only what you asked is raised, on a sheet
+ * a step lighter than the page; the process sits on the page itself. Colour
+ * says only what is going on: gold the waiting dot, a running Agent and a call
+ * waiting on you; green and red a change's size and an outcome. Each
+ * takes a fifth of the text colour so none of them jumps out of the greys.
  */
 export const chapterStyles = `
-  .chapter-turn { --ink-3: var(--vscode-descriptionForeground); --ink-4: color-mix(in srgb, var(--vscode-foreground) 45%, transparent);
-    --hair: color-mix(in srgb, var(--vscode-foreground) 22%, transparent); --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
-    --band: color-mix(in srgb, var(--vscode-foreground) 5%, var(--surface)); --gold: var(--vscode-editorWarning-foreground, #cca700);
-    --spin: color-mix(in srgb, var(--gold) 72%, var(--surface)); --blue: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
-    --green: var(--vscode-charts-green, var(--vscode-gitDecoration-addedResourceForeground)); --red: var(--vscode-errorForeground);
-    --left: 20px; --right: 14px; padding: 0 var(--right) 0 var(--left); }
-  .chapter-turn .turn-heading { justify-content: flex-start; gap: 0; margin: 0 calc(-1 * var(--right)) 0 calc(-1 * var(--left)); padding: 7px var(--right) 7px var(--left); font-size: 12px; color: var(--vscode-foreground); }
+  .chapter-turn { --ink-2: color-mix(in oklch, var(--vscode-foreground) 78%, var(--surface)); --ink-3: color-mix(in oklch, var(--vscode-foreground) 58%, var(--surface));
+    --ink-4: color-mix(in oklch, var(--vscode-foreground) 42%, var(--surface)); --hair: color-mix(in oklch, var(--vscode-foreground) 16%, var(--surface));
+    --raise: color-mix(in oklch, var(--vscode-foreground) 6%, var(--surface)); --edge: color-mix(in oklch, var(--vscode-foreground) 13%, var(--surface));
+    --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
+    --gold: color-mix(in oklch, var(--vscode-editorWarning-foreground, #cca700) 80%, var(--vscode-foreground));
+    --green: color-mix(in oklch, var(--vscode-charts-green, var(--vscode-gitDecoration-addedResourceForeground, #388a34)) 84%, var(--vscode-foreground));
+    --red: color-mix(in oklch, var(--vscode-errorForeground, #f85149) 78%, var(--vscode-foreground));
+    --left: 20px; --right: 16px; padding: 0 var(--right) 0 var(--left); font-variant-numeric: tabular-nums; }
+  .chapter-turn .turn-heading { justify-content: flex-start; gap: 0; margin: 0 calc(-1 * var(--right)) 0 calc(-1 * var(--left)); padding: 8px var(--right) 8px var(--left); font-size: 12px; color: var(--vscode-foreground); }
   .chapter-turn .turn-heading b { font-weight: 600; }
   .chapter-turn .tsub { color: var(--ink-3); white-space: pre; }
-  /* A label over a block: a coloured word on a line of its own, the block right under it. */
-  .tlabel { font-weight: 700; font-size: 12px; line-height: 1.6; }
-  .tlabel[data-tone="blue"] { color: var(--blue); } .tlabel[data-tone="green"] { color: var(--green); }
+  /* A label over a block: a small grey word on a line of its own, the block right under it. */
+  .tlabel { font-weight: 500; font-size: 10.5px; line-height: 1.6; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; }
   .tlabel[data-tone="yellow"] { color: var(--gold); } .tlabel[data-tone="red"] { color: var(--red); }
-  /* What you asked: a blue bar down its side, out in the margin. */
-  .tprompt { margin: 12px 0 0; }
-  /* Agent calls: off the band; a dot coloured by state, the words in the body colour, what the run came to under them. */
-  .cagents { margin: 12px 0 0; }
+  /* What you asked: the one thing raised, a sheet a step lighter than the page with a hairline edge. */
+  .tprompt { margin: 12px -4px 0 -10px; padding: 8px 10px 9px; background: var(--raise); border: 1px solid var(--edge); border-radius: 6px; }
+  .cseg.tprompt { margin-top: 16px; }
+  /* Agent calls: set off from the tools; a dot coloured by state, the words in the body colour, what the run came to under them. */
+  .cagents { margin: 8px 0 0; }
   .chapter > .cagents:first-child { margin-top: 0; }
   .clead { font-weight: 400; }
   .cagent-list { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 4px; }
   .crow.cagent { display: grid; grid-template-columns: 7px minmax(0, 1fr); column-gap: 8px; align-items: baseline; color: var(--vscode-foreground); }
   .cagent .clabel { -webkit-line-clamp: 2; }
-  .cagent .cfacts { grid-column: 2; font: 11.5px/1.5 var(--vscode-font-family, sans-serif); color: var(--ink-3); }
+  .cagent .cfacts { grid-column: 2; font: 12px/1.6 var(--vscode-font-family, sans-serif); color: var(--ink-3); }
   .cdot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); transform: translateY(-1px); }
   .cagent[data-state="running"] .cdot { background: var(--gold); }
   .cagent[data-state="done"] .cdot { background: var(--green); }
   .cagent[data-state="failed"] .cdot { background: var(--red); }
-  .tprompt .turn-question { margin: 0 0 0 -12px; padding: 0 0 0 9px; border: 0; border-left: 3px solid var(--blue); border-radius: 0; background: transparent; }
+  .tprompt .turn-question { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+  .tprompt .question-more { color: var(--ink-3); }
   .cstream { list-style: none; margin: 0; padding: 0; }
-  .chapter, .cseg { margin: 12px 0 0; }
+  .chapter, .cseg { margin: 16px 0 0; }
   .csay { line-height: 1.65; overflow-wrap: anywhere; }
   .csay + .csay { margin-top: 8px; }
   .csay .markdown { line-height: 1.65; }
-  /* A step's calls on a band, the width of the panel. */
-  .ccalls { margin: 10px calc(-1 * var(--right)) 0 calc(-1 * var(--left)); padding: 7px var(--right) 7px var(--left); background: var(--band); }
+  /* Code in the words: the editor's font, a step grey, nothing behind it. */
+  .csay :not(pre) > code { background: transparent; padding: 0; font-size: 12px; color: var(--ink-2); }
+  /* A step's calls on the page itself, under the words that explain them. */
+  .ccalls { margin: 8px 0 0; }
   .chapter > .ccalls:first-child { margin-top: 0; }
-  .ctool { font-weight: 700; font-size: 12.5px; line-height: 1.6; }
+  .crun + .crun { margin-top: 4px; }
+  .ctool { font-weight: 600; font-size: 12px; line-height: 1.6; }
   .ctree { list-style: none; margin: 0; padding: 0; }
   /* The tree: a line down from the tool's name, a tick to each call. Drawn, not typed, so it stays joined in any font. */
   .crow-item { position: relative; padding-left: 16px; }
@@ -273,42 +285,46 @@ export const chapterStyles = `
   .crow-item:has(> .crow[data-ask])::after { display: none; }
   .crow-item:has(> .crow[data-ask])::before { top: 1.45em; }
   .crow-item:last-child:has(> .crow[data-ask])::before { display: none; }
-  .crow { display: flex; align-items: last baseline; gap: 6px; width: 100%; min-width: 0; padding: 0; margin: 0; border: 0; background: transparent; text-align: left; color: var(--ink-3); font: 12px/1.6 var(--mono); }
-  .cbranch { position: absolute; left: 0; top: 0; width: 11px; text-align: center; color: var(--spin); font: 700 12px/1.6 var(--mono); }
+  .crow { display: flex; align-items: last baseline; gap: 8px; width: 100%; min-width: 0; padding: 0; margin: 0; border: 0; background: transparent; text-align: left; color: var(--ink-3); font: 12px/1.6 var(--mono); }
+  .cbranch { position: absolute; left: 0; top: 0; width: 11px; text-align: center; color: var(--gold); font: 700 12px/1.6 var(--mono); }
   .clabel { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .clabel.command { -webkit-line-clamp: 1; word-break: break-all; }
-  .cmore { flex: none; font-weight: 700; color: var(--ink-4); }
+  .cmore { flex: none; font-weight: 600; color: var(--ink-4); }
   .cbad { flex: none; color: var(--red); }
   .cnote { flex: none; color: var(--ink-4); }
   .csize { flex: none; display: inline-flex; gap: 5px; }
   .cadd { color: var(--green); } .cdel { color: var(--red); }
-  /* The line under the cursor or the pointer: gold and underlined, as a link is. */
-  .crow.node-button:hover, .crow[aria-pressed="true"], .cfile:hover, .cfile[aria-pressed="true"] { color: var(--gold); }
-  .crow.node-button:hover .clabel, .crow[aria-pressed="true"] .clabel, .cfile:hover .cname, .cfile[aria-pressed="true"] .cname { text-decoration: underline; text-underline-offset: 2px; }
-  .crow.node-button:hover > :not(.cbranch), .crow[aria-pressed="true"] > :not(.cbranch) { color: var(--gold); }
+  /* The line under the cursor or the pointer (design v13, 2b): grey comes up in the body colour; what is in the body colour already is underlined. No colour of its own. */
+  .crow.node-button:hover > :is(.clabel, .cmore, .cnote), .crow[aria-pressed="true"] > :is(.clabel, .cmore, .cnote),
+  .cagent.node-button:hover .cfacts, .cagent[aria-pressed="true"] .cfacts, .cfile:hover .cmark[data-mark="M"], .cfile[aria-pressed="true"] .cmark[data-mark="M"] { color: var(--vscode-foreground); }
+  .cagent.node-button:hover .clabel, .cagent[aria-pressed="true"] .clabel, .cfile:hover .cname, .cfile[aria-pressed="true"] .cname { text-decoration: underline; text-underline-offset: 2px; }
   .cchoices { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 10px; font-size: 12px; }
   .cchoice { font-weight: 600; color: var(--vscode-foreground); }
   .cq, .cwaiting { font-style: normal; color: var(--ink-3); }
-  .chapter > .nodes { margin-top: 6px; }
-  /* The end of a running turn: the spinner where the answer will come, or how long it has been quiet. */
-  .tend { margin-top: 12px; }
-  .live-tail { position: relative; min-height: 1.6em; font-size: 12px; color: var(--ink-3); }
-  .live-tail .cbranch { left: -2px; }
+  .chapter > .nodes { margin-top: 8px; }
+  /* The end of a running turn: a gold dot breathing where the answer will come, or how long it has been quiet. */
+  .tend { margin-top: 16px; }
+  .live-tail { display: flex; align-items: center; gap: 8px; min-height: 1.6em; font-size: 12px; color: var(--ink-3); }
+  .live-tail .cbranch { position: static; display: inline-flex; align-items: center; width: auto; height: 1.6em; }
+  .cspin { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); animation: sidecar-breathe 1.6s ease-in-out infinite; }
+  @keyframes sidecar-breathe { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
   .live-tail .cquiet:empty { display: none; }
   .turn-panel:not([data-fresh]) .live-tail, .turn-panel[data-idle] .live-tail { display: none; }
   .turn-panel[data-stale] .live-tail .cbranch { display: none; }
   .tbackground { display: none; margin: 12px 0 0; font-size: 12px; color: var(--ink-3); }
   [data-agent-known] .tbackground { display: block; }
   .awaiting .cwait-what { font-size: 12px; overflow-wrap: anywhere; }
-  .awaiting .cwait-what b { font-weight: 700; }
+  .awaiting .cwait-what b { font-weight: 600; }
   .awaiting .cnote { font-size: 12px; color: var(--ink-3); }
-  /* The answer and the changes fold to a line each: the label, then one full line and ▾. */
-  .cfold { margin-top: 12px; }
+  /* The answer and the changes fold to a line each: the label, then one full line and ▾. A hairline sets them, or how the turn broke off, apart from the process. */
+  .cfold { margin-top: 8px; }
+  .cstream ~ .cfold:first-of-type, .cstream + .tend { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--hair); }
+  .cstream + .tend ~ .cfold { margin-top: 8px; padding-top: 0; border-top: 0; }
   .cfold > summary { display: block; list-style: none; cursor: pointer; }
   .cfold > summary::-webkit-details-marker { display: none; }
-  .fline { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .fline { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
   .ftext { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .fchev { flex: none; color: var(--ink-3); font-weight: 700; }
+  .fchev { flex: none; color: var(--ink-3); }
   .cfold > summary:hover .ftext { text-decoration: underline; text-underline-offset: 2px; }
   .cfold[open] .fline { display: none; }
   .fbody .csay + .csay { margin-top: 10px; }
@@ -319,8 +335,9 @@ export const chapterStyles = `
   .cmark[data-mark="A"] { color: var(--green); } .cmark[data-mark="D"] { color: var(--red); }
   .cname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cfile .csize { font: 12px/1.6 var(--mono); }
-  /* Live arrivals fade in one after another, a step apart, so a burst reads in order. */
+  /* Live arrivals (design v12): not on the page until their turn, so the page only grows at its end; then a 200ms fade. The words type out instead (live-client). */
+  .pending { display: none !important; }
   @keyframes sidecar-arrive { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
-  .arrived { animation: sidecar-arrive .26s cubic-bezier(.2, .7, .3, 1) backwards; }
-  @media (prefers-reduced-motion: reduce) { .arrived { animation: none; } }
+  .arrived { animation: sidecar-arrive .2s cubic-bezier(.2, .7, .3, 1) backwards; }
+  @media (prefers-reduced-motion: reduce) { .arrived, .cspin { animation: none; } .cspin { opacity: 1; } }
 `;

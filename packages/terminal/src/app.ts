@@ -21,7 +21,7 @@ export interface Model {
   groups: TurnGroup[];
   status: SessionStatus;
   extras: LiveExtras;
-  caps: Pick<Capabilities, 'symbols' | 'links' | 'background'>;
+  caps: Pick<Capabilities, 'symbols' | 'links' | 'background' | 'foreground'>;
   now: number;
   width: number;
   height: number;
@@ -101,7 +101,7 @@ const pageContext = (state: AppState, model: Model): PageContext => ({
  */
 const LAYOUTS = new WeakMap<TurnGroup[], { key: string; value: ReturnType<typeof turnLayout> }>();
 export function layout(state: AppState, model: Model): ReturnType<typeof turnLayout> {
-  const key = JSON.stringify([state.index, model.width, Boolean(state.answerOpen), Boolean(state.changesOpen), model.frame ?? 0, model.status, model.extras, model.caps.background ?? null, model.caps.symbols]);
+  const key = JSON.stringify([state.index, model.width, Boolean(state.answerOpen), Boolean(state.changesOpen), model.frame ?? 0, model.status, model.extras, model.caps.background ?? null, model.caps.foreground ?? null, model.caps.symbols]);
   const kept = LAYOUTS.get(model.groups);
   if (kept?.key === key) return kept.value;
   const value = turnLayout(pageContext(state, model));
@@ -152,7 +152,7 @@ export function openDetail(state: AppState, model: Model): DetailDoc | undefined
   if (!target?.row || !group) return undefined;
   const callId = target.row.tool === 'Agent' ? target.row.items[0]?.callId : undefined;
   const subagent = callId ? model.subagents?.get(callId) : undefined;
-  const key = JSON.stringify([state.index, target.row.id, state.detail?.edit ?? null, model.width, model.caps.background ?? null, model.caps.symbols, subagent ? model.subagentsRevision ?? 0 : null, subagent && target.row.items[0]?.status === 'running' ? Math.floor(model.now / 80) : null, state.detail?.promptOpen ?? false]);
+  const key = JSON.stringify([state.index, target.row.id, state.detail?.edit ?? null, model.width, model.caps.background ?? null, model.caps.foreground ?? null, model.caps.symbols, subagent ? model.subagentsRevision ?? 0 : null, subagent && target.row.items[0]?.status === 'running' ? Math.floor(model.now / 80) : null, state.detail?.promptOpen ?? false]);
   const kept = DETAILS.get(model.groups);
   if (kept?.key === key) return kept.value;
   const value = detailDoc({ session: model.session, group, row: target.row, width: model.width, glyph: ch => symbol(model.caps, ch), edit: state.detail?.edit, background: model.caps.background, subagent, caps: model.caps, now: model.now, promptOpen: state.detail?.promptOpen });

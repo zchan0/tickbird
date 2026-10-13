@@ -1,6 +1,6 @@
 {
   "name": "tickbird-state",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Tickbird 的接入：把会话属于哪个窗口、是否在等你批准、屏幕上正在显示的长回答写到本机文件，供 Tickbird 的 VS Code 版和终端版读取。只记录会话记录里没有或来得太晚的信息；本身不显示界面，不改变 Agent 的行为。",
   "author": {
     "name": "zchan0"

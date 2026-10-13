@@ -14,7 +14,7 @@ import { plainText, spans, type Line } from '../packages/terminal/src/screen';
 import { contentsEntries, contentsLines } from '../packages/terminal/src/views/contents';
 import { columnWidths, inlineSpans, prose, wrapSpans } from '../packages/terminal/src/views/prose';
 import { commandEffects, exploreText } from '../packages/core/src/command-line';
-import { Motion, SAY_MS } from '../packages/terminal/src/motion';
+import { breathAt, Motion, SAY_MAX, WAIT_MS } from '../packages/terminal/src/motion';
 import { liveExtras } from '../packages/core/src/live-extras';
 import type { SessionState } from '../packages/core/src/session-state';
 import { commandText, headerLines, runningClock, sessionStatus, turnBody, type PageContext } from '../packages/terminal/src/views/turn-page';
@@ -99,16 +99,17 @@ test('a finished turn: the request as title, each step\'s words, its calls as a 
     '  Edit',
     '  └ width.test.ts +1 -1',
     '',
+    '  ' + '─'.repeat(model.width - 4),
     '  Final Answer',
     '  修好了：assert.equal 的两个参数写反了。 ▾',
     '',
     '  Changes',
     '  1 个文件  +1 -1 ▾',
   ]);
-  // The prompt under its label, a blue bar beside it; the words in the body colour; the tool names bold in the body colour, to see what was used;
-  // what each call worked on grey, all alike, and the tree grey.
-  assert.deepEqual(spans(body[0]).find(span => span.text.includes('Prompt'))?.style, { fg: 'blue', bold: true });
-  assert.equal(spans(body[1]).find(span => span.text === '┃')?.style?.fg, 'blue');
+  // The prompt under a grey label, its words bold, a bar beside it where the background is unknown; a faint rule before how it ended.
+  assert.deepEqual(spans(body[0]).find(span => span.text.includes('Prompt'))?.style, { dim: true });
+  assert.ok(spans(body[1]).filter(span => span.text.trim() && span.text !== '┃').every(span => span.style?.bold));
+  assert.deepEqual(spans(body[1]).find(span => span.text === '┃')?.style, { dim: true });
   assert.ok(spans(body[3]).filter(span => span.text.includes('先跑')).every(span => !span.style?.dim));
   assert.ok(spans(body[5]).some(span => span.text === 'Bash' && !span.style?.dim && span.style?.bold));
   assert.ok(spans(body[6]).some(span => span.text.includes('├') && span.style?.dim));
@@ -117,10 +118,11 @@ test('a finished turn: the request as title, each step\'s words, its calls as a 
   assert.ok(spans(body[6]).some(span => span.text === 'exit 1' && span.style?.fg === 'red'));
   assert.ok(spans(body[14]).some(span => span.text === 'width.test.ts' && span.style?.dim));
   assert.ok(spans(body[14]).some(span => span.text === '+1' && span.style?.fg === 'green'));
-  // The answer's label on a line of its own, over the answer, as the prompt's is.
-  assert.deepEqual(spans(body[16]).find(span => span.text.includes('Final Answer'))?.style, { fg: 'green', bold: true });
+  // Under the rule, the answer's label on a line of its own, grey, over the answer, as the prompt's is.
+  assert.ok(spans(body[16]).every(span => !span.text.trim() || span.style?.dim));
+  assert.deepEqual(spans(body[17]).find(span => span.text.includes('Final Answer'))?.style, { dim: true });
   // Then what the turn changed, under a label of the same kind, folded to one line.
-  assert.deepEqual(spans(body[19]).find(span => span.text.includes('Changes'))?.style, { fg: 'default', bold: true });
+  assert.deepEqual(spans(body[20]).find(span => span.text.includes('Changes'))?.style, { dim: true });
   assert.ok(!lines.some(line => /→|✻|●|[$≡±]|calls/.test(line)));
 });
 
@@ -139,8 +141,8 @@ test('reads in a row hang from one Read, one per line; each is its own call to s
   state = key(state, keyOf('down'), model);
   assert.equal(state.call, 1);
   const marked = frame(state, model).find(line => plainText(line).includes('b.ts'))!;
-  assert.equal(spans(marked).find(span => span.text === 'b.ts')?.style?.fg, 'yellow');
-  assert.notEqual(spans(marked).find(span => span.text.includes('├'))?.style?.fg, 'yellow', 'The tree stays grey');
+  assert.equal(spans(marked).find(span => span.text === 'b.ts')?.style?.dim, false, 'From grey to the body colour');
+  assert.equal(spans(marked).find(span => span.text.includes('├'))?.style?.dim, true, 'The tree stays grey');
   // A click on a line opens its call.
   const y = text(frame(state, model)).findIndex(line => line.includes('c.ts')) + 1;
   state = key(state, { type: 'mouse', action: 'press', button: 0, x: 5, y }, model);
@@ -200,19 +202,19 @@ test('a script reads by what it works on; reads by their files and lines', () =>
   assert.deepEqual(commandText(`jq -c '{type, timestamp, p: (.payload | del(.encrypted_content) | tostring)}' f.jsonl`), { text: `jq -c '{type, timestamp, p: (.payload |…' f.jsonl`, more: 0 });
 });
 
-test('a running turn with no call out turns at its end, where the answer will come', () => {
+test('a running turn with no call out shows the waiting dot at its end, where the answer will come', () => {
   const model = modelOf(parse([...FIRST, ...SECOND, result('t5', 23)]));
   assert.equal(model.status.kind, 'running');
   const body = turnBody(ctxOf(model, 1));
   const lines = text(body);
-  // The call is done: its tree is back. A blank line, then the spinner alone, in gold.
+  // The call is done: its tree is back. A blank line, then the waiting dot alone, in gold.
   assert.match(lines.at(-3)!, /^  └ Search for reversed assertions/);
   assert.equal(lines.at(-2), '');
-  assert.match(lines.at(-1)!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
-  assert.equal(spans(body.at(-1)!).find(span => /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/.test(span.text))?.style?.fg, 'yellow');
-  // One spinner on the page at a time: while a call turns, the end is empty.
+  assert.match(lines.at(-1)!, /^  ●$/);
+  assert.equal(spans(body.at(-1)!).find(span => span.text === '●')?.style?.fg, 'yellow');
+  // One dot on the page at a time.
   const out = text(turnBody(ctxOf(modelOf(parse([...FIRST, ...SECOND])), 1)));
-  assert.equal(out.filter(line => /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(line)).length, 1);
+  assert.equal(out.filter(line => line.trim() === '●').length, 1);
 });
 test('a long call label wraps to two lines at most, the second under the tree', () => {
   const session = parse([
@@ -227,18 +229,18 @@ test('a long call label wraps to two lines at most, the second under the tree', 
   assert.match(lines[0], /^  └ one two/);
   assert.match(lines[1].trimEnd(), /^ {4}\S.*…$/);
 });
-test('the running turn shows no agent word or clock and no end; one spinner at its end, a call still out drawn as any other', () => {
+test('the running turn shows no agent word or clock and no end; one waiting dot at its end, a call still out drawn as any other', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]));
   assert.equal(model.status.kind, 'running');
   const body = turnBody(ctxOf(model, 1));
   const lines = text(body);
-  // The call still out is on its branch as any other; the spinner turns once, in gold, at the turn's end.
+  // The call still out is on its branch as any other; the waiting dot shows once, in gold, at the turn's end.
   const call = lines.findIndex(line => line.includes('Search for reversed assertions'));
   assert.equal(lines[call - 1].trimEnd(), '  Search');
   assert.match(lines[call], /^  └ Search for reversed assertions *$/);
-  assert.match(lines.at(-1)!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] *$/);
-  assert.equal(lines.filter(line => /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(line)).length, 1);
-  assert.equal(spans(body.at(-1)!).find(span => /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/.test(span.text))?.style?.fg, 'yellow');
+  assert.match(lines.at(-1)!, /^  ● *$/);
+  assert.equal(lines.filter(line => line.trim() === '●').length, 1);
+  assert.equal(spans(body.at(-1)!).find(span => span.text === '●')?.style?.fg, 'yellow');
   assert.ok(!lines.some(line => line.includes('答复')));
   const header = text(headerLines(ctxOf(model, 1)));
   assert.equal(header.length, 1);
@@ -327,7 +329,7 @@ test('an Agent call with its subagent\'s record opens on that subagent\'s turn: 
   parent.items.find(item => item.kind === 'subagent')!.status = 'running';
   const running = open(false);
   assert.equal(running.doc.meta, 'Agent · running');
-  assert.match(text(running.doc.lines).at(-1)!, /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
+  assert.match(text(running.doc.lines).at(-1)!, /^  ●$/);
   // Without a record of its own, the call opens as any call does.
   const plain = openDetail({ ...initialState(), index: 0, follow: false, call: layout(initialState(), modelOf(parent)).targets.findIndex(target => target.row?.tool === 'Agent') }, modelOf(parent));
   assert.ok(plain && !text(plain.lines).includes('  Prompt'));
@@ -410,27 +412,32 @@ test('the turn\'s changes fold to one line and open to a line a file; a file a s
   assert.equal(openDetail(opened, model)?.kind, 'diff');
 });
 
-test('on the running turn new words type out and a running call turns in gold; an older turn never moves', () => {
+test('on the running turn new words type out and the waiting dot breathes in gold once they are in; an older turn never moves', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]), { now: Date.parse(at(30)) });
   const motion = new Motion();
   // First page: everything simply there.
   let lines = text(turnBody({ ...ctxOf(model, 1), motion }));
   assert.ok(lines.some(line => line.includes('先找出所有类似的断言。')));
   motion.live = true;
-  // The hook's early words arrive: typed from nothing, whole after SAY_MS.
+  // The hook's early words arrive: typed from nothing, whole well within SAY_MAX.
   const draft = '找到 3 处写反的断言，接下来逐个修正。';
   const at0 = { ...ctxOf({ ...model, extras: { draft } }, 1), motion };
   lines = text(turnBody(at0));
   assert.ok(!lines.some(line => line.includes('找到')), lines.join('\n'));
   assert.equal(motion.busy, true);
-  lines = text(turnBody({ ...at0, now: at0.now + SAY_MS / 2 }));
+  assert.ok(!lines.some(line => line.trim() === '●'), 'No waiting dot while the words type');
+  lines = text(turnBody({ ...at0, now: at0.now + 60 }));
   assert.ok(lines.some(line => line.includes('找到') && !line.includes('修正')), lines.join('\n'));
-  lines = text(turnBody({ ...at0, now: at0.now + SAY_MS }));
+  lines = text(turnBody({ ...at0, now: at0.now + SAY_MAX }));
   assert.ok(lines.some(line => line.includes('接下来逐个修正。')));
-  // The running call's mark is gold where the terminal reports its colours.
-  const coloured = turnBody({ ...ctxOf(model, 1), motion, caps: { ...ONE_CELL, background: { r: 24, g: 25, b: 28, dark: true } } });
-  const mark = coloured.flatMap(line => spans(line)).find(span => /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/.test(span.text));
-  assert.deepEqual(mark?.style?.fgRgb, [201, 164, 92]);
+  lines = text(turnBody({ ...at0, now: at0.now + SAY_MAX + WAIT_MS }));
+  assert.equal(lines.at(-1)!.trim(), '●', 'Then the dot, at the end');
+  // The dot is gold where the terminal reports its colours, breathing toward the background.
+  const background = { r: 24, g: 25, b: 28, dark: true };
+  const coloured = turnBody({ ...ctxOf(model, 1), now: 0, caps: { ...ONE_CELL, background } });
+  const mark = coloured.flatMap(line => spans(line)).find(span => span.text === '●');
+  const k = breathAt(0);
+  assert.deepEqual(mark?.style?.fgRgb, [201, 164, 92].map((value, index) => Math.round(value * k + [24, 25, 28][index] * (1 - k))));
   // The first turn, drawn now for the first time, is simply there.
   const older = new Motion();
   older.live = true;
@@ -471,7 +478,7 @@ test('text on screen but not yet in the transcript shows as the words will, so n
   // Last of what was said, then the turn's spinner under it.
   const draft = lines.filter(line => plainText(line).trim()).at(-2)!;
   assert.equal(plainText(draft), '  找到 3 处写反的断言，接下来逐个修正。');
-  assert.match(plainText(lines.at(-1)!), /^  [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
+  assert.match(plainText(lines.at(-1)!), /^  ●$/);
   assert.ok(spans(draft).filter(span => span.text.trim()).every(span => !span.style?.dim && !span.style?.italic));
   // Not on an older turn.
   assert.ok(!text(turnBody(ctxOf(model, 0))).some(line => line.includes('找到 3 处')));
@@ -485,9 +492,10 @@ test('目录 lists the newest turn first, two lines each: the request, then the 
   assert.match(plainText(lines[0]), /^  2 再加一个回归测试.*… +\d\d:\d\d {3}$/);
   assert.equal(plainText(lines[1]).trimEnd(), '    运行中');
   assert.equal(plainText(lines[2]), '');
-  // The selected one is golden and ends in ⏎, as a selected call does.
+  // The selected one: its number in the body colour, its request underlined, and a ⏎ at the end. No colour.
   assert.match(plainText(lines[3]), /^  1 先看看测试为什么失败，再修好它 +\d\d:\d\d ⏎ $/);
-  assert.equal(spans(lines[3]).find(span => span.text.includes('先看看'))?.style?.fg, 'yellow');
+  assert.deepEqual(spans(lines[3]).find(span => span.text.includes('先看看'))?.style, { underline: true });
+  assert.ok(!spans(lines[3]).some(span => span.style?.fg), 'No colour of its own');
   assert.equal(plainText(lines[4]).trimEnd(), '    修好了：assert.equal 的两个参数写反了。');
   assert.ok(!text(lines).some(line => /完成|calls|\ds\b/.test(line)));
 });
@@ -542,7 +550,7 @@ test('scrolling up pauses following, G resumes it at the end of the newest turn'
   assert.equal(state.follow, true);
 });
 
-test('↑↓ select calls and the answer; the selected one comes up golden and underlined, every line of it; ⏎ opens it; selecting stops following', () => {
+test('↑↓ select calls and the answer; the selected one comes up from grey to the body colour, every line of it; ⏎ opens it; selecting stops following', () => {
   const model = modelOf(parse([...FIRST, ...SECOND]));
   let state = key(update(initialState(), model), keyOf('['), model);
   assert.equal(state.index, 0);
@@ -555,9 +563,9 @@ test('↑↓ select calls and the answer; the selected one comes up golden and u
   assert.ok(!lines.some(line => line.includes('⏎ ') && !line.startsWith('  第')), 'No ⏎ on the call');
   assert.match(lines[0], /⏎ 详情/);
   const selected = spans(screen.find(line => text([line])[0].includes('Run the unit tests'))!);
-  assert.notEqual(selected.find(span => span.text.includes('├'))?.style?.fg, 'yellow', 'The tree stays grey');
-  assert.deepEqual([selected.find(span => span.text === 'Run the unit tests')?.style?.fg, selected.find(span => span.text === 'Run the unit tests')?.style?.dim], ['yellow', false]);
-  assert.equal(selected.find(span => span.text === 'Run the unit tests')?.style?.underline, true);
+  assert.equal(selected.find(span => span.text.includes('├'))?.style?.dim, true, 'The tree stays grey');
+  const words = selected.find(span => span.text === 'Run the unit tests')?.style;
+  assert.deepEqual([words?.fg, words?.dim, words?.underline], [undefined, false, undefined], 'Grey to the body colour; no colour, no underline');
   state = key(key(state, keyOf('down'), model), keyOf('up'), model);
   assert.equal(state.call, 0);
   // ⏎ opens, Esc comes back; q quits from anywhere.
@@ -579,14 +587,21 @@ test('↑↓ select calls and the answer; the selected one comes up golden and u
   assert.deepEqual([state.mode, state.call], ['turn', undefined]);
 });
 
-test('with a known background, a run of calls sits on a full-width band a little lighter than it', () => {
-  const model = { ...modelOf(parse([...FIRST, ...SECOND])), caps: { ...ONE_CELL, background: { r: 10, g: 12, b: 16, dark: true } } };
+test('with known colours, the prompt sits on a full-width band; calls are on the page in greys mixed from the text colour', () => {
+  const background = { r: 10, g: 12, b: 16, dark: true }, foreground = { r: 210, g: 212, b: 216 };
+  const model = { ...modelOf(parse([...FIRST, ...SECOND])), caps: { ...ONE_CELL, background, foreground } };
   const body = turnBody(ctxOf(model, 0));
-  const call = body.find(line => text([line])[0].includes('Run only the width tests'))!;
-  assert.equal(textWidth(plainText(call)), model.width);
-  assert.ok(spans(call).every(span => span.style?.bgRgb?.join() === '27,29,33'));
-  // The words around it are not on the band.
-  assert.ok(spans(body[3]).every(span => !span.style?.bgRgb));
+  const lines = text(body);
+  // A band line above and below the prompt, every line full width, and no bar.
+  const prompt = body.slice(0, 4);
+  assert.deepEqual(text(prompt).map(line => line.trimEnd()), ['', '  Prompt', '  先看看测试为什么失败，再修好它', '']);
+  assert.ok(prompt.every(line => textWidth(plainText(line)) === model.width && spans(line).every(span => span.style?.bgRgb?.join() === '27,29,33')));
+  const call = body[lines.findIndex(line => line.includes('Run only the width tests'))];
+  assert.ok(spans(call).every(span => !span.style?.bgRgb), 'Calls are not on a band');
+  const grey = (share: number) => [10, 12, 16].map((value, index) => Math.round([210, 212, 216][index] * share + value * (1 - share))).join();
+  assert.equal(spans(call).find(span => span.text === 'Run only the width tests')?.style?.fgRgb?.join(), grey(0.6));
+  assert.equal(spans(call).find(span => span.text.includes('└'))?.style?.fgRgb?.join(), grey(0.3), 'The tree fainter than the words on it');
+  assert.equal(spans(body[1]).find(span => span.text === 'Prompt')?.style?.fgRgb?.join(), grey(0.6), 'The label grey');
 });
 
 test('the pointer brings up the call under it; one click opens it', () => {
@@ -595,7 +610,7 @@ test('the pointer brings up the call under it; one click opens it', () => {
   const y = text(frame(state, model)).findIndex(line => line.includes('Run only the width tests')) + 1;
   state = key(state, { type: 'mouse', action: 'move', button: 3, x: 10, y }, model);
   const screen = frame(state, model);
-  assert.equal(spans(screen[y - 1]).find(span => span.text === 'Run only the width tests')?.style?.underline, true);
+  assert.equal(spans(screen[y - 1]).find(span => span.text === 'Run only the width tests')?.style?.dim, false);
   assert.match(text(screen)[0], /⏎ 详情/);
   assert.equal(state.call, undefined);
   state = key(state, { type: 'mouse', action: 'press', button: 0, x: 10, y }, model);
@@ -925,7 +940,7 @@ test('a Codex script reads as its steps: the command, the first query, the quest
 test('scrolling under a pointer that stays put lights up no call: the pointer counts again once it moves', () => {
   const calls = Array.from({ length: 30 }, (_, i) => [call(`m${i}`, 'Bash', { command: `echo ${i}`, description: `Step number ${i}` }, 1 + i), result(`m${i}`, 1 + i)]).flat();
   const model = modelOf(parse([rec('user', '跑很多步', 0), said('开始。', 0), ...calls, said('好了。', 40, true), done(41, 41_000)]), { height: 12 });
-  const gold = (state: AppState) => frame(state, model).some(line => spans(line).some(span => span.style?.fg === 'yellow' && span.text.trim()));
+  const gold = (state: AppState) => frame(state, model).some(line => spans(line).some(span => span.style?.dim === false && span.text.trim()));
   let state = key(update(initialState(), model), keyOf('g'), model);
   const y = text(frame(state, model)).findIndex(line => line.includes('Step number 1')) + 1;
   state = key(state, { type: 'mouse', action: 'move', button: 35, x: 6, y }, model);
@@ -1057,7 +1072,7 @@ test('a call that points somewhere opens that place; calls with a detail of thei
   assert.equal(key(state, keyOf('enter'), model).mode, 'detail');
 });
 
-test('a call that wraps lights up whole: golden and underlined on every line, nothing added at the end', () => {
+test('a call that wraps lights up whole: in the body colour on every line, nothing added at the end', () => {
   const session = parse([
     rec('user', '发布', 0),
     call('a1', 'Artifact', { url: 'https://claude.ai/artifact/Abc123Def456Ghi789Jk/a/very/long/path/that/wraps' }, 1), result('a1', 2),
@@ -1066,9 +1081,9 @@ test('a call that wraps lights up whole: golden and underlined on every line, no
   const model = modelOf(session, { width: 40 });
   const state = key(update(initialState(), model), keyOf('down'), model);
   const screen = frame(state, model);
-  const lit = screen.map(line => spans(line)).filter(parts => parts.some(span => span.style?.underline));
+  const lit = screen.map(line => spans(line)).filter(parts => parts.some(span => span.style?.dim === false));
   assert.equal(lit.length, 2, 'Both lines of the address');
-  for (const parts of lit) assert.ok(parts.filter(span => span.style?.underline).every(span => span.style?.fg === 'yellow'));
+  for (const parts of lit) assert.ok(parts.filter(span => span.style?.dim === false).every(span => !span.style?.fg));
   assert.ok(!text(screen).slice(1).some(line => line.includes('⏎')));
 });
 

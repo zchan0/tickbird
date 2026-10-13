@@ -19,6 +19,8 @@ export interface Capabilities {
   /** OSC 52 clipboard writes, as the terminal's own terminfo says (XTGETTCAP Ms). */
   clipboard: boolean;
   background?: { r: number; g: number; b: number; dark: boolean };
+  /** The text colour (OSC 10): with the background, the greys are mixed from the terminal's own colours. */
+  foreground?: { r: number; g: number; b: number };
   /** XTVERSION, for the report only: never used to decide a feature that can be asked. */
   terminal?: string;
   inTmux: boolean;
@@ -29,8 +31,6 @@ export interface Capabilities {
 /** Symbols the views draw, and what replaces each one when it is not one cell wide. */
 export const SYMBOLS: Readonly<Record<string, string>> = {
   '●': '*', '✻': '*', '┃': '|', '…': '...', '─': '-', '⏸': '||', '▌': '|', '›': '>', '‹': '<', '│': '|', '✓': 'v', '❯': '>', '→': '>',
-  // The running turn's spinner, at its end; a plain line turns where braille is not one cell.
-  '⠋': '|', '⠙': '/', '⠹': '-', '⠸': '\\', '⠼': '|', '⠴': '/', '⠦': '-', '⠧': '\\', '⠇': '|', '⠏': '/',
   '☐': '[ ]', '☑': '[x]', '┌': '+', '┬': '+', '┐': '+', '├': '+', '┼': '+', '┤': '+', '└': '+', '┴': '+', '┘': '+', '┆': ':', '▸': '>', '▾': 'v', '⏎': '<', '≡': '=', '±': '~',
 };
 
@@ -46,6 +46,7 @@ export function queries(symbols = Object.keys(SYMBOLS), graphics = true): string
   return `${ESC}[?2026$p`                                   // DECRQM synchronized output
     + `${ESC}[?u`                                           // kitty keyboard flags
     + (graphics ? `${ESC}_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA${ST}` : '') // kitty graphics query
+    + `${ESC}]10;?${ST}`                                    // text colour
     + `${ESC}]11;?${ST}`                                    // background colour
     + `${ESC}[>0q`                                          // XTVERSION
     + `${ESC}]99;i=sidecar:p=?;${ST}`                        // OSC 99 notification query
@@ -58,7 +59,7 @@ export function queries(symbols = Object.keys(SYMBOLS), graphics = true): string
 export interface Answers {
   done: boolean;
   sync?: boolean; kittyKeyboard?: boolean; kittyGraphics?: boolean; osc99?: boolean; clipboard?: boolean;
-  background?: Capabilities['background']; terminal?: string; cursorColumns: number[];
+  background?: Capabilities['background']; foreground?: Capabilities['foreground']; terminal?: string; cursorColumns: number[];
 }
 
 /** Reads every answer found so far in the terminal's replies. */
@@ -70,12 +71,17 @@ export function parseAnswers(text: string): Answers {
   if (/\x1b_Gi=31;OK/.test(text)) answers.kittyGraphics = true;
   if (/\x1b\]99;i=sidecar:p=\?;/.test(text)) answers.osc99 = true;
   if (/\x1bP1\+r4d73/.test(text)) answers.clipboard = true;
-  const bg = text.match(/\x1b\]11;rgb:([0-9a-fA-F]+)\/([0-9a-fA-F]+)\/([0-9a-fA-F]+)/);
+  const channel = (hex: string) => Math.round(parseInt(hex, 16) / (16 ** hex.length - 1) * 255);
+  const colour = (osc: number) => {
+    const found = text.match(new RegExp(`\\x1b\\]${osc};rgb:([0-9a-fA-F]+)\\/([0-9a-fA-F]+)\\/([0-9a-fA-F]+)`));
+    return found ? [channel(found[1]), channel(found[2]), channel(found[3])] : undefined;
+  };
+  const bg = colour(11), fg = colour(10);
   if (bg) {
-    const channel = (hex: string) => Math.round(parseInt(hex, 16) / (16 ** hex.length - 1) * 255);
-    const [r, g, b] = [channel(bg[1]), channel(bg[2]), channel(bg[3])];
+    const [r, g, b] = bg;
     answers.background = { r, g, b, dark: (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.5 };
   }
+  if (fg) answers.foreground = { r: fg[0], g: fg[1], b: fg[2] };
   const version = text.match(/\x1bP>\|([^\x1b]*)\x1b\\/);
   if (version) answers.terminal = version[1];
   for (const report of text.matchAll(/\x1b\[(\d+);(\d+)R/g)) answers.cursorColumns.push(Number(report[2]));
@@ -105,6 +111,7 @@ export function capabilitiesFrom(answers: Answers, env: NodeJS.ProcessEnv, symbo
     kittyKeyboard: Boolean(answers.kittyKeyboard),
     clipboard: Boolean(answers.clipboard),
     ...(answers.background ? { background: answers.background } : {}),
+    ...(answers.foreground ? { foreground: answers.foreground } : {}),
     ...(terminal ? { terminal } : {}),
     inTmux: Boolean(env.TMUX),
     symbols: widths,

@@ -195,7 +195,7 @@ test('reader scrolling pauses follow across updates and refresh; explicit return
 });
 
 
-test('a burst is revealed one part at a time: the words, a beat, then each call; a later update does not cut it short', async t => {
+test('a burst is revealed one part at a time, off the page until its turn: the words, a beat, then each call; a later update does not cut it short', async t => {
   const f = await fixture(t), { document } = f;
   const now = new Date().toISOString();
   // The turn is running first; then a burst lands in it.
@@ -206,24 +206,29 @@ test('a burst is revealed one part at a time: the words, a beat, then each call;
   const panel = document.querySelector('[data-turn-panel="turn:t2"]')!;
   const arrived = ['say:said-1', 'say:said-2'].map(key => panel.querySelector<HTMLElement>(`[data-observation-key="${key}"]`)!)
     .concat([...panel.querySelectorAll<HTMLElement>('.crow-item')].slice(-2));
-  assert.ok(arrived.every(node => node.classList.contains('arrived')));
-  assert.deepEqual(arrived.map(node => node.matches('.csay') ? 'say' : 'row'), ['say', 'say', 'row', 'row'], 'The container does not fade as one block');
-  const delays = arrived.map(node => parseInt(node.style.animationDelay, 10));
+  const delays = arrived.map(node => node.classList.contains('pending') ? Number(node.dataset.reveal) : 0);
+  assert.deepEqual(arrived.map(node => node.matches('.csay') ? 'say' : 'row'), ['say', 'say', 'row', 'row'], 'The container does not come in as one block');
+  assert.equal(delays[0], 0, 'The first words start typing at once');
+  assert.ok(arrived.slice(1).every(node => node.classList.contains('pending')), 'The rest is not on the page yet');
   assert.ok(delays.every((delay, index) => index === 0 || delay > delays[index - 1]), 'One after another');
   assert.ok(delays[2] - delays[1] > delays[3] - delays[2], 'Words get a longer beat than a call row');
-  // The band and the tool's name come in with the first call, after the words: not before them.
+  // The block of calls and the tool's name come in with the first call, after the words: not before them.
   const band = arrived[2].closest<HTMLElement>('.ccalls')!;
-  assert.ok(band.classList.contains('arrived') && parseInt(band.style.animationDelay, 10) === delays[2] && delays[2] > delays[1]);
+  assert.ok(band.classList.contains('pending') && Number(band.dataset.reveal) === delays[2]);
   f.data.items.push(input('read-e')); Object.assign(f.data.items.at(-1)!, { turnId: 't2', timestamp: now });
   f.update();
-  assert.ok(arrived.every(node => node.isConnected && node.classList.contains('arrived') && node.style.animationDelay), 'Still waiting or fading after the next morph');
-  const later = panel.querySelector<HTMLElement>('.crow-item.arrived:last-child')!;
-  assert.ok(parseInt(later.style.animationDelay, 10) > delays[3], 'A later burst queues behind the one still appearing');
+  assert.ok(arrived.slice(1).every(node => node.isConnected && node.classList.contains('pending') && node.dataset.reveal), 'Still waiting after the next morph');
+  const later = [...panel.querySelectorAll<HTMLElement>('.crow-item')].at(-1)!;
+  assert.ok(later.classList.contains('pending') && Number(later.dataset.reveal) > delays[3] - 50, 'A later burst queues behind the one still appearing');
   const tail = panel.querySelector<HTMLElement>('.live-tail')!;
-  assert.ok(parseInt(tail.style.animationDelay, 10) > parseInt(later.style.animationDelay, 10), 'The loading line comes back last');
+  assert.ok(tail.classList.contains('pending') && Number(tail.dataset.reveal) > Number(later.dataset.reveal), 'The waiting dot comes back last');
+  // In their turn they come onto the page.
+  await new Promise(resolve => setTimeout(resolve, Number(tail.dataset.reveal) + 300));
+  assert.ok(arrived.concat(later, tail).every(node => !node.classList.contains('pending')));
+  assert.equal(arrived[1].textContent!.trim(), '然后改视图。', 'Typed out whole');
 });
 
-test('the newest open turn ends in a spinner while records come, says how long it has been quiet after a silence, and nothing for a stale turn', async t => {
+test('the newest open turn ends in a waiting dot while records come, says how long it has been quiet after a silence, and nothing for a stale turn', async t => {
   const f = await fixture(t), { document } = f;
   const panel = () => document.querySelector('[data-turn-panel="turn:t2"]')!;
   assert.ok(!panel().hasAttribute('data-fresh'), 'No timestamps: nothing is claimed');
@@ -231,7 +236,7 @@ test('the newest open turn ends in a spinner while records come, says how long i
   current.timestamp = new Date(Date.now() - 5000).toISOString(); f.update();
   assert.ok(panel().hasAttribute('data-fresh') && !panel().hasAttribute('data-stale'));
   const tail = () => panel().querySelector('.live-tail')!;
-  assert.ok(tail().querySelector('.cspin'), 'A spinner, as in the terminal');
+  assert.ok(tail().querySelector('.cspin'), 'A waiting dot, as in the terminal');
   assert.equal(tail().textContent!.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠿]/g, ''), '', 'No status word and no clock: the agent shows its own');
   current.timestamp = new Date(Date.now() - 20 * 60000).toISOString(); f.update();
   assert.ok(panel().hasAttribute('data-stale'));

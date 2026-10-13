@@ -823,7 +823,7 @@ test('a final answer folds to one line under Final Answer, after the process, an
     detail: { title: '原始回答', blocks: [{ kind: 'text', label: '正文', text: '**有格式的回答**\n[link](command:danger)' }] },
   });
   const html = renderSidecar({ projectName: 'project', session: session([item({ id: 'before' }), answer]), nonce });
-  const fold = /<details class="cfold fanswer"[^>]*><summary><div class="tlabel" data-tone="green">Final Answer<\/div><span class="fline"><span class="ftext">([^<]*)<\/span>[\s\S]*?<\/summary><div class="fbody">([\s\S]*?)<\/div><\/details>/.exec(html);
+  const fold = /<details class="cfold fanswer"[^>]*><summary><div class="tlabel">Final Answer<\/div><span class="fline"><span class="ftext">([^<]*)<\/span>[\s\S]*?<\/summary><div class="fbody">([\s\S]*?)<\/div><\/details>/.exec(html);
   assert.ok(fold, 'The answer under its label, folded');
   assert.equal(fold[1], '有格式的回答 link', 'One line of it, as words: no Markdown marks');
   assert.match(fold[2], /<strong>有格式的回答<\/strong>/, 'Opened, the whole answer');
@@ -1458,7 +1458,7 @@ test('a turn that is over keeps its process open, the answer folded at its end; 
   assert.ok(!panel.includes('cprocess'));
   assert.equal((panel.match(/class="csay"/g) ?? []).length, 3, 'The agent\'s words, and the answer\'s');
   assert.deepEqual([...panel.matchAll(/<div class="ctool">([^<]+)<\/div>/g)].map(match => match[1]), ['Bash', 'Read', 'Bash']);
-  assert.ok(panel.indexOf('class="tlabel" data-tone="blue">Prompt') < panel.indexOf('class="ccalls"') && panel.indexOf('class="ccalls"') < panel.indexOf('Final Answer'), 'Prompt above, the answer at the end');
+  assert.ok(panel.indexOf('class="tlabel">Prompt') < panel.indexOf('class="ccalls"') && panel.indexOf('class="ccalls"') < panel.indexOf('Final Answer'), 'Prompt above, the answer at the end');
   const at = '2026-09-23T06:24:07.000Z';
   const running = renderSidecar({ projectName: 'project', nonce, session: session([said('newest', 't2'), ...['d', 'e', 'f'].map(id => ({ ...bash(id, 't2'), timestamp: at }))]) });
   const live = running.slice(running.indexOf('data-turn-panel="turn:t2"')).split('</main>')[0];

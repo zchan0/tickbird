@@ -117,7 +117,7 @@ test('input: SGR mouse and late terminal replies', () => {
   assert.deepEqual(new InputParser().feed('\x1b[?62;c\x1b[?2026;2$yk').map(describe), ['k']);
 });
 
-const KITTY_REPLY = '\x1b[?2026;2$y\x1b[?0u\x1b_Gi=31;OK\x1b\\\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\\x1bP>|kitty(0.43.1)\x1b\\'
+const KITTY_REPLY = '\x1b[?2026;2$y\x1b[?0u\x1b_Gi=31;OK\x1b\\\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\\x1bP>|kitty(0.43.1)\x1b\\'
   + '\x1b]99;i=sidecar:p=?;a=focus,report:o=always,unfocused:u=0,1,2:p=title,body\x1b\\\x1bP1+r4d73=5c45\x1b\\'
   + Object.keys(SYMBOLS).map(() => '\x1b[5;2R').join('') + '\x1b[?62;52;c';
 // Recorded from tmux 3.6a (default config) inside kitty: only the background, its version, cursor reports and DA1.
@@ -148,7 +148,7 @@ test('probing kitty finds every enhancement and one-cell symbols', async () => {
   assert.equal(io.written.join(''), queries());
   assert.deepEqual({ ...caps, symbols: undefined }, {
     probed: true, sync: true, links: true, images: 'kitty', notify: 'osc99', kittyKeyboard: true, clipboard: true,
-    background: { r: 30, g: 30, b: 46, dark: true }, terminal: 'kitty(0.43.1)', inTmux: false, symbols: undefined,
+    background: { r: 30, g: 30, b: 46, dark: true }, foreground: { r: 205, g: 214, b: 244 }, terminal: 'kitty(0.43.1)', inTmux: false, symbols: undefined,
   });
   assert.ok(Object.keys(SYMBOLS).every(ch => caps.symbols[ch] === 1));
   assert.equal(symbol(caps, '●'), '●');

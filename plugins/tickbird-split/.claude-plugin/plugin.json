@@ -1,6 +1,6 @@
 {
   "name": "tickbird-split",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Tickbird 终端版：在 kitty 或 tmux 里启动 Agent 时，在旁边开一栏 Tickbird，显示这个会话的过程。/clear 后同一栏显示新会话，Agent 退出时栏自己关闭。自带 Tickbird 程序；命令 /tickbird-split:kitty 打开 kitty 的远程控制，/tickbird-split:open 重新打开这一栏。不改变 Agent 的行为。",
   "author": {
     "name": "zchan0"

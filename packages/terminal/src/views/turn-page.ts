@@ -12,17 +12,18 @@ import { inlineSpans, prose, wrapSpans } from './prose';
 import { shortFileLabels } from '../../../core/src/presentation';
 import { commandText } from '../../../core/src/command-line';
 import { announcedRow, callEnd as endOf, callSteps, callText as wordsOf, callTool } from '../../../core/src/call-line';
-import { spinnerAt, type Motion } from '../motion';
+import { breathAt, FADE_MS, type Motion } from '../motion';
 
 export { commandText };
 
 /**
- * One turn per screen, to read beside the agent: the request as the page's
- * title, the agent's words in the body colour with the calls they explain on
- * a band under them, as a tree under each tool's name, and how the turn ended
- * after a label in a block of colour. Nothing here is drawn the way the
- * agents draw their own transcript. Plain data in, styled lines out; the app
- * decides which turn and which part of it is on screen.
+ * One turn per screen, to read beside the agent (design v11 B): what you asked
+ * raised on a band, the one thing on the page that is; the agent's words in
+ * the body colour with the calls they explain under them, as a tree under each
+ * tool's name, on the page itself; and, under a rule, how the turn ended.
+ * Labels are grey; colour says only what is going on. Nothing here is drawn
+ * the way the agents draw their own transcript. Plain data in, styled lines
+ * out; the app decides which turn and which part of it is on screen.
  */
 
 export type SessionStatus =
@@ -78,10 +79,37 @@ export function viewOf(group: TurnGroup, latest: boolean, provider: Provider): T
 }
 
 const DIM: Style = { dim: true };
-/** The running mark's dark gold, apart from the yellow of a selected line; the palette's yellow where exact colour is unknown. */
-const GOLD = [201, 164, 92] as const;
-const gold = (ctx: PageContext): Style => ({ fg: 'yellow', ...(ctx.caps.background ? { fgRgb: GOLD } : {}) });
-const YELLOW: Style = { fg: 'yellow' };
+type Rgb = readonly [number, number, number];
+const mix = (a: Rgb, b: Rgb, share: number): Rgb => [0, 1, 2].map(i => Math.round(a[i] * share + b[i] * (1 - share))) as unknown as Rgb;
+const rgb = (colour: { r: number; g: number; b: number }): Rgb => [colour.r, colour.g, colour.b];
+
+/**
+ * The greys, mixed from the terminal's own text and background colours, as
+ * the VS Code panel mixes them from its theme (design v12): labels, notes and
+ * what a call worked on at QUIET, the tree's lines at HAIR. `fade`, from 0 to
+ * 1, is how far a line just come in has faded in. Colours unknown: the
+ * palette's grey, and nothing fades.
+ */
+const QUIET = 0.6, HAIR = 0.3;
+function ink(ctx: Pick<PageContext, 'caps'>, share: number, fade = 1): Style {
+  const { background, foreground } = ctx.caps;
+  return background && foreground ? { fgRgb: mix(rgb(foreground), rgb(background), share * fade) } : DIM;
+}
+const quiet = (ctx: Pick<PageContext, 'caps'>, fade = 1): Style => ink(ctx, QUIET, fade);
+const hair = (ctx: Pick<PageContext, 'caps'>, fade = 1): Style => ink(ctx, HAIR, fade);
+/** The body colour, fading in: plain where nothing fades. */
+const body = (ctx: Pick<PageContext, 'caps'>, fade = 1): Style => fade < 1 && ctx.caps.background && ctx.caps.foreground ? ink(ctx, 1, fade) : {};
+/** How far a call `age` ms on the page has faded in: three steps over FADE_MS. */
+const faded = (age: number | undefined): number => age === undefined || age >= FADE_MS ? 1 : (Math.floor(age / (FADE_MS / 3)) + 1) / 3;
+
+/**
+ * Gold for a call waiting on you and the waiting dot, a fifth of the way to
+ * the text colour so it sits with the greys; the palette's yellow where exact
+ * colour is unknown.
+ */
+const GOLD: Rgb = [201, 164, 92];
+const goldRgb = (ctx: Pick<PageContext, 'caps'>): Rgb => ctx.caps.foreground ? mix(GOLD, rgb(ctx.caps.foreground), 0.8) : GOLD;
+const gold = (ctx: PageContext): Style => ({ fg: 'yellow', ...(ctx.caps.background ? { fgRgb: goldRgb(ctx) } : {}) });
 
 export interface PageContext {
   session: SessionData;
@@ -90,7 +118,7 @@ export interface PageContext {
   index: number;
   status: SessionStatus;
   extras: LiveExtras;
-  caps: Pick<Capabilities, 'symbols' | 'background'>;
+  caps: Pick<Capabilities, 'symbols' | 'background' | 'foreground'>;
   width: number;
   now: number;
   /** The closing answer is opened in full. */
@@ -115,12 +143,12 @@ const CHIP = new WeakSet<Style>();
 const owned = (style: Style, id: string): Style => { const own = { ...style }; OWNER.set(own, id); return own; };
 
 /**
- * A label's word: Prompt, Final Answer, Needs approval, Interrupted, New
- * turn. Bold in its colour and nothing behind it, the same for every label: a
- * block of colour presses on the line below it.
+ * A label's word: Prompt, Final Answer and Changes in grey; Needs approval,
+ * Interrupted and New turn bold in the colour of what is going on. Nothing
+ * behind it: a block of colour presses on the line below it.
  */
-export function label(text: string, fg: Color): Span {
-  const style: Style = { fg, bold: true };
+export function label(text: string, tone: Color | Style): Span {
+  const style: Style = typeof tone === 'string' ? { fg: tone, bold: true } : { ...tone };
   CHIP.add(style);
   return { text, style };
 }
@@ -148,8 +176,8 @@ export function headerLines(ctx: PageContext, aside: Span[] = []): Line[] {
   const total = groups.at(-1)?.ordinal ?? groups.length;
   const started = clock(viewOf(group, index === groups.length - 1, session.provider).turn.start);
   const left: Span[] = group.turnId
-    ? [{ text: ' '.repeat(MARGIN) }, { text: `第 ${ordinal} 轮`, style: { bold: true } }, { text: ` / 共 ${total} 轮${started ? ` · ${started}${narrow ? '' : ' 开始'}` : ''}`, style: DIM }]
-    : [{ text: ' 未归属回合的记录', style: DIM }];
+    ? [{ text: ' '.repeat(MARGIN) }, { text: `第 ${ordinal} 轮`, style: { bold: true } }, { text: ` / 共 ${total} 轮${started ? ` · ${started}${narrow ? '' : ' 开始'}` : ''}`, style: quiet(ctx) }]
+    : [{ text: ' 未归属回合的记录', style: quiet(ctx) }];
   return [row(left, right, width)];
 }
 
@@ -165,27 +193,32 @@ const requestText = (item: TimelineItem | undefined, group: TurnGroup): string =
 export const MARGIN = 2;
 
 /**
- * The label over a block of words, Prompt or Final Answer: a coloured word on
- * a line of its own, the words right under it. No wash behind it: a block of
- * colour presses on the line below, and a blank line between is too much.
+ * The label over a block of words, Prompt or Final Answer: a word on a line of
+ * its own, the words right under it. No wash behind it: a block of colour
+ * presses on the line below, and a blank line between is too much.
  */
-function heading(text: string, fg: Color): Span[] {
-  return [{ text: ' '.repeat(MARGIN) }, label(text, fg)];
+function heading(text: string, tone: Color | Style): Span[] {
+  return [{ text: ' '.repeat(MARGIN) }, label(text, tone)];
 }
 
 /**
- * What you asked, whole, under a Prompt label, a blue bar down its side: set
- * apart from the agent's words without a rule across the page. Your words
- * sent during the turn are set the same way.
+ * What you asked, whole, in bold under a grey Prompt label, on a band: the one
+ * thing on the page raised, as a sheet is in the VS Code panel. Where the
+ * terminal's background is unknown there is no band, and a bar runs down its
+ * side instead. Your words sent during the turn are set the same way.
  */
 function promptLines(text: string, ctx: PageContext): Line[] {
-  // The bar in the first column, the words in the page's column.
-  const bar: Span[] = [{ text: symbol(ctx.caps, '┃'), style: { fg: 'blue' } }, { text: ' '.repeat(MARGIN - 1) }];
+  const tint = bandColor(ctx.caps.background);
+  // The words in the page's column; without a band, the bar in the first column.
+  const lead: Span[] = tint ? [{ text: ' '.repeat(MARGIN) }] : [{ text: symbol(ctx.caps, '┃'), style: quiet(ctx) }, { text: ' '.repeat(MARGIN - 1) }];
   // Typed, not written as a document: each line as it was typed, wrapped beside the bar, no list indents.
-  const room = Math.max(8, ctx.width - MARGIN - 1);
-  const words = text.replace(/\r/g, '').split('\n').flatMap(source => source.trim() ? wrapSpans(inlineSpans(source.trimEnd()), room).map(line => [...bar, ...spans(line)]) : [bar.slice(0, 1)]);
+  const room = Math.max(8, ctx.width - MARGIN - 1 - (tint ? MARGIN - 1 : 0));
+  const bold = (line: Span[]): Span[] => line.map(span => ({ ...span, style: { ...span.style, bold: true } }));
+  const words = text.replace(/\r/g, '').split('\n').flatMap(source => source.trim() ? wrapSpans(inlineSpans(source.trimEnd()), room).map(line => [...lead, ...bold(spans(line))]) : [lead.slice(0, 1)]);
   const max = ctx.promptMax;
-  return [heading('Prompt', 'blue'), ...(max && words.length > max ? [...words.slice(0, max), [...bar, { text: '… ', style: DIM }, { text: symbol(ctx.caps, '▾'), style: { dim: true, bold: true } }]] : words)];
+  const lines: Line[] = [heading('Prompt', quiet(ctx)), ...(max && words.length > max ? [...words.slice(0, max), [...lead, { text: '… ', style: quiet(ctx) }, { text: symbol(ctx.caps, '▾'), style: { ...quiet(ctx), bold: true } }]] : words)];
+  // A line of the band's own above and below: room around the words.
+  return tint ? band([[], ...lines, []], ctx.width, tint) : lines;
 }
 
 
@@ -199,17 +232,17 @@ function changesLines(view: TurnView, ctx: PageContext): Line[] {
   const files = view.turn.files;
   if (!files.length) return [];
   const lead: Span = { text: ' '.repeat(MARGIN) };
-  const head = heading('Changes', 'default');
+  const head = heading('Changes', quiet(ctx));
   CHANGES.add(head);
   const sizes = (added?: number, removed?: number): Span[] => [
     ...(added ? [{ text: `+${added}`, style: { fg: 'green' } as Style }] : []), ...(added && removed ? [{ text: ' ' }] : []),
     ...(removed ? [{ text: `-${removed}`, style: { fg: 'red' } as Style }] : []),
   ];
-  const open: Span = { text: ' ' + symbol(ctx.caps, '▾'), style: { dim: true, bold: true } };
+  const open: Span = { text: ' ' + symbol(ctx.caps, '▾'), style: { ...quiet(ctx), bold: true } };
   if (!ctx.changesOpen) {
     const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0), removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
     const partial = files.some(file => file.added === undefined) && files.some(file => file.added !== undefined);
-    const line = cutLine([lead, { text: `${files.length} 个文件` }, ...(added || removed ? [{ text: '  ' }, ...sizes(added, removed)] : []), ...(partial ? [{ text: ' 等', style: DIM }] : []), open], ctx.width);
+    const line = cutLine([lead, { text: `${files.length} 个文件` }, ...(added || removed ? [{ text: '  ' }, ...sizes(added, removed)] : []), ...(partial ? [{ text: ' 等', style: quiet(ctx) }] : []), open], ctx.width);
     CHANGES.add(line);
     return [head, line];
   }
@@ -221,7 +254,7 @@ function changesLines(view: TurnView, ctx: PageContext): Line[] {
     const name = textWidth(names[index]) > room ? cutLine([{ text: names[index] }], room)[0] : { text: names[index] };
     const gap = Math.max(1, ctx.width - 1 - MARGIN - 2 - textWidth(plainText([name])) - textWidth(plainText(size)));
     const row = view.rows.find(candidate => candidate.id === file.id);
-    const line: Span[] = [lead, { text: file.mark, style: file.mark === 'A' ? { fg: 'green' } : file.mark === 'D' ? { fg: 'red' } : DIM }, { text: ' ' },
+    const line: Span[] = [lead, { text: file.mark, style: file.mark === 'A' ? { fg: 'green' } : file.mark === 'D' ? { fg: 'red' } : quiet(ctx) }, { text: ' ' },
       { ...name, ...(row ? { style: owned({}, row.id) } : {}) }, { text: ' '.repeat(gap) }, ...size];
     if (row?.openable) TARGETS.set(line as object, [{ row, height: 1 }]);
     lines.push(line);
@@ -230,7 +263,7 @@ function changesLines(view: TurnView, ctx: PageContext): Line[] {
 }
 
 /**
- * The band behind a run of calls: the terminal's own background moved a
+ * The band behind what you asked: the terminal's own background moved a
  * little toward its text. Unknown background, no band.
  */
 export function bandColor(background: Capabilities['background']): readonly [number, number, number] | undefined {
@@ -267,12 +300,12 @@ const ANSWER = new WeakMap<object, number>();
 const CHANGES = new WeakSet<object>();
 
 /** What shows on the right of a call: a failure in red, a call still out, the size of a change. */
-function callEnd(chapterRow: ChapterRow, ctx: PageContext, live: boolean): Span[] {
+function callEnd(chapterRow: ChapterRow, ctx: PageContext, live: boolean, fade = 1): Span[] {
   const end = endOf(chapterRow, ctx.session, live);
   if (!end) return [];
   if (end.kind === 'failed') return [{ text: end.word, style: { fg: 'red' } }];
-  if (end.kind === 'empty') return [{ text: 'no match', style: DIM }];
-  if (end.kind === 'note') return [{ text: end.text, style: DIM }];
+  if (end.kind === 'empty') return [{ text: 'no match', style: quiet(ctx, fade) }];
+  if (end.kind === 'note') return [{ text: end.text, style: quiet(ctx, fade) }];
   return [...(end.added ? [{ text: `+${end.added}`, style: { fg: 'green' } as Style }] : []), ...(end.added && end.removed ? [{ text: ' ' }] : []), ...(end.removed ? [{ text: `-${end.removed}`, style: { fg: 'red' } as Style }] : [])];
 }
 
@@ -286,41 +319,46 @@ function withTail(line: Span[], tail: Span[], room: number): Span[] {
 }
 
 /**
- * A step's calls on a band, under the words that explain them, as a tree: the
- * tool's name on a line of its own, once for a run of one tool, and each call
- * of the run hung from it on ├, the last on └. A call's second line goes on
- * under │, so it never reads as the next call. Every call is shown: the reader
- * is here for the process. The tool's name is bold in the body colour, to see
- * at a glance what the agent used; what each call worked on reads in grey,
- * all alike. A command keeps to one line, what it runs after counted. Colour
- * marks what needs it: a failure, a call still out, a change's size.
+ * A step's calls under the words that explain them, on the page itself, as a
+ * tree: the tool's name on a line of its own, once for a run of one tool, and
+ * each call of the run hung from it on ├, the last on └. A call's second line
+ * goes on under │, so it never reads as the next call. Every call is shown:
+ * the reader is here for the process. The tool's name is bold in the body
+ * colour, to see at a glance what the agent used; what each call worked on
+ * reads in grey, all alike, the tree's lines fainter still. A command keeps to
+ * one line, what it runs after counted. Colour marks what needs it: a
+ * failure, a call still out, a change's size.
  */
 function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean): Line[] {
   // Calls that arrive together come in one after another. The key is what the line says, the same for the
   // hook's early copy and the transcript's record; a repeat of the same line is told apart by its count.
   const said = new Map<string, number>();
+  const fades = new Map<ChapterRow, number>();
   const rows = callSteps(all).filter(chapterRow => {
     if (!ctx.motion) return true;
     const key = `c:${callTool(chapterRow, ctx.session)}\u0000${wordsOf(chapterRow, ctx.session).text}`;
     const count = said.get(key) ?? 0;
     said.set(key, count + 1);
-    return ctx.motion.shows(`${key}\u0000${count}`);
+    const age = ctx.motion.age(`${key}\u0000${count}`);
+    if (age === undefined) return false;
+    fades.set(chapterRow, faded(age));
+    return true;
   });
-  // Runs of calls, and runs of Agent calls: another agent's work is set off the band (agentLines).
+  // Runs of calls, and runs of Agent calls: another agent's work is set off from them (agentLines).
   const runs: ChapterRow[][] = [];
   for (const chapterRow of rows) {
     const last = runs.at(-1);
     if (last && isAgent(last[0]) === isAgent(chapterRow)) last.push(chapterRow); else runs.push([chapterRow]);
   }
-  return runs.flatMap((run, index) => [...(index ? [[]] : []), ...(isAgent(run[0]) ? agentLines(run, view, ctx, waitingOn) : bandLines(run, view, ctx, waitingOn, rows.at(-1)))]);
+  return runs.flatMap((run, index) => [...(index ? [[]] : []), ...(isAgent(run[0]) ? agentLines(run, view, ctx, waitingOn) : treeLines(run, view, ctx, waitingOn, fades, rows.at(-1)))]);
 }
 
 /** A subagent's call: its own session's work, opened on its own page. */
 const isAgent = (chapterRow: ChapterRow): boolean => chapterRow.items[0]?.kind === 'subagent';
 
 /**
- * Agent calls are other agents set to work, not tools the agent used: off the
- * band, under their tool's name and the lead their descriptions share, each a
+ * Agent calls are other agents set to work, not tools the agent used: set off
+ * from them, under their tool's name and the lead their descriptions share, each a
  * dot whose colour is its state (gold running, green done, red failed, grey
  * stopped) and its own words in the body colour; under it, in grey, what the
  * run came to: background or not, how long, its tokens and its calls.
@@ -332,7 +370,7 @@ function agentLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waitin
   const lines: Line[] = [[{ text: lead }, { text: callTool(rows[0], ctx.session), style: TOOL }, ...(group.lead ? [{ text: ' · ' + group.lead }] : [])]];
   rows.forEach((chapterRow, index) => {
     const state = agentState(chapterRow);
-    const dot: Style = state === 'running' ? gold(ctx) : state === 'done' ? { fg: 'green' } : state === 'failed' ? { fg: 'red' } : DIM;
+    const dot: Style = state === 'running' ? gold(ctx) : state === 'done' ? { fg: 'green' } : state === 'failed' ? { fg: 'red' } : quiet(ctx);
     const style = owned({}, chapterRow.id);
     const label = group.names[index] + (chapterRow.count > 1 ? ` · ${chapterRow.count} 次` : '');
     const parts = wrapSpans([{ text: label, style }], room);
@@ -340,16 +378,15 @@ function agentLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waitin
     const callId = chapterRow.items[0]?.callId;
     const facts = agentFacts(chapterRow, ctx.now, callId ? ctx.subagents?.get(callId) : undefined);
     const own: Line[] = parts.map((part, piece) => [{ text: lead }, piece ? { text: '  ' } : { text: symbol(ctx.caps, '●'), style: dot }, ...(piece ? [] : [{ text: ' ' }]), ...part]);
-    if (facts) own.push(cutLine([{ text: lead + '  ' }, { text: facts, style: owned(DIM, chapterRow.id) }], ctx.width));
+    if (facts) own.push(cutLine([{ text: lead + '  ' }, { text: facts, style: owned(quiet(ctx), chapterRow.id) }], ctx.width));
     if (chapterRow.openable) TARGETS.set(own[0] as object, [{ row: chapterRow, height: own.length }]);
     lines.push(...own);
   });
   return lines;
 }
 
-/** Calls on the band: see callLines. */
-function bandLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean, lastRow = rows.at(-1)): Line[] {
-  const tint = bandColor(ctx.caps.background);
+/** Calls on their tree: see callLines. `fades` says how far each call just come in has faded in. */
+function treeLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean, fades: ReadonlyMap<ChapterRow, number>, lastRow = rows.at(-1)): Line[] {
   const live = view.live || waitingOn;
   const names = rows.map(chapterRow => callTool(chapterRow, ctx.session));
   const lead = ' '.repeat(MARGIN);
@@ -357,31 +394,30 @@ function bandLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waiting
   const room = Math.max(8, ctx.width - MARGIN - 2 - MARGIN);
   const lines: Line[] = [];
   const push = (line: Span[], targets: LineTarget[]) => {
-    const laid = band([line], ctx.width, tint)[0];
-    if (targets.length) TARGETS.set(laid as object, targets);
-    lines.push(laid);
+    if (targets.length) TARGETS.set(line as object, targets);
+    lines.push(line);
   };
-  // A line of the band's own above and below: room around the block, where there is a band to show it.
-  if (rows.length && tint) push([], []);
   for (let at = 0; at < rows.length;) {
     let last = at;
     while (last + 1 < rows.length && names[last + 1] === names[at]) last++;
     const run = rows.slice(at, last + 1);
-    push([{ text: lead }, { text: names[at], style: TOOL }], []);
+    // The tool's name comes in with its first call.
+    push([{ text: lead }, { text: names[at], style: { ...TOOL, ...body(ctx, fades.get(run[0]) ?? 1) } }], []);
     run.forEach((chapterRow, index) => {
       const end = index === run.length - 1;
-      // A call waiting on you shows ? in its tree cell. One still running is drawn as any other: the spinner is the turn's, at its end.
+      const fade = fades.get(chapterRow) ?? 1;
+      // A call waiting on you shows ? in its tree cell. One still running is drawn as any other: the waiting dot is the turn's, at its end.
       const asking = waitingOn && chapterRow === lastRow && rowView(chapterRow, live).out;
       const branch: Span[] = asking
         ? [{ text: lead }, { text: '?', style: gold(ctx) }, { text: ' ' }]
-        : [{ text: lead + symbol(ctx.caps, end ? '└' : '├') + ' ', style: DIM }];
-      const through: Span = { text: lead + (end ? ' ' : symbol(ctx.caps, '│')) + ' ', style: DIM };
+        : [{ text: lead + symbol(ctx.caps, end ? '└' : '├') + ' ', style: hair(ctx, fade) }];
+      const through: Span = { text: lead + (end ? ' ' : symbol(ctx.caps, '│')) + ' ', style: hair(ctx, fade) };
       const shown = wordsOf(chapterRow, ctx.session);
       // The tool's name stands out; what the call worked on reads a step back, in grey.
-      const style = owned(DIM, chapterRow.id);
+      const style = owned(quiet(ctx, fade), chapterRow.id);
       const label = shown.text + (chapterRow.count > 1 ? ` · ${chapterRow.count} 次` : '');
-      const outcome = callEnd(chapterRow, ctx, live);
-      const tail: Span[] = [...(shown.more ? [{ text: ` +${shown.more}`, style: owned({ dim: true, bold: true }, chapterRow.id) }] : []), ...(outcome.length ? [{ text: ' ' }, ...outcome] : [])];
+      const outcome = callEnd(chapterRow, ctx, live, fade);
+      const tail: Span[] = [...(shown.more ? [{ text: ` +${shown.more}`, style: owned({ ...quiet(ctx, fade), bold: true }, chapterRow.id) }] : []), ...(outcome.length ? [{ text: ' ' }, ...outcome] : [])];
       let wrapped: Span[][];
       if (shown.command) wrapped = [withTail([{ text: label, style }], tail, room)];
       else {
@@ -394,12 +430,11 @@ function bandLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waiting
       wrapped.forEach((part, piece) => push([...(piece ? [through] : branch), ...part], piece === 0 && chapterRow.openable ? [{ row: chapterRow, height: wrapped.length }] : []));
       for (const choice of rowView(chapterRow, live).choices ?? []) {
         const chosen = choice.chosen.length ? choice.chosen.map(value => `${symbol(ctx.caps, '✓')} ${value}`).join('  ') : choice.waiting ? '等待你的选择' : '';
-        if (chosen) push(cutLine([through, ...(choice.header ? [{ text: choice.header + '  ', style: DIM }] : []), { text: chosen, style: choice.chosen.length ? { bold: true } : DIM }], ctx.width), []);
+        if (chosen) push(cutLine([through, ...(choice.header ? [{ text: choice.header + '  ', style: quiet(ctx) }] : []), { text: chosen, style: choice.chosen.length ? { bold: true } : quiet(ctx) }], ctx.width), []);
       }
     });
     at = last + 1;
   }
-  if (rows.length && tint) push([], []);
   return lines;
 }
 
@@ -448,7 +483,7 @@ const wordLines = (source: string, ctx: PageContext, style: Style = {}, indent =
   return shown;
 };
 
-/** A segment as blocks, one blank line apart: the agent's words, then the band of its calls. */
+/** A segment as blocks, one blank line apart: the agent's words, then the tree of its calls. */
 function segmentBlocks(segment: TurnSegment, view: TurnView, ctx: PageContext, waitingOn: boolean): Line[][] {
   if (segment.kind === 'answer') return [wordLines(publicBody(segment.item), ctx)];
   if (segment.kind === 'interjection') {
@@ -468,24 +503,31 @@ function answerLines(view: TurnView, ctx: PageContext): Line[] {
   const lead: Span[] = [{ text: ' '.repeat(MARGIN) }];
   if (!text) return view.turn.aborted ? [heading('Interrupted', 'red')] : [];
   // As the prompt is: the label over the answer; folded, one full line of it and a ▾ to open it.
-  const head = heading('Final Answer', 'green');
+  const head = heading('Final Answer', quiet(ctx));
   if (ctx.answerOpen) {
     ANSWER.set(head, 1);
     return [head, ...wordLines(text, ctx)];
   }
   // Its opening lines run together, marks of headings and lists dropped, so the line is full.
   const flat = text.split(/\n/).map(line => line.trim().replace(/^#+\s*|^[-*]\s+|^\d+\.\s+|^>\s*/, '')).filter(Boolean).join(' ');
-  const open: Span = { text: ' ' + symbol(ctx.caps, '▾'), style: { dim: true, bold: true } };
+  const open: Span = { text: ' ' + symbol(ctx.caps, '▾'), style: { ...quiet(ctx), bold: true } };
   ANSWER.set(head, 2);
   return [head, [...cutLine([...lead, ...inlineSpans(flat)], ctx.width - 2 - MARGIN), open]];
 }
 
-/** Set while a page is drawn: a call on it turns. */
 /**
  * The end of the turn: waiting on you, no word for a while, or the answer it
  * closed with. While it runs, a call out or the agent working out its next
- * step, the one spinner turns here, where the answer will come.
+ * step, a gold dot breathes here, where the answer will come: once what came
+ * in last is all in, so it never sits above what is still appearing.
  */
+/** The waiting dot: gold breathing toward the background; without exact colours, the palette's yellow, faint every other breath. */
+function breathing(ctx: PageContext): Style {
+  const background = ctx.caps.background;
+  if (!background) return { fg: 'yellow', dim: Math.floor(ctx.now / 800) % 2 === 1 };
+  return { fg: 'yellow', fgRgb: mix(goldRgb(ctx), rgb(background), breathAt(ctx.now)) };
+}
+
 function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
   const status = ctx.status;
   const lead: Span = { text: ' '.repeat(MARGIN) };
@@ -495,30 +537,36 @@ function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
     return [
       heading('Needs approval', 'yellow'),
       ...(what.length ? [cutLine([lead, { text: what[0], style: { bold: true } }, ...(what[1] ? [{ text: ' · ' + what[1].replace(/\s+/g, ' ') }] : [])], ctx.width)] : []),
-      cutLine([lead, { text: `在 ${providerName(ctx.session.provider)} 里选择批准或拒绝。`, style: DIM }], ctx.width),
+      cutLine([lead, { text: `在 ${providerName(ctx.session.provider)} 里选择批准或拒绝。`, style: quiet(ctx) }], ctx.width),
     ];
   }
   if (latest && status.kind === 'running') {
     ctx.motion?.turning();
-    return [[lead, { text: symbol(ctx.caps, spinnerAt(ctx.now)), style: gold(ctx) }]];
+    if (ctx.motion && !ctx.motion.resting()) return [];
+    return [[lead, { text: symbol(ctx.caps, '●'), style: breathing(ctx) }]];
   }
-  if (view.live && latest) return [[lead, { text: `无新记录${status.kind === 'quiet' && status.lastAt ? ` · 最后一条 ${clock(status.lastAt)}` : ''}`, style: DIM }]];
+  if (view.live && latest) return [[lead, { text: `无新记录${status.kind === 'quiet' && status.lastAt ? ` · 最后一条 ${clock(status.lastAt)}` : ''}`, style: quiet(ctx) }]];
   if (!view.turn.segments.length) return [];
   return answerLines(view, ctx);
 }
 
 /**
- * Marks the call or the answer under the cursor or the pointer as a link is
- * marked: golden yellow and underlined, every line of it at once. `owner` is
- * the call's id; without one the line is the answer's, and all its words are.
+ * Marks the call or the answer under the cursor or the pointer, every line of
+ * it at once (design v13, 2b): what was grey comes up in the body colour; what
+ * was in the body colour already is underlined. No colour of its own: colour
+ * says what the agent is doing, not where the reader is. `owner` is the call's
+ * id; without one the line is the answer's, and all its words are.
  */
 export function markSelected(line: Line, owner?: string): Line {
   return spans(line).map(span => {
     const style = span.style;
     const mine = owner !== undefined ? Boolean(style && OWNER.get(style) === owner) : Boolean(span.text.trim()) && !(style && CHIP.has(style));
-    return mine ? { ...span, style: { ...style, ...YELLOW, dim: false, underline: true } } : span;
+    return mine ? { ...span, style: lit(style) } : span;
   });
 }
+
+/** A span under the pointer: grey to the body colour, the body colour underlined. */
+export const lit = (style: Style = {}): Style => style.dim || style.fgRgb ? { ...style, dim: false, fgRgb: undefined } : { ...style, underline: true };
 
 /** A call or the answer on the page: its first line, how many lines it takes, and its cells when it shares the line. */
 export interface CallTarget { line: number; height: number; row?: ChapterRow; answer?: boolean; changes?: boolean; from?: number; to?: number }
@@ -539,9 +587,9 @@ export function turnLayout(ctx: PageContext): { lines: Line[]; targets: CallTarg
 }
 
 /**
- * The whole turn, top to bottom: the request as the title and what it
- * changed, then the agent's words with the calls each explains on a band
- * under them, then how the turn ended. Blocks are one blank line apart.
+ * The whole turn, top to bottom: what was asked, then the agent's words with
+ * the calls each explains under them, then, under a rule, how the turn ended
+ * and what it changed. Blocks are one blank line apart.
  */
 export function turnBody(ctx: PageContext): Line[] {
   const group = ctx.groups[ctx.index];
@@ -564,11 +612,15 @@ export function turnBody(ctx: PageContext): Line[] {
   // On screen in the agent, not yet in the transcript: set as the words will be, so nothing changes when the record arrives.
   if (latest && ctx.extras.draft && going) blocks.push(wordLines(ctx.extras.draft, ctx));
   if (latest && ctx.extras.calls?.length && going) blocks.push(callLines(ctx.extras.calls.map(announcedRow), view, ctx, waitingOn));
-  blocks.push(tailLines(view, latest, ctx));
+  const tail = tailLines(view, latest, ctx);
   // What the turn changed, once it is over.
-  if (closed) blocks.push(changesLines(view, ctx));
+  const changes = closed ? changesLines(view, ctx) : [];
+  // Over: a faint rule across the page sets how it ended apart from the process.
+  const closing = closed ? [tail, changes].find(block => block.length) : undefined;
+  if (closing) closing.unshift([{ text: ' '.repeat(MARGIN) + symbol(ctx.caps, '─').repeat(Math.max(1, ctx.width - 2 * MARGIN)), style: hair(ctx) }]);
+  blocks.push(tail, changes);
   // Over, but tasks it left running have not reported back: the agent will answer them here.
   const background = closed && latest && ctx.status.kind === 'idle' && ctx.status.alive ? backgroundLine(ctx.session) : undefined;
-  if (background) blocks.push([[{ text: ' '.repeat(MARGIN) }, { text: background, style: DIM }]]);
+  if (background) blocks.push([[{ text: ' '.repeat(MARGIN) }, { text: background, style: quiet(ctx) }]]);
   return blocks.filter(block => block.length).flatMap((block, index) => index ? [[], ...block] : block);
 }

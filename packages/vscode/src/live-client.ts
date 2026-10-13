@@ -9,13 +9,15 @@ export const liveClient = `
     const key = node => node.nodeType === 1 ? ['observationKey', 'turnPanel', 'itemId', 'actionGroup', 'textId', 'inlineId', 'turnId', 'lensTurnId']
       .map(name => node.dataset[name] ? node.tagName + ':' + name + ':' + node.dataset[name] : '').find(Boolean) : undefined;
     const compatible = (a, b) => a.nodeType === b.nodeType && (a.nodeType !== 1 || a.tagName === b.tagName);
-    // Client-owned state the host never renders: an arrival still waiting or fading in, a quiet turn.
-    const transient = name => name === 'arrived';
+    // Client-owned state the host never renders: an arrival still waiting, typing or fading in, a quiet turn.
+    const transient = name => name === 'arrived' || name === 'pending' || name === 'typing';
     const morph = (current, next) => {
       if (current.nodeType === 1 && current.dataset.inlineLoaded && current.dataset.inlineRevision === next.dataset?.inlineRevision) return;
+      // Words still typing go on typing when they come again unchanged; changed, they show whole and take the change.
+      if (current.nodeType === 1 && current.typing) { if (current.typing.text === next.textContent) return; current.typing.finish(); }
       if (current.isEqualNode(next)) return;
       if (current.nodeType !== 1) { if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue; return; }
-      const local = name => name === 'open' && current.tagName === 'DETAILS' || name === 'aria-pressed' || name === 'aria-expanded' || name === 'data-stale' || name === 'data-fresh' || name === 'data-idle' || name === 'data-current' || name === 'style';
+      const local = name => name === 'open' && current.tagName === 'DETAILS' || name === 'aria-pressed' || name === 'aria-expanded' || name === 'data-stale' || name === 'data-fresh' || name === 'data-idle' || name === 'data-current' || name === 'data-reveal' || name === 'style';
       const animating = [...current.classList].filter(transient);
       for (const attribute of [...current.attributes]) if (!local(attribute.name) && !next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
       for (const attribute of [...next.attributes]) if (!local(attribute.name) && current.getAttribute(attribute.name) !== attribute.value) current.setAttribute(attribute.name, attribute.value);
@@ -25,23 +27,63 @@ export const liveClient = `
     let arrivals = [], revealAt = 0;
     // Claude Code writes a response's words together with the call that follows
     // them, so records land in bursts. Reveal the smallest keyed parts one at a
-    // time: the agent's words fade in fully and rest before the first call row,
-    // rows follow a step apart, and the loading line comes back only after all of
-    // it. A new burst waits for the one still appearing; a long one is quickened.
-    const FADE = 260, WORDS = FADE + 380, ROW = 170, TAIL = 220, BACKLOG = 2500;
+    // time, at the terminal's pace (design v12): the agent's words type out, a
+    // character each WORD ms, SAY_MIN to SAY_MAX in all, and rest REST before
+    // the calls under them; rows follow ROW apart, fading in over FADE; the
+    // waiting dot comes back WAIT after all of it is in. A part is not on the
+    // page until its turn, so the page only grows at its end and following
+    // scrolls with what shows. A new burst waits for the one still appearing;
+    // one more than BACKLOG behind shows at once.
+    const WORD = 5, SAY_MIN = 120, SAY_MAX = 480, REST = 120, ROW = 90, FADE = 200, WAIT = 240, BACKLOG = 1200;
+    const calm = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const nextFrame = typeof window.requestAnimationFrame === 'function' ? step => window.requestAnimationFrame(step) : step => setTimeout(step, 16);
     const words = part => part.matches('.csay, .tprompt, .turn-heading, .cfold');
-    const reveal = (part, delay) => {
-      // Restart: a part already fading (the loading line) goes back to waiting.
+    const typed = part => part.matches('.csay') && !calm;
+    const typeTime = part => Math.max(SAY_MIN, Math.min(SAY_MAX, part.textContent.length * WORD));
+    // Types the part's text out, every text node in order; the layout is the whole text's from the start, cut short.
+    const typeOut = (part, ms) => {
+      const walker = document.createTreeWalker(part, 4);
+      const texts = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push([node, node.nodeValue]);
+      const total = texts.reduce((sum, [, text]) => sum + text.length, 0), begun = performance.now();
+      const typing = { text: part.textContent, finish: () => {
+        if (part.typing !== typing) return;
+        part.typing = null; part.classList.remove('typing');
+        for (const [node, text] of texts) node.nodeValue = text;
+      } };
+      part.typing = typing; part.classList.add('typing');
+      const step = () => {
+        if (part.typing !== typing) return;
+        let left = Math.floor(total * Math.min(1, (performance.now() - begun) / ms));
+        if (left >= total) { typing.finish(); return; }
+        for (const [node, text] of texts) { node.nodeValue = text.slice(0, Math.max(0, left)); left -= text.length; }
+        nextFrame(step);
+      };
+      step();
+    };
+    const fadeIn = part => {
       part.classList.remove('arrived'); void part.offsetWidth;
-      part.style.animationDelay = Math.round(delay) + 'ms';
       part.classList.add('arrived');
       const done = event => {
         if (event.target !== part) return;
         part.removeEventListener('animationend', done);
-        part.classList.remove('arrived'); part.style.animationDelay = '';
-        if (!part.getAttribute('style')) part.removeAttribute('style');
+        part.classList.remove('arrived');
       };
       part.addEventListener('animationend', done);
+    };
+    const show = (part, quiet) => {
+      part.revealing = 0;
+      part.classList.remove('pending'); part.removeAttribute('data-reveal');
+      if (!quiet && !calm) typed(part) ? typeOut(part, typeTime(part)) : fadeIn(part);
+      if (part.isConnected) followLatest();
+    };
+    // Off the page until \`delay\` ms from now; a part already waiting or fading goes back to waiting.
+    const reveal = (part, delay, quiet) => {
+      if (part.revealing) clearTimeout(part.revealing);
+      if (part.typing) part.typing.finish();
+      if (delay <= 0) { show(part, quiet); return; }
+      part.classList.add('pending'); part.dataset.reveal = String(Math.round(delay));
+      part.revealing = setTimeout(() => show(part, quiet), delay);
     };
     const stagger = nodes => {
       const parts = new Set(), holders = new Set();
@@ -54,30 +96,37 @@ export const liveClient = `
           // Calls folded away arrive as their one fold line.
           const fold = part.closest('details:not([open])');
           parts.add(fold && timeline.contains(fold) ? fold : part);
-          // A new block of calls, or a new tool's run in one, comes in with its first call: its band and the
-          // tool's name are not there before the words above them, as they would be if only the rows faded in.
-          for (const holder of [part.closest('.ccalls'), part.closest('.crun')]) if (holder && node.contains(holder)) holders.add(holder);
+          // A new block of calls, or a new tool's run in one, comes in with its first call: the tool's name
+          // is not there before the words above it, as it would be if only the rows came in.
+          for (const holder of [part.closest('.ccalls'), part.closest('.cagents'), part.closest('.crun')]) if (holder && node.contains(holder)) holders.add(holder);
         }
       }
       const ordered = [...parts].filter(part => !part.matches('.live-tail'))
         .sort((a, b) => a === b ? 0 : a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
       const tail = timeline.querySelector('[data-turn-panel] .live-tail');
       if (!ordered.length && !parts.has(tail)) return;
-      const now = performance.now(), step = Math.max(50, Math.min(ROW, 1600 / Math.max(1, ordered.length)));
-      let at = Math.max(now, revealAt), last = at - FADE;
-      if (at - now > BACKLOG) at = now + BACKLOG;
+      const now = performance.now(), step = Math.max(40, Math.min(ROW, 1200 / Math.max(1, ordered.length)));
+      let at = Math.max(now, revealAt), last = now;
+      // Too far behind: what is queued shows now.
+      if (at - now > BACKLOG) at = now;
       const delays = new Map();
       for (const part of ordered) {
-        reveal(part, at - now); delays.set(part, at); last = at;
-        at += words(part) ? WORDS : step;
+        reveal(part, at - now); delays.set(part, at);
+        const takes = typed(part) ? typeTime(part) : FADE;
+        last = Math.max(last, at + takes);
+        at += typed(part) ? takes + REST : words(part) ? FADE + REST : step;
       }
+      // A holder shows with its first part; the tool's name in it fades in with that part.
       for (const holder of holders) {
         const first = ordered.find(part => holder.contains(part));
-        if (first) reveal(holder, delays.get(first) - now);
+        if (!first) continue;
+        reveal(holder, delays.get(first) - now, true);
+        const name = holder.querySelector(':scope > .ctool');
+        if (name && !calm) setTimeout(() => fadeIn(name), Math.max(0, delays.get(first) - now));
       }
       revealAt = at;
-      // The loading line always comes back last, once what arrived above it has settled.
-      if (tail) reveal(tail, Math.max(0, last + FADE + TAIL - now));
+      // The waiting dot always comes back last, once what arrived above it is all in.
+      if (tail) reveal(tail, Math.max(0, last + WAIT - now), true);
     };
     const children = (parent, next) => {
       const old = [...parent.childNodes], used = new Set();

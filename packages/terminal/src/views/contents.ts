@@ -38,17 +38,17 @@ export function contentsEntries(groups: TurnGroup[], provider: Provider, status:
 
 /**
  * Lines of the list; `selected` is a turn index. The selected turn comes up
- * golden with a ⏎ at the end, as a selected call does on the turn page.
+ * as a selected call does on the turn page: its number from grey to the body
+ * colour, its request underlined, and a ⏎ at the end.
  */
 export function contentsLines(entries: ContentsEntry[], selected: number, width: number, caps: Pick<Capabilities, 'symbols'>): Line[] {
   const digits = Math.max(2, ...entries.map(entry => String(entry.ordinal).length));
   return entries.flatMap(entry => {
     const on = entry.index === selected;
-    const gold: Style = { fg: 'yellow' };
-    const left: Span[] = [{ text: String(entry.ordinal).padStart(digits + 1) + ' ', style: on ? gold : { dim: true } }, { text: entry.request, style: on ? { ...gold, bold: true } : {} }];
+    const left: Span[] = [{ text: String(entry.ordinal).padStart(digits + 1) + ' ', style: on ? {} : { dim: true } }, { text: entry.request, style: on ? { underline: true } : {} }];
     const right: Span[] = [
       { text: entry.at, style: { dim: true } },
-      on ? { text: ' ' + symbol(caps, '⏎'), style: { ...gold, bold: true } } : { text: '  ' },
+      on ? { text: ' ' + symbol(caps, '⏎'), style: { bold: true } } : { text: '  ' },
       { text: ' ' },
     ];
     const second: Span = entry.state ? { text: entry.state, style: entry.stateStyle } : { text: entry.answer, style: { dim: true } };

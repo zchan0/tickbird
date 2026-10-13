@@ -417,7 +417,7 @@ const styles = `
   .write-removed { color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-errorForeground)); }
   /* One turn to a page: the header says which, ‹ › go to the turn before and after, ☰ lists them all. */
   .sidecar:not(:has([data-turn-panel])) .page-head { display: none; }
-  .page-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 8px 3px 20px; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .page-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 8px 3px 20px; font-size: 12px; }
   .ph-turn { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ph-turn b { font-weight: 600; }
   .ph-turn .tsub { color: var(--muted); }
@@ -428,7 +428,8 @@ const styles = `
   .ph-follow { border: 0; border-radius: 4px; padding: 2px 6px; margin-right: 4px; background: transparent; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
   .ph-follow:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
   .ph-follow[aria-pressed="true"] { display: none; }
-  .timeline { padding: 0 0 24px; }
+  /* No rule under the header: what scrolls up under it fades out (design v12). */
+  .timeline { padding: 0 0 24px; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12px); mask-image: linear-gradient(to bottom, transparent, #000 12px); }
   .timeline:focus-visible { outline: none; }
   .turn-panel:not([data-current]) { display: none; }
   .turn-panel + .turn-panel { margin-top: 0; padding-top: 0; border-top: 0; }
@@ -446,7 +447,7 @@ const styles = `
   .new-turn { flex: none; display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 5px 14px 6px 20px; border: 0; border-top: 1px solid var(--border); background: var(--surface); text-align: left; }
   .new-turn .nt-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
   .new-turn:hover .nt-text { color: var(--vscode-foreground); }
-  .new-turn .tlabel { color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); }
+  .new-turn .tlabel { margin: 0; color: color-mix(in oklch, var(--vscode-editorWarning-foreground, #cca700) 80%, var(--vscode-foreground)); }
 `;
 
 const script = `(() => {
@@ -658,11 +659,6 @@ const script = `(() => {
     if (fold.open && fold.matches('.fanswer') && timeline && fold.getBoundingClientRect().bottom > timeline.getBoundingClientRect().bottom) readFromTop(fold);
     persist();
   }, true);
-  // A call still out turns where its branch would be, as the terminal's does: one frame each 80ms.
-  const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-  const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const turn = () => { const frame = still ? '⠿' : SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]; document.querySelectorAll('.cspin').forEach(spin => { if (spin.textContent !== frame) spin.textContent = frame; }); };
-  turn(); if (!still) setInterval(turn, 80);
   const ready = () => {
     applyFolds();
     measureText();
