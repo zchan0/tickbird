@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { SessionState } from '../packages/core/src/session-state';
@@ -108,7 +108,7 @@ test('variables inherited from another terminal are not trusted', () => {
   assert.equal(stale.find('split-window'), undefined);
   // kitty variables, but the agent is not in that window.
   const elsewhere = fakeTools({ kittyAgent: 1 });
-  assert.match(split.handle('claude', AGENT, START, { ...KITTY, ...CLI }, elsewhere.tools)!, /不在支持自动开栏的终端里/);
+  assert.match(split.handle('claude', AGENT, START, { ...KITTY, ...CLI }, elsewhere.tools)!, /这个终端不能自动开栏/);
   assert.equal(elsewhere.find('launch'), undefined);
 });
 
@@ -136,7 +136,7 @@ test('no pane where it would not belong', () => {
   none(split.handle('claude', AGENT, START, { ...KITTY, TICKBIRD_CLI: '/missing/cli.js' }, fake.tools), /找不到 tickbird/, fake.calls);
   none(split.handle('claude', AGENT, START, { KITTY_WINDOW_ID: '19', ...CLI }, fake.tools), /socket 远程控制/, fake.calls);
   none(split.handle('claude', AGENT, START, { ZELLIJ: '0', ...KITTY, ...CLI }, fake.tools), /Zellij 还不支持/, fake.calls);
-  none(split.handle('claude', AGENT, START, { TERM_PROGRAM: 'Apple_Terminal', ...CLI }, fake.tools), /不在支持自动开栏的终端里/, fake.calls);
+  none(split.handle('claude', AGENT, START, { TERM_PROGRAM: 'Apple_Terminal', ...CLI }, fake.tools), /这个终端不能自动开栏/, fake.calls);
   assert.equal(split.handle('claude', AGENT, { ...START, hook_event_name: 'SessionEnd' }, { ...KITTY, ...CLI }, fake.tools), undefined);
   assert.equal(split.interactive('claude', 'claude --resume abc'), true);
   assert.equal(split.interactive('codex', 'codex resume --last'), true);
@@ -164,12 +164,19 @@ test('the hook prints nothing, never fails, and logs what it decided', () => {
   assert.equal(result.stdout, '');
 });
 
-test('the pane’s program: the named one, else tickbird on PATH, else the install location', () => {
-  const paneProgram = (require(join(pluginDir, 'split.mjs')) as { paneProgram(env: NodeJS.ProcessEnv, tools: { which: (name: string, env: NodeJS.ProcessEnv) => string | undefined }): string[] | undefined }).paneProgram;
+test('the pane’s program: the named one, else a development install’s, else the one the plugin carries', () => {
+  type Tools = { which: (name: string, env: NodeJS.ProcessEnv) => string | undefined; ours?: (file: string) => boolean; bundled?: string };
+  const { paneProgram, BUNDLED } = require(join(pluginDir, 'split.mjs')) as { paneProgram(env: NodeJS.ProcessEnv, tools: Tools): string[] | undefined; BUNDLED: string };
   const looked: string[] = [];
   const which = (name: string, env: NodeJS.ProcessEnv) => { looked.push(env.PATH ?? ''); return env.PATH === '/home/me/.local/bin' ? `${env.PATH}/${name}` : undefined; };
-  assert.deepEqual(paneProgram({ PATH: '/usr/bin', HOME: '/home/me' }, { which }), ['/home/me/.local/bin/tickbird']);
+  // npm run install:terminal's launcher, found where it puts it: the checkout's latest build.
+  assert.deepEqual(paneProgram({ PATH: '/usr/bin', HOME: '/home/me' }, { which, ours: () => true }), ['/home/me/.local/bin/tickbird']);
   assert.deepEqual(looked, ['/usr/bin', '/home/me/.local/bin']);
+  // Some other program called tickbird, or none: the plugin's own, with this node.
+  assert.deepEqual(paneProgram({ PATH: '/usr/bin', HOME: '/home/me' }, { which, ours: () => false }), [process.execPath, BUNDLED]);
+  assert.deepEqual(paneProgram({ PATH: '/usr/bin', HOME: '/nobody' }, { which: () => undefined }), [process.execPath, BUNDLED]);
+  assert.ok(existsSync(BUNDLED), 'The plugin carries its program: npm run set-version builds it');
+  assert.equal(paneProgram({ HOME: '/nobody' }, { which: () => undefined, bundled: '/nowhere/tickbird.cjs' }), undefined);
   assert.deepEqual(paneProgram({ TICKBIRD_CLI: CLI.TICKBIRD_CLI }, { which }), [process.execPath, CLI.TICKBIRD_CLI]);
 });
 
@@ -299,4 +306,26 @@ test('the pane opens a session from the transcript its state names, wherever the
   assert.equal(found?.file, transcript);
   assert.equal(found?.provider, 'codex');
   assert.equal(await resolveSession('x-2', join(home, 'nowhere'), [state]), undefined);
+});
+
+test('/tickbird-split:open finds the agent a few shells above the command it ran', () => {
+  const { agentAbove } = require(join(pluginDir, 'split.mjs')) as { agentAbove(provider: string, start: number, exec: (command: string, args: string[]) => { stdout: string }): number | undefined };
+  // node ← zsh ← zsh ← claude ← login
+  const table: Record<string, string> = { 900: '901 /bin/zsh', 901: '902 -zsh', 902: '500 zsh', 500: '400 /opt/homebrew/bin/claude', 400: '1 login' };
+  const exec = (_command: string, args: string[]) => ({ stdout: table[args.at(-1)!] ?? '' });
+  assert.equal(agentAbove('claude', 900, exec), 500);
+  assert.equal(agentAbove('codex', 900, exec), undefined, 'Not a Codex below this one');
+});
+
+test('where the terminal cannot open a pane, the decision says how to run it by hand', () => {
+  const { decide, manualCommand } = require(join(pluginDir, 'split.mjs')) as { decide(...args: unknown[]): { text: string; manual?: string }; manualCommand(program: string[], pid: number): string };
+  const fake = fakeTools();
+  const decision = decide('claude', AGENT, START, { TERM_PROGRAM: 'Apple_Terminal', ...CLI }, fake.tools);
+  assert.match(decision.text, /这个终端不能自动开栏/);
+  assert.equal(decision.manual, manualCommand([process.execPath, CLI.TICKBIRD_CLI], AGENT));
+  assert.match(decision.manual!, new RegExp(` watch --agent ${AGENT}$`));
+  // A path with a space or a quote stays one word to the shell.
+  assert.equal(manualCommand(['/usr/bin/node', "/Users/a b/it's/tickbird.cjs"], 7), `/usr/bin/node '/Users/a b/it'\\''s/tickbird.cjs' watch --agent 7`);
+  // Where nothing could run it, nothing is offered.
+  assert.equal(decide('claude', AGENT, { ...START, hook_event_name: 'Stop' }, { ...CLI }, fake.tools), undefined);
 });

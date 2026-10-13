@@ -3,7 +3,7 @@
   "displayName": "Tickbird",
   "description": "Read-only, project-scoped process evidence beside Codex and Claude Code.",
   "publisher": "zchan0",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "engines": {
     "vscode": "^1.96.0",
@@ -108,7 +108,8 @@
     "test:coexistence": "npm run build && node scripts/test-coexistence.mjs",
     "install:terminal": "npm run build && node scripts/install-terminal.mjs",
     "install:all": "npm run install:vscode && node scripts/install-terminal.mjs",
-    "package:terminal": "esbuild packages/terminal/src/cli.ts --bundle --platform=node --format=cjs --target=node22 --minify --legal-comments=none --log-level=warning --outfile=build/tickbird-cli.cjs"
+    "package:terminal": "esbuild packages/terminal/src/cli.ts --bundle --platform=node --format=cjs --target=node22 --minify --legal-comments=none --log-level=warning --outfile=build/tickbird-cli.cjs",
+    "bundle:plugin": "esbuild packages/terminal/src/cli.ts --bundle --platform=node --format=cjs --target=node22 --minify --legal-comments=none --log-level=warning --outfile=plugins/tickbird-split/program/tickbird.cjs"
   },
   "dependencies": {
     "acorn": "8.18.0",

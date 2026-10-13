@@ -1,6 +1,7 @@
 // One version for the product and its integration:
 //   npm run set-version -- 0.2.1
-// Sets package.json (and its lockfile) and every plugin manifest under plugins/. Claude Code
+// Sets package.json (and its lockfile) and every plugin manifest under plugins/, and builds the
+// terminal program tickbird-split carries (plugins/tickbird-split/program). Claude Code
 // and Codex cache an installed plugin by version, so a changed integration needs a new one.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -17,4 +18,6 @@ for (const file of manifests) {
   manifest.version = version;
   writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');
 }
-console.log(`版本已设为 ${version}：package.json 和 plugins/ 下的插件清单。`);
+// The terminal program travels inside tickbird-split: built anew with each version, the only time an agent takes a plugin's update.
+execFileSync('npm', ['run', 'bundle:plugin'], { cwd: root, stdio: 'ignore' });
+console.log(`版本已设为 ${version}：package.json、plugins/ 下的插件清单，并重新打包 plugins/tickbird-split/program/tickbird.cjs。`);

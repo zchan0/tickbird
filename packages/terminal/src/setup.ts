@@ -129,7 +129,7 @@ export function kittyRemote(text: string): { remote: boolean; listen: boolean; s
 }
 
 /** The lines setup appends: kitty listens on a socket per instance, and only that socket controls it. */
-export const KITTY_LINES = ['# Tickbird: open the Tickbird pane beside an agent (tickbird setup)', 'allow_remote_control socket-only', 'listen_on unix:${TMPDIR}/kitty-{kitty_pid}'];
+export const KITTY_LINES = ['# Tickbird: open the Tickbird pane beside an agent', 'allow_remote_control socket-only', 'listen_on unix:${TMPDIR}/kitty-{kitty_pid}'];
 
 export interface KittyOptions { env?: NodeJS.ProcessEnv; ask?: (question: string) => Promise<boolean>; now?: Date; kittyApp?: string }
 

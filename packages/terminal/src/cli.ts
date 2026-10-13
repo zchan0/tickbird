@@ -2,7 +2,7 @@
 import { NONE, probe, symbol, SYMBOLS, type Capabilities, type ProbeIO } from './caps';
 import { describe, InputParser, type InputEvent } from './input';
 import { parseWatchArgs, watch } from './watch';
-import { setup, uninstall } from './setup';
+import { consoleReport, kitty, setup, uninstall } from './setup';
 import { createInterface } from 'node:readline/promises';
 import { cutLine, enterBytes, leaveBytes, row, Screen, type Color, type Line, type Span } from './screen';
 
@@ -152,7 +152,14 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
   if (command === 'uninstall') { process.exitCode = uninstall() ? 0 : 1; return; }
-  process.stderr.write('用法：tickbird watch [会话 ID 或记录文件] [--agent 进程号 [--focus 命令]] | setup [--source 仓库] | uninstall | caps [--json] | demo\n');
+  // kitty's remote control alone: checked, and with --apply backed up and turned on (the agent's /tickbird-split:kitty asks first).
+  if (command === 'kitty') {
+    const report = consoleReport();
+    await kitty(report, args.includes('--apply') ? { ask: async () => true } : {});
+    process.exitCode = report.failed ? 1 : 0;
+    return;
+  }
+  process.stderr.write('用法：tickbird watch [会话 ID 或记录文件] [--agent 进程号 [--focus 命令]] | kitty [--apply] | setup [--source 仓库] | uninstall | caps [--json] | demo\n');
   process.exitCode = 2;
 }
 
