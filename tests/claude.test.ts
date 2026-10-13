@@ -86,6 +86,16 @@ test('hidden thinking, skill and environment injection never become user request
   assert.doesNotMatch(JSON.stringify(data), /PRIVATE_/);
   assert.equal(new Set(data.coverage.map(x => x.source.line)).size, 4);
 });
+test('a command the agent carries out is the request as typed; one Claude Code runs itself is not a request', () => {
+  const data = parse([
+    row('user', '<command-message>tickbird-split:open</command-message>\n<command-name>/tickbird-split:open</command-name>'),
+    row('assistant', [{ type: 'text', text: '开好了。' }]),
+    row('user', '<command-message>code-review</command-message>\n<command-name>/code-review</command-name>\n<command-args>high --fix</command-args>'),
+    row('user', '<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>'),
+  ]);
+  assert.deepEqual(data.items.filter(x => x.kind === 'request').map(x => x.summary), ['/tickbird-split:open', '/code-review high --fix']);
+  assert.doesNotMatch(JSON.stringify(data.items), /command-message/);
+});
 test('tool identity and error state are independent of nonempty stderr', () => {
   const data = parse([tool('a'), result('a', true), tool('b'), result('b', false, { toolUseResult: { stderr: 'A harmless progress stream' } })]);
   assert.deepEqual(data.items.map(x => x.status), ['failed', 'completed']);

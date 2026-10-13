@@ -40,6 +40,19 @@ const injectedAttachments = new Set(['total_tokens_reminder', 'deferred_tools_de
   'environment', 'date', 'model', 'instructions', 'session_context', 'prompt_snapshot', 'deferred_tools_record',
   'remote_session_change', 'silent_turn_reminder', 'task_reminder', 'compact_file_reference']);
 const injected = (value: string): boolean => /^\s*(?:<(?:system-reminder|system_reminder|local-command-caveat|command-name|local-command-stdout|environment_context|skills_instructions|skill|user_instructions)\b|# AGENTS\.md instructions for\b)/.test(value);
+/**
+ * A command the agent carries out, a skill or a plugin's prompt command, is
+ * recorded as its tags, `<command-message>` first: the request is the command
+ * as it was typed, with its arguments. Commands Claude Code runs itself
+ * (/clear, /model) start with `<command-name>` and are not requests (injected).
+ */
+const typedCommand = (value: string): string | undefined => {
+  if (!/^\s*<command-message>/.test(value)) return undefined;
+  const name = /<command-name>([^<]*)<\/command-name>/.exec(value)?.[1]?.trim();
+  if (!name) return undefined;
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(value)?.[1]?.trim();
+  return args ? `${name} ${args}` : name;
+};
 const asyncLaunchWrapper = (text: string, result: Obj): boolean => {
   if (result.isAsync !== true || result.status !== 'async_launched' || typeof result.agentId !== 'string' || typeof result.outputFile !== 'string') return false;
   // Match the complete observed transport template, including identities from
@@ -455,7 +468,7 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
         if (type === 'user' && /^\s*<task-notification>/.test(raw)) { taskNotification(ref, raw); return; }
         const apiError = r.isApiErrorMessage === true;
         const kind: ItemKind = apiError ? 'notice' : type === 'user' ? 'request' : message.stop_reason === 'end_turn' ? 'answer' : 'message';
-        let request = raw; let background = '';
+        let request = type === 'user' ? typedCommand(raw) ?? raw : raw; let background = '';
         if (type === 'user' && /^# Context from my IDE setup:/m.test(raw)) {
           const split = /^## My request:\s*$/m.exec(raw);
           if (!split) { cover(ref, 'user:ide-context', 'excluded', '只有 IDE 上下文，不另计为新问题。'); return; }
