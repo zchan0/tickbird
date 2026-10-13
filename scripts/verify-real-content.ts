@@ -3,11 +3,14 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { parseCodex } from '../packages/core/src/codex';
 import { parseClaude } from '../packages/core/src/claude';
 import type { ItemKind, Provider, SessionData, TimelineItem } from '../packages/core/src/model';
-import { sampleFile } from './sample-file';
+import { localSamples, sampleFile } from './sample-file';
+
+// The real sessions this check reads: local/samples.json, kept out of the repository.
+const local = localSamples();
 
 // Independent fixed-source checks. No parser helpers, current files, referenced
 // URLs, child output paths, or private instruction/reasoning bodies are read.
-const projectPath = '/Users/me/Developer/agent-sidecar';
+const projectPath = local.projectPath;
 type Obj = Record<string, unknown>;
 const object = (value: unknown): Obj => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Obj : {};
 const required = (ok: unknown, message: string): void => { if (!ok) throw new Error(message); };
@@ -22,11 +25,11 @@ const canonical = (value: unknown): string => {
 
 interface Sample { name: string; provider: Provider; file: string; lines: number; hash: string }
 const samples: Sample[] = [
-  { name: 'CX1', provider: 'codex', file: '/Users/me/.codex/sessions/2026/08/29/rollout-2026-08-29T13-17-57-01a00000-0000-7000-8000-0000000000c1.jsonl', lines: 1216, hash: 'f024098aa183b509ba59d536ac8c23bcc42d4fae923afc87a808c5389df27d61' },
-  { name: 'CX2', provider: 'codex', file: '/Users/me/.codex/sessions/2026/09/04/rollout-2026-09-04T18-52-56-01a00000-0000-7000-8000-0000000000c2.jsonl', lines: 1282, hash: 'e4f778a116351de05848dc07e603d18e816794c85d92de305b44fbd2a6b3b198' },
-  { name: 'CL1', provider: 'claude', file: '/Users/me/.claude/projects/-Users-me-Developer-agent-sidecar/00000000-0000-4000-8000-0000000000a1.jsonl', lines: 1133, hash: '4b2460fe9ea563f1006ddef1d830929a8942b1869fd7772c9d22310e59e8e2dc' },
-  { name: 'CL2', provider: 'claude', file: '/Users/me/.claude/projects/-Users-me-Developer-agent-sidecar/00000000-0000-4000-8000-0000000000a3.jsonl', lines: 244, hash: '3a610a4c728c07d49d7272279d44a8c233853e5c1b01d2392105e89e66331925' },
-  { name: 'CL2-child', provider: 'claude', file: '/Users/me/.claude/projects/-Users-me-Developer-agent-sidecar/00000000-0000-4000-8000-0000000000a3/subagents/agent-a0c51d6f6a986ff22.jsonl', lines: 21, hash: '45ff27a95a7b7fe317dbf03658142ed4692f1c4db7812af0a5093d34a808c7f6' },
+  { name: 'CX1', provider: 'codex', file: local.files['CX1'], lines: 1216, hash: 'f024098aa183b509ba59d536ac8c23bcc42d4fae923afc87a808c5389df27d61' },
+  { name: 'CX2', provider: 'codex', file: local.files['CX2'], lines: 1282, hash: 'e4f778a116351de05848dc07e603d18e816794c85d92de305b44fbd2a6b3b198' },
+  { name: 'CL1', provider: 'claude', file: local.files['CL1'], lines: 1133, hash: '4b2460fe9ea563f1006ddef1d830929a8942b1869fd7772c9d22310e59e8e2dc' },
+  { name: 'CL2', provider: 'claude', file: local.files['CL2'], lines: 244, hash: '3a610a4c728c07d49d7272279d44a8c233853e5c1b01d2392105e89e66331925' },
+  { name: 'CL2-child', provider: 'claude', file: local.files['CL2-child'], lines: 21, hash: '45ff27a95a7b7fe317dbf03658142ed4692f1c4db7812af0a5093d34a808c7f6' },
 ];
 // Codex archives old rollouts: look there too.
 for (const sample of samples) sample.file = sampleFile(sample.file);

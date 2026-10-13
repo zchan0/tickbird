@@ -6,6 +6,8 @@ import { createInterface } from 'node:readline';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 const require = createRequire(import.meta.url);
 const { recordedToolInputs } = require('../dist/packages/core/src/actions.js');
 const { toolView } = require('../dist/packages/core/src/tool-view.js');
@@ -37,7 +39,7 @@ for (const sample of baseline.results) {
   assert.equal(hash.digest('hex'), sample.lfNormalizedPrefixSha256, `${sample.id}: fixed source changed`);
   samples.push({ id: sample.id, prefixLines: line, mappings: [...mappings.values()] });
 }
-const installed = JSON.parse(await readFile('/Users/me/.vscode/extensions/extensions.json', 'utf8'));
+const installed = JSON.parse(await readFile(join(homedir(), '.vscode', 'extensions', 'extensions.json'), 'utf8'));
 const targets = [
   ['anthropic.claude-code', 'webview/index.js', ['name="Bash"', 'name="Skill"', 'var YH1="mcp__"', 'name="Read"', 'name="WebFetch"']],
   ['openai.chatgpt', 'webview/assets/subagent-activity-chip-group-47f38af5edcf.js', ['toolSummaryForCmd.readSkillDefinition.steps.finished', 'skillPathInfo:']],

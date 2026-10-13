@@ -72,7 +72,7 @@ test('explicit title text is bounded plain display data, not a coercible object'
 test('validated custom fixture log loading retains request fallback without consulting the real account index', async t => {
   const {directory} = await fixture(t);
   const file = join(directory,'fixture.jsonl');
-  const id = '01a00000-0000-7000-8000-0000000000c2';
+  const id = '01a00000-0000-7000-8000-000000000001';
   await writeFile(file,jsonl([
     {type:'session_meta',payload:{id,cwd:directory,source:'cli'}},
     {type:'event_msg',payload:{type:'user_message',message:'Test-owned request fallback'}},

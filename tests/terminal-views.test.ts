@@ -1060,7 +1060,7 @@ test('a call that points somewhere opens that place; calls with a detail of thei
 test('a call that wraps lights up whole: golden and underlined on every line, nothing added at the end', () => {
   const session = parse([
     rec('user', '发布', 0),
-    call('a1', 'Artifact', { url: 'https://claude.ai/artifact/KoZrtJW4XtTK2fMnYMvqiY/a/very/long/path/that/wraps' }, 1), result('a1', 2),
+    call('a1', 'Artifact', { url: 'https://claude.ai/artifact/Abc123Def456Ghi789Jk/a/very/long/path/that/wraps' }, 1), result('a1', 2),
     said('好了。', 3, true), done(4, 4000),
   ]);
   const model = modelOf(session, { width: 40 });

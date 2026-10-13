@@ -2,6 +2,10 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { localSamples } from './local-samples.mjs';
+
+// The real sessions this check reads: local/samples.json, kept out of the repository.
+const local = localSamples();
 const require = createRequire(import.meta.url);
 const { parseCodex } = require('../dist/packages/core/src/codex.js');
 const { parseClaude } = require('../dist/packages/core/src/claude.js');
@@ -10,11 +14,11 @@ const { groupSessionTurns } = require('../dist/packages/core/src/timeline.js');
 const { outlineTurn, actionRows, actionRowSections, resolveOutlineEvidence } = require('../dist/packages/core/src/outline.js');
 const { describeAction } = require('../dist/packages/core/src/actions.js');
 const { applyCodexSessionTitle } = require('../dist/packages/core/src/session-title.js');
-const projectPath = '/Users/me/Developer/agent-sidecar';
+const projectPath = local.projectPath;
 const samples = [
-  ['CX2', 'codex', '/Users/me/.codex/sessions/2026/09/04/rollout-2026-09-04T18-52-56-01a00000-0000-7000-8000-0000000000c2.jsonl', 1282],
-  ['CL1', 'claude', '/Users/me/.claude/projects/-Users-me-Developer-agent-sidecar/00000000-0000-4000-8000-0000000000a1.jsonl', 1133],
-  ['CL2', 'claude', '/Users/me/.claude/projects/-Users-me-Developer-agent-sidecar/00000000-0000-4000-8000-0000000000a3.jsonl', 244]
+  ['CX2', 'codex', local.files['CX2'], 1282],
+  ['CL1', 'claude', local.files['CL1'], 1133],
+  ['CL2', 'claude', local.files['CL2'], 244]
 ];
 const cases = new Map();
 const nonce = randomBytes(18).toString('base64');

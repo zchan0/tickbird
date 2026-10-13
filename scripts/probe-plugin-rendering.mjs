@@ -5,10 +5,14 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
+import { localSamples } from './local-samples.mjs';
 
-const root = '/Users/me/.claude/projects/-Users-me-Developer-agent-sidecar/';
+// The real sessions this check reads: local/samples.json, kept out of the repository.
+const local = localSamples();
+
+const root = local.claudeProjectDir;
 const samples = [
-  { id: 'CX-A', file: '/Users/me/.codex/sessions/2026/09/04/rollout-2026-09-04T18-52-56-01a00000-0000-7000-8000-0000000000c2.jsonl', limit: 7893, picks: [1, 7891, 7893], pairs: [[7891, 7893]] },
+  { id: 'CX-A', file: local.files['CX2'], limit: 7893, picks: [1, 7891, 7893], pairs: [[7891, 7893]] },
   { id: 'CL-A', file: root + '00000000-0000-4000-8000-0000000000a2.jsonl', limit: 246, picks: [3, 11, 141, 142, 160, 166, 167, 168, 170, 171, 172], pairs: [[141, 142], [167, 168], [171, 172]] },
   { id: 'CL-B', file: root + '00000000-0000-4000-8000-0000000000a3.jsonl', limit: 244, picks: [5, 37, 38, 59, 60, 72, 73, 167, 168, 173, 175, 180, 181], pairs: [[37, 38], [59, 60], [72, 73], [167, 168], [173, 175], [180, 181]] },
 ];
