@@ -16,5 +16,7 @@
         }
       ]
     }
-  }
+  },
+  "license": "MIT",
+  "repository": "https://github.com/zchan0/tickbird"
 }
