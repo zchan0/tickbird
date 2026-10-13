@@ -24,6 +24,10 @@ jobs:
           version=$(node -p "require('./package.json').version")
           test "v$version" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME, package.json $version: run npm run set-version first"; exit 1; }
       - run: npm ci --ignore-scripts
+      - name: The program tickbird-split carries is this version's build
+        run: |
+          npm run bundle:plugin
+          git diff --exit-code -- plugins/tickbird-split/program || { echo "plugins/tickbird-split/program is stale: run npm run set-version"; exit 1; }
       - run: npm test
       - run: npm run package:vscode
       - run: npm run package:terminal

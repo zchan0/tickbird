@@ -19,6 +19,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { candidates } from './adapters/index.mjs';
+import { shellLine } from './adapters/registry.mjs';
 import { frontOf } from './front.mjs';
 import { run, which } from './run.mjs';
 
@@ -68,8 +69,7 @@ export const paneArgv = (program, agentPid, focus) => [...program, 'watch', '--a
 export const handle = (provider, hookPid, input, hookEnv = process.env, tools = { run, which }) => decide(provider, hookPid, input, hookEnv, tools)?.text;
 
 /** The command to run the pane by hand, where the terminal cannot open one: shell-quoted, the agent's to follow. */
-export const manualCommand = (program, agentPid) => [...program, 'watch', '--agent', String(agentPid)]
-  .map(arg => /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`).join(' ');
+export const manualCommand = (program, agentPid) => shellLine([...program, 'watch', '--agent', String(agentPid)]);
 
 /**
  * handle()'s decision, and where the pane could run but this terminal cannot

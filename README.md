@@ -2,42 +2,64 @@
 
 VS Code 侧边栏里的只读过程观察器：读取当前项目的 Claude Code / Codex 本地会话记录，把 Agent 每一轮做了什么整理成章节，证据在编辑器区打开。原 Agent 负责对话和执行；Tickbird 不发送消息，也不执行记录里的任何命令。
 
-状态：私有使用中（0.6.0），未公开发布。现状、已知问题与待办见 [docs/STATUS.md](./docs/STATUS.md)，产品愿景与原则见 [docs/VISION.md](./docs/VISION.md)，终端版设计见 [docs/TERMINAL_DESIGN.md](./docs/TERMINAL_DESIGN.md)。
+状态：0.7.0，开发中。现状、已知问题与待办见 [docs/STATUS.md](./docs/STATUS.md)，产品愿景与原则见 [docs/VISION.md](./docs/VISION.md)，终端版设计见 [docs/TERMINAL_DESIGN.md](./docs/TERMINAL_DESIGN.md)。
 
 ## 安装
 
-需要 Node.js 22+ 和 npm，以及要接入的 Agent：Claude Code、Codex，有一个就行。VS Code 版需要 VS Code，安装脚本用 Mac 上 VS Code 自带的 `code` 命令，没有就用 PATH 里的 `code`（也可以用 `TICKBIRD_CODE_CLI` 指定）。终端版需要 kitty 或 tmux。开发验证平台为 macOS，其他平台尚未实测。
+Tickbird 有两个版本，装哪个都行，也可以都装：终端版在 Agent 旁边开一栏，VS Code 版在侧边栏。两者都通过 Agent 自己的插件取得会话状态。
 
-```sh
-git clone git@github.com:zchan0/tickbird.git
-cd tickbird
-npm ci --ignore-scripts
-npm run install:all
+需要 Node.js 22 以上（插件的 hook 用 `node` 运行），以及要接入的 Agent：Claude Code、Codex，有一个就行。
+
+### 终端版
+
+在 Claude Code 里：
+
+```
+/plugin install tickbird-split --marketplace zchan0/tickbird
 ```
 
-`install:all` 装上 VS Code 版、终端版，以及两者在 Claude Code 和 Codex 里的接入。只要其中一个时：
+`tickbird-split` 自带 Tickbird 程序，依赖的 `tickbird-state` 会一起装上。（Claude Code 2.1.275 以前的版本分两步：`/plugin marketplace add zchan0/tickbird`，再 `/plugin install tickbird-split@tickbird`。）
 
-| 命令 | 装什么 |
-| --- | --- |
-| `npm run install:vscode` | VS Code 扩展（打成 `build/tickbird-<版本>.vsix` 后用 `code --install-extension` 安装），以及插件 `tickbird-state` |
-| `npm run install:terminal` | 终端版：程序 `~/.local/share/tickbird/cli.cjs` 和命令 `~/.local/bin/tickbird`，插件 `tickbird-state` 与 `tickbird-split`；VS Code 版已装且比它旧时一起更新 |
+在 Codex 里：
 
-插件装在 Agent 自己的插件管理里：本仓库登记为 Claude Code（`.claude-plugin/marketplace.json`）和 Codex（`.agents/plugins/marketplace.json`）的本地插件市场。
+```sh
+codex plugin marketplace add zchan0/tickbird
+codex plugin add tickbird-state@tickbird
+codex plugin add tickbird-split@tickbird
+```
 
-- `tickbird-state`：一组只写会话状态的 hook。VS Code 版靠它自动跟随会话、在 Agent 等你批准时显示 Needs approval，终端版也用它。
-- `tickbird-split`：只属于终端版，在 kitty、tmux 里启动 Agent 时自动在旁边开一栏。不想自动开栏，在 Agent 的插件管理里停用它。
+Codex 第一次启动会提示 **Hooks need review**，选 Trust all（或执行 `/hooks`，按 `t`）。不信任时 Codex 静默跳过这些 hook。
 
-装完还要做的：
+之后新开的 Agent 会话旁边会自动开一栏，已经开着的会话不受影响。各终端的情况：
 
-1. **Codex**：第一次启动会提示 **Hooks need review**，选 Trust all（或执行 `/hooks`，按 `t`）。不信任时 Codex 静默跳过这些 hook。
-2. **kitty**：要开启远程控制。安装时会说明要加的两行，在终端里运行时会问你要不要替你备份 kitty.conf 并加上；加上后要完全退出 kitty 再打开。tmux 不需要设置。
-3. 已开着的 Agent 会话不受影响，新开的会话生效；VS Code 已打开的窗口执行 **Developer: Reload Window**。
+| 终端 | 自动开栏 | 说明 |
+| --- | --- | --- |
+| kitty | ✅ | 要开远程控制：在 Claude Code 里运行 `/tickbird-split:kitty`，它会检查，经你同意后备份 kitty.conf 并加上两行；之后完全退出 kitty 再打开 |
+| tmux（在任何终端里） | ✅ | 不需要设置 |
+| WezTerm | ✅ 未实测 | 按 WezTerm 的文档实现（`wezterm cli split-pane`） |
+| Zellij | ✅ 未实测 | 按 Zellij 的文档实现；新栏先开在右边，再挪到左边 |
+| iTerm2（macOS） | ✅ 未实测 | 通过 AppleScript，新栏在 Agent 右边；第一次会请你允许控制 iTerm2 |
+| Ghostty（macOS，1.3 以上） | ✅ 未实测 | 通过 AppleScript（Ghostty 标为预览）；分出的是当时窗口里正在用的那个终端；第一次会请你允许控制 Ghostty |
+| 其它终端 | — | 在 Claude Code 里运行 `/tickbird-split:open`，它给出一行命令并复制到剪贴板，在新的标签页或窗口里运行即可 |
 
-**更新**：`git pull`，再运行一次同一个安装命令。安装可以重复运行，旧版本和旧名字（Agent Sidecar）的扩展、插件和命令会被移除。
+栏被关掉了，用 `/tickbird-split:open` 重新打开。不想自动开栏，在 Agent 的插件管理里停用 `tickbird-split`。
 
-**卸载**：终端版用 `tickbird uninstall`（VS Code 版还装着时保留 `tickbird-state`）；VS Code 版在扩展面板里卸载。
+### VS Code 版
 
-只用 VS Code 版、不想从源码构建时，也可以从 [GitHub Releases](https://github.com/zchan0/tickbird/releases) 下载 `.vsix`，用 `code --install-extension tickbird-<版本>.vsix` 安装；这样不会装上 Agent 里的插件，自动跟随会话和 Needs approval 不可用。
+从 [GitHub Releases](https://github.com/zchan0/tickbird/releases) 下载 `tickbird-<版本>.vsix`：
+
+```sh
+code --install-extension tickbird-<版本>.vsix
+```
+
+再给 Agent 装上 `tickbird-state`（装了终端版就已经有了）：Claude Code 里 `/plugin install tickbird-state --marketplace zchan0/tickbird`；Codex 里同上面的 `marketplace add` 和 `plugin add tickbird-state@tickbird`。没有它，侧栏仍能手动选择会话，但不会自动跟随本窗口的会话，也不显示 Needs approval。
+
+### 更新与卸载
+
+- 插件：在 Agent 的插件管理里更新或卸载（Claude Code 的 `/plugin`，Codex 的 `/plugins`）。两个 Agent 都只在插件版本号变化时取更新。
+- VS Code 版：装新的 `.vsix`；卸载在扩展面板里。
+
+插件做什么：`tickbird-state` 是一组只写会话状态的 hook（会话属于哪个窗口、是否在等你批准、屏幕上正在显示的长回答），写到本机文件；不显示界面，不改变 Agent 的行为。`tickbird-split` 在会话开始时开一栏，运行 Tickbird 只读地显示这个会话。
 
 ## 开发
 
@@ -53,7 +75,9 @@ npm run dev
 
 也可以在本项目按 F5，选择 `Run Tickbird Development Host`。在 worktree 里开发时，用 `npm run dev -- <项目目录>` 打开有会话的项目。
 
-`npm run package:vscode`、`npm run package:terminal` 只打包，不安装。产品和接入用同一个版本号，用 `npm run set-version -- x.y.z` 修改；改了 `plugins/` 下的插件后必须升版本再安装，见 [plugins/tickbird-state/README.md](./plugins/tickbird-state/README.md)。
+从源码安装（开发用）：`npm run install:all` 把终端版、VS Code 版和两个插件从这个仓库装上（插件市场登记为本地目录，插件原地加载，改了新开会话就生效）；之后有开发安装的 `tickbird` 时，分屏优先用它，而不是插件里打包好的程序。也可以分开装：`npm run install:vscode`、`npm run install:terminal`；终端版用 `tickbird uninstall` 卸载。
+
+`npm run package:vscode`、`npm run package:terminal` 只打包，不安装。产品和接入用同一个版本号，用 `npm run set-version -- x.y.z` 修改，它同时重新打包 `plugins/tickbird-split/program/tickbird.cjs`（插件自带的程序）；改了 `plugins/` 下的插件后必须升版本，Agent 才会取更新，见 [plugins/tickbird-state/README.md](./plugins/tickbird-state/README.md)。
 
 GitHub Actions：每次推送到 `main` 和每个 PR 在 macOS、Linux（Node 22、24）上跑 `npm test` 并打包；推送标签 `v<版本>`（与 `package.json` 一致）时发布 GitHub Release，附带 `.vsix` 和终端版程序。真实 VS Code 的核对（`npm run test:host`）需要桌面环境，只在本机跑。
 

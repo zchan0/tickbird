@@ -135,7 +135,7 @@ test('no pane where it would not belong', () => {
   none(split.handle('claude', AGENT, { ...START, source: 'compact' }, { ...KITTY, ...CLI }, fake.tools), /压缩/, fake.calls);
   none(split.handle('claude', AGENT, START, { ...KITTY, TICKBIRD_CLI: '/missing/cli.js' }, fake.tools), /找不到 tickbird/, fake.calls);
   none(split.handle('claude', AGENT, START, { KITTY_WINDOW_ID: '19', ...CLI }, fake.tools), /socket 远程控制/, fake.calls);
-  none(split.handle('claude', AGENT, START, { ZELLIJ: '0', ...KITTY, ...CLI }, fake.tools), /Zellij 还不支持/, fake.calls);
+  none(split.handle('claude', AGENT, START, { ZELLIJ: '0', ...KITTY, ...CLI }, fake.tools), /Zellij 环境变量不完整/, fake.calls);
   none(split.handle('claude', AGENT, START, { TERM_PROGRAM: 'Apple_Terminal', ...CLI }, fake.tools), /这个终端不能自动开栏/, fake.calls);
   assert.equal(split.handle('claude', AGENT, { ...START, hook_event_name: 'SessionEnd' }, { ...KITTY, ...CLI }, fake.tools), undefined);
   assert.equal(split.interactive('claude', 'claude --resume abc'), true);

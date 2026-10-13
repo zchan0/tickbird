@@ -6,13 +6,15 @@
 // An adapter: { name, matches(env), locate(env, { run, which }) } where locate
 // returns { skip: reason } or a place: { name, pane, owns(agentPid, info),
 // find(tag), open({ argv, cwd, env, tag }), focus: argv }.
+import * as ghostty from './ghostty.mjs';
+import * as iterm2 from './iterm2.mjs';
 import * as kitty from './kitty.mjs';
 import * as tmux from './tmux.mjs';
+import * as wezterm from './wezterm.mjs';
+import * as zellij from './zellij.mjs';
 
-/** Known, but not supported yet: no automatic pane there. */
-const later = (name, key) => ({ name, matches: env => Boolean(env[key]), locate: () => ({ skip: `${name} 还不支持自动开栏` }) });
-
-export const ADAPTERS = [later('Zellij', 'ZELLIJ'), tmux, kitty, later('WezTerm', 'WEZTERM_PANE'), later('iTerm2', 'ITERM_SESSION_ID')];
+// Multiplexers first, then terminals. Where none matches, /tickbird-split:open gives the command to run by hand.
+export const ADAPTERS = [zellij, tmux, kitty, wezterm, iterm2, ghostty];
 
 /** The adapters whose variables are set, in the order they are tried. */
 export const candidates = env => ADAPTERS.filter(adapter => adapter.matches(env));
