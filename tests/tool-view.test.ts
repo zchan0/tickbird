@@ -6,6 +6,10 @@ import { describeDisplayAction, presentEvidence } from '../packages/core/src/pre
 import { parseCodex } from '../packages/core/src/codex';
 import { renderSidecar, renderDetail } from '../packages/vscode/src/render';
 import { presentationCases } from './fixtures/presentation-cases';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 const sample = () => structuredClone(presentationCases.find(value => value.id === 'semantic-tools')!.session);
 const detail = (id: string) => new JSDOM(renderDetail({ item: sample().items.find(item => item.id === id)!, provider: 'codex', kept: false, nonce: 'test' })).window.document;
 

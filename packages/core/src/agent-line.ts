@@ -2,6 +2,7 @@ import type { ChapterRow } from './chapters';
 import type { SessionData, TimelineItem } from './model';
 import { elapsed } from './turn-view';
 import { callText, callTool } from './call-line';
+import { count, t, times } from './i18n';
 
 /**
  * An Agent call, as both products set it (design v10): a dot whose colour is
@@ -41,10 +42,10 @@ export function agentFacts(row: ChapterRow, now: number, subagent?: SessionData)
   const duration = usage?.durationMs ?? (Number.isFinite(started) ? (running ? now : lastAt || NaN) - started : NaN);
   const calls = usage?.toolUses ?? (subagent ? subagent.items.filter(entry => ['tool', 'file-change', 'subagent', 'question'].includes(entry.kind)).length : undefined);
   return [
-    item.backgroundTask ? '后台' : '',
+    item.backgroundTask ? t('background', '后台') : '',
     Number.isFinite(duration) && duration >= 0 ? elapsed(duration) : '',
     usage?.tokens !== undefined ? tokens(usage.tokens) : '',
-    calls !== undefined ? `${calls} 次调用` : '',
+    calls !== undefined ? count(calls, 'call', 'calls', '次调用') : '',
   ].filter(Boolean).join(' · ');
 }
 
@@ -145,7 +146,7 @@ export function workflowMeta(input: Record<string, unknown>): { name: string; de
 export function partnerRun(rows: ChapterRow[], session: SessionData, now: number, subagent: (row: ChapterRow) => SessionData | undefined = () => undefined): PartnerRun {
   const kind = partnerOf(rows[0], session);
   const tool = callTool(rows[0], session);
-  const repeat = (row: ChapterRow) => row.count > 1 ? ` · ${row.count} 次` : '';
+  const repeat = (row: ChapterRow) => row.count > 1 ? ` · ${times(row.count)}` : '';
   if (kind === 'SendMessage') return { tool, lines: rows.map(row => {
     const input = inputOf(row);
     const said = callText(row, session).text;

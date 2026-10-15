@@ -11,6 +11,7 @@ import { wrapSpans } from './views/prose';
 import { textWidth } from './width';
 import type { Motion } from './motion';
 import { MARGIN, label, headerLines, markSelected, viewOf, providerName, turnLayout, type CallTarget, type PageContext, type SessionStatus } from './views/turn-page';
+import { count, t } from '../../core/src/i18n';
 
 /**
  * The watch pane's state and what each key does to it. No I/O here: the
@@ -132,7 +133,7 @@ const bottom = (state: AppState, model: Model) => Math.max(0, body(state, model)
  */
 const openHint = (model: Model, target: CallTarget): string => {
   const effect = openTarget(model, target);
-  return effect?.kind === 'view' ? '⏎ 打开图片' : effect?.kind === 'link' ? (/^https?:/.test(effect.link.target) ? '⏎ 打开链接' : '⏎ 打开文件') : '⏎ 详情';
+  return effect?.kind === 'view' ? t('⏎ open image', '⏎ 打开图片') : effect?.kind === 'link' ? (/^https?:/.test(effect.link.target) ? t('⏎ open link', '⏎ 打开链接') : t('⏎ open file', '⏎ 打开文件')) : t('⏎ details', '⏎ 详情');
 };
 
 function openTarget(model: Model, target: CallTarget | undefined): Effect | undefined {
@@ -340,7 +341,7 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
       if (!dragged(drag)) return click(rest, drag.from.x, drag.from.y, model);
       // Dragged over: what it covers is copied, as soon as the button is let go.
       const text = selectedText(frame(rest, model), drag);
-      return text ? { ...rest, effect: { kind: 'copy', text, what: '选中的文字', selected: true } } : rest;
+      return text ? { ...rest, effect: { kind: 'copy', text, what: t('the selected words', '选中的文字'), selected: true } } : rest;
     }
     if (state.drag) {
       if (event.action !== 'move') return state;
@@ -468,18 +469,18 @@ function contentsScroll(state: AppState, model: Model): number {
 
 const dim = (text: string): Span => ({ text, style: { dim: true } });
 
-const HELP: Array<[string, string]> = [
-  ['j k  ↓ ↑', '移动：选择调用或答复（选中后暂停跟随）；详情里滚动'],
-  ['⏎', '进入：打开详情；展开或收起答复（子任务页里是任务说明）；目录里打开这一轮'],
-  ['Esc', '返回上一层；轮页上是取消选择'],
-  ['[  ]', '同一层的上一个 / 下一个：轮页是轮，详情是调用'],
-  ['<  >', '详情里：同一文件的上一次 / 下一次修改'],
-  ['g  G', '开头 / 末尾（轮页的 G 回到最新一轮并恢复跟随）'],
-  ['␣ b  ^d ^u', '整页 / 半页'],
-  ['t  o  y', '目录 / 在编辑器打开 / 复制'],
-  ['a', '切回 Agent'],
-  ['q', '退出'],
-  ['拖动', '选中文字，松开就复制'],
+const help = (): Array<[string, string]> => [
+  ['j k  ↓ ↑', t('Move: select a call or the answer (selecting pauses following); scroll in a detail', '移动：选择调用或答复（选中后暂停跟随）；详情里滚动')],
+  ['⏎', t('Enter: open the details; open or fold the answer (on a subagent\'s page, its task); open the turn in the contents', '进入：打开详情；展开或收起答复（子任务页里是任务说明）；目录里打开这一轮')],
+  ['Esc', t('Back one level; on a turn, clear the selection', '返回上一层；轮页上是取消选择')],
+  ['[  ]', t('The one before / after at this level: turns on a turn page, calls in a detail', '同一层的上一个 / 下一个：轮页是轮，详情是调用')],
+  ['<  >', t('In a detail: the change before / after to the same file', '详情里：同一文件的上一次 / 下一次修改')],
+  ['g  G', t('Start / end (G on a turn goes to the newest turn and follows it again)', '开头 / 末尾（轮页的 G 回到最新一轮并恢复跟随）')],
+  ['␣ b  ^d ^u', t('A page / half a page', '整页 / 半页')],
+  ['t  o  y', t('Contents / open in the editor / copy', '目录 / 在编辑器打开 / 复制')],
+  ['a', t('Back to the agent', '切回 Agent')],
+  ['q', t('Quit', '退出')],
+  [t('drag', '拖动'), t('Select words; let go to copy them', '选中文字，松开就复制')],
 ];
 
 function detailFrame(state: AppState, model: Model): Line[] {
@@ -487,14 +488,14 @@ function detailFrame(state: AppState, model: Model): Line[] {
   const doc = openDetail(state, model);
   const lines: Line[] = [];
   if (!doc) {
-    lines.push(row([dim(' '.repeat(MARGIN) + '← Esc')], '', width), [], [dim(' '.repeat(MARGIN) + '这个调用没有可显示的记录。')]);
+    lines.push(row([dim(' '.repeat(MARGIN) + '← Esc')], '', width), [], [dim(' '.repeat(MARGIN) + t('This call has no record to show.', '这个调用没有可显示的记录。'))]);
   } else {
     lines.push(row([dim(' '.repeat(MARGIN) + '← Esc  '), { text: doc.title, style: { bold: true } }], [dim(doc.meta + ' ')], width));
     const link = doc.path && model.caps.links ? `file://${doc.path}` : undefined;
     const path: Span[] = doc.directory !== undefined ? [dim(' '.repeat(MARGIN) + doc.directory), { text: doc.title, style: { underline: Boolean(link), ...(link ? { link } : {}) } }] : [];
     // What this detail can do, on the right of its path; what does not fit is on the help page.
     const room = width - 2 - (path.length ? Math.min(textWidth(path.map(span => span.text).join('')), Math.floor(width / 2)) + 2 : 0);
-    const keys = fitKeys([doc.fold ? (doc.fold.open ? '⏎ 收起任务' : '⏎ 展开任务') : '', doc.path ? 'o 打开' : '', `y 复制${doc.copy.what}`, doc.edits ? '< > 切换修改' : '', '? 按键'], room);
+    const keys = fitKeys([doc.fold ? (doc.fold.open ? t('⏎ fold task', '⏎ 收起任务') : t('⏎ open task', '⏎ 展开任务')) : '', doc.path ? t('o open', 'o 打开') : '', t(`y copy ${doc.copy.what}`, `y 复制${doc.copy.what}`), doc.edits ? t('< > changes', '< > 切换修改') : '', t('? keys', '? 按键')], room);
     lines.push(row(path, [dim(keys + ' ')], width));
     lines.push([]);
     const shown = height - DETAIL_HEADER;
@@ -535,7 +536,7 @@ function screenLines(state: AppState, model: Model): Line[] {
   if (state.mode === 'detail') return detailFrame(state, model);
   if (state.mode === 'contents') {
     const entries = entriesOf(model);
-    lines.push(row([{ text: ' '.repeat(MARGIN) }, { text: '目录', style: { bold: true } }, dim(`  共 ${model.groups.length} 轮`)], [dim(fitKeys(['⏎ 打开', 'Esc 返回'], width - 12) + ' ')], width), []);
+    lines.push(row([{ text: ' '.repeat(MARGIN) }, { text: t('Contents', '目录'), style: { bold: true } }, dim(t(`  ${count(model.groups.length, 'turn', 'turns', '')}`, `  共 ${model.groups.length} 轮`))], [dim(fitKeys([t('⏎ open', '⏎ 打开'), t('Esc back', 'Esc 返回')], width - 12) + ' ')], width), []);
     const list = contentsLines(entries, state.selected, width, model.caps);
     const top = contentsScroll(state, model);
     lines.push(...list.slice(top, top + height - HEADER));
@@ -543,9 +544,9 @@ function screenLines(state: AppState, model: Model): Line[] {
     return lines;
   }
   if (state.mode === 'help') {
-    lines.push(row([{ text: ' '.repeat(MARGIN) }, { text: '按键', style: { bold: true } }], [dim('Esc 返回 ')], width), []);
-    for (const [keys, what] of HELP.filter(([keys]) => keys !== 'a' || model.focusAgent)) lines.push(cutLine([{ text: ' '.repeat(MARGIN) + keys.padEnd(12) }, dim(what)], width));
-    lines.push([], cutLine([dim(' '.repeat(MARGIN) + '只读：按键只用来阅读和跳转，不会向 Agent 输入任何东西。')], width));
+    lines.push(row([{ text: ' '.repeat(MARGIN) }, { text: t('Keys', '按键'), style: { bold: true } }], [dim(t('Esc back ', 'Esc 返回 '))], width), []);
+    for (const [keys, what] of help().filter(([keys]) => keys !== 'a' || model.focusAgent)) lines.push(cutLine([{ text: ' '.repeat(MARGIN) + keys.padEnd(12) }, dim(what)], width));
+    lines.push([], cutLine([dim(' '.repeat(MARGIN) + t('Read-only: keys only read and move around; nothing is typed to the agent.', '只读：按键只用来阅读和跳转，不会向 Agent 输入任何东西。'))], width));
     while (lines.length < height) lines.push([]);
     return lines.slice(0, height);
   }
@@ -555,7 +556,7 @@ function screenLines(state: AppState, model: Model): Line[] {
   // The header says what a key does now: open what is selected, pick up following again, find the keys.
   const paused = !state.follow && state.index === model.groups.length - 1;
   const what = selected ?? pointed;
-  const aside = fitKeys([what ? (what.answer ? (state.answerOpen ? '⏎ 收起' : '⏎ 展开') : what.changes ? (state.changesOpen ? '⏎ 收起' : '⏎ 展开') : openHint(model, what)) : '', paused ? '已暂停跟随 · G' : '', '? 按键'], Math.max(0, width - 30));
+  const aside = fitKeys([what ? (what.answer ? (state.answerOpen ? t('⏎ fold', '⏎ 收起') : t('⏎ open', '⏎ 展开')) : what.changes ? (state.changesOpen ? t('⏎ fold', '⏎ 收起') : t('⏎ open', '⏎ 展开')) : openHint(model, what)) : '', paused ? t('following paused · G', '已暂停跟随 · G') : '', t('? keys', '? 按键')], Math.max(0, width - 30));
   lines.push(...headerLines(ctx, aside ? [dim(aside)] : []), []);
   const on = (target: CallTarget | undefined, at: number) => target !== undefined && at >= target.line && at < target.line + target.height;
   const visible = page.slice(state.scroll, state.scroll + bodyHeight(state, model)).map((line, index) => {

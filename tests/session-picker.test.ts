@@ -6,6 +6,10 @@ import { join } from 'node:path';
 import type { SessionCandidate } from '../packages/core/src/model';
 import { createSessionPickerMetadata } from '../packages/core/src/session-picker';
 import { tempDir } from './temp';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 
 const jsonl = (records: unknown[]) => records.map(record => JSON.stringify(record)).join('\n') + '\n';
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {

@@ -13,6 +13,7 @@ import { shortFileLabels } from '../../../core/src/presentation';
 import { commandText } from '../../../core/src/command-line';
 import { announcedRow, callEnd as endOf, callSteps, callText as wordsOf, callTool } from '../../../core/src/call-line';
 import { breathAt, FADE_MS, type Motion } from '../motion';
+import { count, t, times } from '../../../core/src/i18n';
 
 export { commandText };
 
@@ -158,8 +159,8 @@ export function label(text: string, tone: Color | Style): Span {
 /** What the session is doing, on the right of the header; nothing while it runs or after it is done. */
 function statusSpans(status: SessionStatus): Span[] {
   if (status.kind === 'waiting') return [label('Needs approval', 'yellow')];
-  if (status.kind === 'quiet') return [{ text: '无新记录', style: DIM }];
-  if (status.kind === 'ended') return [{ text: '已退出', style: DIM }];
+  if (status.kind === 'quiet') return [{ text: t('no new records', '无新记录'), style: DIM }];
+  if (status.kind === 'ended') return [{ text: t('exited', '已退出'), style: DIM }];
   return [];
 }
 
@@ -173,18 +174,18 @@ export function headerLines(ctx: PageContext, aside: Span[] = []): Line[] {
   const narrow = width < 50;
   const status = statusSpans(ctx.status);
   const right: Span[] = status.length ? [...status, { text: ' ' }] : aside.length ? [...aside, { text: ' ' }] : [];
-  if (!group) return [row([{ text: ' '.repeat(MARGIN) + '还没有记录', style: DIM }], right, width)];
+  if (!group) return [row([{ text: ' '.repeat(MARGIN) + t('No records yet', '还没有记录'), style: DIM }], right, width)];
   const ordinal = group.ordinal ?? index + 1;
   const total = groups.at(-1)?.ordinal ?? groups.length;
   const started = clock(viewOf(group, index === groups.length - 1, session.provider).turn.start);
   const left: Span[] = group.turnId
-    ? [{ text: ' '.repeat(MARGIN) }, { text: `第 ${ordinal} 轮`, style: { bold: true } }, { text: ` / 共 ${total} 轮${started ? ` · ${started}${narrow ? '' : ' 开始'}` : ''}`, style: quiet(ctx) }]
-    : [{ text: ' 未归属回合的记录', style: quiet(ctx) }];
+    ? [{ text: ' '.repeat(MARGIN) }, { text: t(`Turn ${ordinal}`, `第 ${ordinal} 轮`), style: { bold: true } }, { text: t(` of ${total}${started ? ` · ${narrow ? '' : 'started '}${started}` : ''}`, ` / 共 ${total} 轮${started ? ` · ${started}${narrow ? '' : ' 开始'}` : ''}`), style: quiet(ctx) }]
+    : [{ text: ' ' + t('Records outside any turn', '未归属回合的记录'), style: quiet(ctx) }];
   return [row(left, right, width)];
 }
 
 const requestText = (item: TimelineItem | undefined, group: TurnGroup): string =>
-  plainPasted(item ? publicBody(item) : group.request).trim() || '（未取得本轮请求）';
+  plainPasted(item ? publicBody(item) : group.request).trim() || t('(no request recorded for this turn)', '（未取得本轮请求）');
 
 /**
  * Every word on the page starts in this column: the header, the labels' words,
@@ -244,7 +245,7 @@ function changesLines(view: TurnView, ctx: PageContext): Line[] {
   if (!ctx.changesOpen) {
     const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0), removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
     const partial = files.some(file => file.added === undefined) && files.some(file => file.added !== undefined);
-    const line = cutLine([lead, { text: `${files.length} 个文件` }, ...(added || removed ? [{ text: '  ' }, ...sizes(added, removed)] : []), ...(partial ? [{ text: ' 等', style: quiet(ctx) }] : []), open], ctx.width);
+    const line = cutLine([lead, { text: count(files.length, 'file', 'files', '个文件') }, ...(added || removed ? [{ text: '  ' }, ...sizes(added, removed)] : []), ...(partial ? [{ text: t(' and more', ' 等'), style: quiet(ctx) }] : []), open], ctx.width);
     CHANGES.add(line);
     return [head, line];
   }
@@ -420,7 +421,7 @@ function treeLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waiting
       const shown = wordsOf(chapterRow, ctx.session);
       // The tool's name stands out; what the call worked on reads a step back, in grey.
       const style = owned(quiet(ctx, fade), chapterRow.id);
-      const label = shown.text + (chapterRow.count > 1 ? ` · ${chapterRow.count} 次` : '');
+      const label = shown.text + (chapterRow.count > 1 ? ` · ${times(chapterRow.count)}` : '');
       const outcome = callEnd(chapterRow, ctx, live, fade);
       const tail: Span[] = [...(shown.more ? [{ text: ` +${shown.more}`, style: owned({ ...quiet(ctx, fade), bold: true }, chapterRow.id) }] : []), ...(outcome.length ? [{ text: ' ' }, ...outcome] : [])];
       let wrapped: Span[][];
@@ -434,7 +435,7 @@ function treeLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waiting
       }
       wrapped.forEach((part, piece) => push([...(piece ? [through] : branch), ...part], piece === 0 && chapterRow.openable ? [{ row: chapterRow, height: wrapped.length }] : []));
       for (const choice of rowView(chapterRow, live).choices ?? []) {
-        const chosen = choice.chosen.length ? choice.chosen.map(value => `${symbol(ctx.caps, '✓')} ${value}`).join('  ') : choice.waiting ? '等待你的选择' : '';
+        const chosen = choice.chosen.length ? choice.chosen.map(value => `${symbol(ctx.caps, '✓')} ${value}`).join('  ') : choice.waiting ? t('waiting for your choice', '等待你的选择') : '';
         if (chosen) push(cutLine([through, ...(choice.header ? [{ text: choice.header + '  ', style: quiet(ctx) }] : []), { text: chosen, style: choice.chosen.length ? { bold: true } : quiet(ctx) }], ctx.width), []);
       }
     });
@@ -542,7 +543,7 @@ function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
     return [
       heading('Needs approval', 'yellow'),
       ...(what.length ? [cutLine([lead, { text: what[0], style: { bold: true } }, ...(what[1] ? [{ text: ' · ' + what[1].replace(/\s+/g, ' ') }] : [])], ctx.width)] : []),
-      cutLine([lead, { text: `在 ${providerName(ctx.session.provider)} 里选择批准或拒绝。`, style: quiet(ctx) }], ctx.width),
+      cutLine([lead, { text: t(`Approve or deny in ${providerName(ctx.session.provider)}.`, `在 ${providerName(ctx.session.provider)} 里选择批准或拒绝。`), style: quiet(ctx) }], ctx.width),
     ];
   }
   if (latest && status.kind === 'running') {
@@ -550,7 +551,7 @@ function tailLines(view: TurnView, latest: boolean, ctx: PageContext): Line[] {
     if (ctx.motion && !ctx.motion.resting()) return [];
     return [[lead, { text: symbol(ctx.caps, '●'), style: breathing(ctx) }]];
   }
-  if (view.live && latest) return [[lead, { text: `无新记录${status.kind === 'quiet' && status.lastAt ? ` · 最后一条 ${clock(status.lastAt)}` : ''}`, style: quiet(ctx) }]];
+  if (view.live && latest) return [[lead, { text: `${t('No new records', '无新记录')}${status.kind === 'quiet' && status.lastAt ? ` · ${t('last at', '最后一条')} ${clock(status.lastAt)}` : ''}`, style: quiet(ctx) }]];
   if (!view.turn.segments.length) return [];
   return answerLines(view, ctx);
 }
@@ -598,7 +599,7 @@ export function turnLayout(ctx: PageContext): { lines: Line[]; targets: CallTarg
  */
 export function turnBody(ctx: PageContext): Line[] {
   const group = ctx.groups[ctx.index];
-  if (!group) return [[{ text: ' 这个会话还没有可显示的记录。', style: DIM }]];
+  if (!group) return [[{ text: ' ' + t('This session has no records to show yet.', '这个会话还没有可显示的记录。'), style: DIM }]];
   const latest = ctx.index === ctx.groups.length - 1;
   const view = viewOf(group, latest, ctx.session.provider);
   const waitingOn = latest && ctx.status.kind === 'waiting';

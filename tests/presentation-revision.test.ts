@@ -9,6 +9,10 @@ import { execCommandHint, recordedToolInputs } from '../packages/core/src/action
 import { parseCodex } from '../packages/core/src/codex';
 import { parseClaude } from '../packages/core/src/claude';
 import { hasReadableEvidence, resolveOutlineEvidence } from '../packages/core/src/outline';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 const sample = (id: string) => structuredClone(presentationCases.find(value => value.id === id)!.session);
 const doc = (id: string, locale?: string) => new JSDOM(renderSidecar({ projectName: 'fixture', session: sample(id), nonce: 'fixture', locale })).window.document;
 

@@ -18,6 +18,7 @@ import { frame, initialState, key, pointerGone, pointerRest, update, windowTitle
 import { clipboardBytes, openFile, openLink, viewImage } from './effects';
 import { sessionStatus, viewOf } from './views/turn-page';
 import { prose } from './views/prose';
+import { t } from '../../core/src/i18n';
 
 const ESCAPE_GAP_MS = 30;
 const STATE_POLL_MS = 1000;
@@ -59,17 +60,17 @@ export function parseWatchArgs(args: string[]): WatchOptions | { error: string }
     const arg = args[at];
     if (arg === '--agent') {
       const pid = Number(args[++at]);
-      if (!Number.isInteger(pid) || pid <= 1) return { error: '--agent 需要 Agent 的进程号' };
+      if (!Number.isInteger(pid) || pid <= 1) return { error: t('--agent needs the agent\'s process id', '--agent 需要 Agent 的进程号') };
       options.agent = pid;
     } else if (arg === '--focus') {
       try {
         const argv = JSON.parse(args[++at] ?? '');
         if (!Array.isArray(argv) || !argv.length || !argv.every(item => typeof item === 'string')) throw new Error();
         options.focus = argv;
-      } catch { return { error: '--focus 需要 JSON 字符串数组' }; }
-    } else if (arg.startsWith('-')) return { error: `不认识的参数 ${arg}` };
+      } catch { return { error: t('--focus needs a JSON array of strings', '--focus 需要 JSON 字符串数组') }; }
+    } else if (arg.startsWith('-')) return { error: t(`unknown option ${arg}`, `不认识的参数 ${arg}`) };
     else if (options.target === undefined) options.target = arg;
-    else return { error: `多余的参数 ${arg}` };
+    else return { error: t(`extra argument ${arg}`, `多余的参数 ${arg}`) };
   }
   return options;
 }
@@ -142,10 +143,10 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
   const waitingLines = (message: string): Line[] => {
     const lines: Line[] = [row([{ text: ' Tickbird', style: { bold: true } }], '', screen.width), [], ...prose(message, screen.width - 1, { indent: 3, style: { dim: true } })];
     while (lines.length < screen.height - 1) lines.push([]);
-    return [...lines.slice(0, screen.height - 1), row('', [{ text: (focus ? 'a 切回 Agent   ' : '') + 'q 退出 ', style: { dim: true } }], screen.width)];
+    return [...lines.slice(0, screen.height - 1), row('', [{ text: (focus ? t('a back to agent   ', 'a 切回 Agent   ') : '') + t('q quit ', 'q 退出 '), style: { dim: true } }], screen.width)];
   };
-  const waitingMessage = () => agent ? '等 Agent 的第一条消息：发出后，这里显示这个会话的过程。'
-    : target ? `找不到会话 ${target}` : '当前目录还没有 Agent 会话，开始一个会话后这里会自动显示。';
+  const waitingMessage = () => agent ? t('Waiting for the first message to the agent: once you send it, this session\'s process shows here.', '等 Agent 的第一条消息：发出后，这里显示这个会话的过程。')
+    : target ? t(`No session ${target}`, `找不到会话 ${target}`) : t('No agent session in this directory yet. Start one and it shows here.', '当前目录还没有 Agent 会话，开始一个会话后这里会自动显示。');
   const draw = () => {
     const current = model();
     if (!current) { screen.render(waitingLines(waitingMessage())); return; }
@@ -167,7 +168,7 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
   const focusAgent = () => {
     if (!focus) return;
     const result = spawnSync(focus[0], focus.slice(1), { stdio: 'ignore', timeout: 2000 });
-    if (result.error || result.status !== 0) say('无法切回 Agent：它的窗格可能已经关闭');
+    if (result.error || result.status !== 0) say(t('Could not go back to the agent: its pane may be closed', '无法切回 Agent：它的窗格可能已经关闭'));
   };
   const perform = (effect: Effect) => {
     if (effect.kind === 'focus') { focusAgent(); return; }
@@ -178,8 +179,8 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
       const copied = caps.clipboard ? (out.write(clipboardBytes(effect.text)), true)
         : process.platform === 'darwin' && !process.env.SSH_CONNECTION && spawnSync('pbcopy', [], { input: effect.text, timeout: 2000 }).status === 0;
       // Copied, it says nothing (y), but for words dragged over: their inverse is gone on release, and nothing else would tell.
-      if (!copied) say(`这个终端不能直接复制，请手动复制：${effect.text}`, 15000);
-      else if (effect.selected) say('已复制', 1500);
+      if (!copied) say(t(`This terminal cannot copy for Tickbird. Copy it by hand: ${effect.text}`, `这个终端不能直接复制，请手动复制：${effect.text}`), 15000);
+      else if (effect.selected) say(t('Copied', '已复制'), 1500);
       return;
     }
     say(openFile(effect.path, effect.line, {

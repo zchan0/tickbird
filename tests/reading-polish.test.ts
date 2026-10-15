@@ -7,6 +7,10 @@ import { resolveOutlineEvidence } from '../packages/core/src/outline';
 import { renderSidecar, renderInlineEvidence } from '../packages/vscode/src/render';
 import { groupSessionTurns } from '../packages/core/src/timeline';
 import { turnView } from '../packages/core/src/turn-view';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 const response = (payload: unknown) => ({ type: 'response_item', payload });
 const event = (payload: unknown) => ({ type: 'event_msg', payload });
 const call = (input: string, id = 'wrapper') => response({ type: 'custom_tool_call', name: 'exec', call_id: id, input });

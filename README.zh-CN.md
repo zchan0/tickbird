@@ -12,6 +12,8 @@ Tickbird 读取 Claude Code 和 Codex 写在本机的会话记录，把每一轮
 - **实时**：新内容随 Agent 干活出现；Agent 停下等你批准时会提示。
 - **点开看证据**：读过的文件选中那几行，改动打开 diff，命令看输出。
 
+界面跟随系统语言，中文系统下显示中文；也可以手动指定，见使用说明的 [Language](./docs/USAGE.md#language) 一节。
+
 ## 两个版本
 
 | 终端版 | VS Code 版 |

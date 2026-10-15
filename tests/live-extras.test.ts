@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseClaude } from '../packages/core/src/claude';
 import { projectSidecar, renderDetail, renderSidecar, renderSubagentTurn } from '../packages/vscode/src/render';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 
 const parse = (records: unknown[]) => parseClaude({ file: '/fixture/cl.jsonl', projectPath: '/fixture', text: records.map(r => JSON.stringify(r)).join('\n') + '\n' });
 const at = (second: number) => new Date(Date.UTC(2026, 9, 5, 1, 0, second)).toISOString();

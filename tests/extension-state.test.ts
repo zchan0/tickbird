@@ -12,6 +12,10 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { tempDir } from './temp';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 
 // This is an in-memory async/control-flow fixture, not a real VS Code host test.
 function deferred<T>() {
@@ -156,6 +160,7 @@ function harness(initialOrientation = 0) {
       dispose() { const callback = this.callback; this.callback = undefined; callback?.(); }
     },
     Uri: { parse: (value: string) => ({ toString: () => value }) },
+    env: { language: 'zh-cn' },
     workspace: {
       onDidChangeWorkspaceFolders: workspaceChange.event,
       // Settings: nothing set, so the pages keep VS Code's own fonts.

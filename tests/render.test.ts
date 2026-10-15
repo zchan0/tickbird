@@ -8,6 +8,10 @@ import { actionRows, actionRowSections, outlineTurn, resolveOutlineEvidence, vis
 import { groupSessionTurns } from '../packages/core/src/timeline';
 import { parseCodex } from '../packages/core/src/codex';
 import { renderDetail, renderInlineEvidence, renderSidecar } from '../packages/vscode/src/render';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 
 const nonce = 'renderer-test-nonce';
 function item(overrides: Partial<TimelineItem> = {}): TimelineItem {

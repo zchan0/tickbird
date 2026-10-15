@@ -19,6 +19,10 @@ import { liveExtras } from '../packages/core/src/live-extras';
 import type { SessionState } from '../packages/core/src/session-state';
 import { commandText, headerLines, runningClock, sessionStatus, turnBody, type PageContext } from '../packages/terminal/src/views/turn-page';
 import { textWidth } from '../packages/terminal/src/width';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 
 /** A click: the button pressed and let go on the same cell. */
 const click = (state: AppState, cell: { x: number; y: number }, model: Model): AppState =>

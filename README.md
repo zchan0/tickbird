@@ -12,7 +12,7 @@ Tickbird reads the session records that Claude Code and Codex write on your mach
 - **Live.** New steps come in as the agent works. When the agent stops to ask for your approval, Tickbird says so.
 - **Open the evidence.** A file the agent read opens with those lines selected, a change opens as a diff, and a command shows its output.
 
-Some of the labels on the page are in Chinese for now.
+The pages are in English, or Chinese where your language is Chinese ([how to choose](./docs/USAGE.md#language)). Detail pages still have some Chinese text.
 
 ## Two versions
 

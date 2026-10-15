@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { claudeExitPrefix, commandOutcome, exitReason } from '../packages/core/src/outcome';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 
 test('only a single-stage search command reads exit 1 as an empty result', () => {
   assert.equal(commandOutcome('rg foo src', 1), 'empty');

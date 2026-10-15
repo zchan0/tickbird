@@ -6,6 +6,10 @@ import { visibleTurnGroups } from '../packages/core/src/outline';
 import { turnView } from '../packages/core/src/turn-view';
 import { fileChanges, fileRead, findRow, locateLines, rowChanges, turnRows } from '../packages/core/src/call-target';
 import { renderDetail } from '../packages/vscode/src/render';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 
 const at = (second: number) => new Date(Date.UTC(2026, 9, 11, 1, 0, second)).toISOString();
 let uuid = 0;

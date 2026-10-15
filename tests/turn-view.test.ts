@@ -4,6 +4,10 @@ import { parseClaude } from '../packages/core/src/claude';
 import { visibleTurnGroups } from '../packages/core/src/outline';
 import type { ChapterRow } from '../packages/core/src/chapters';
 import { duration, elapsed, outcomeWord, publicBody, rowView, runStarts, turnView } from '../packages/core/src/turn-view';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 
 const parse = (records: unknown[]) => parseClaude({ file: '/fixture/cl.jsonl', projectPath: '/fixture', text: records.map(r => JSON.stringify(r)).join('\n') + '\n' });
 const at = (second: number) => new Date(Date.UTC(2026, 9, 5, 1, 0, second)).toISOString();

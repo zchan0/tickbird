@@ -5,6 +5,7 @@ import { clock, publicBody, type turnView } from '../../../core/src/turn-view';
 import { symbol, type Capabilities } from '../caps';
 import { row, type Line, type Span, type Style } from '../screen';
 import { viewOf, type SessionStatus } from './turn-page';
+import { t } from '../../../core/src/i18n';
 
 /**
  * 目录: every turn, newest first, two lines and a blank each — its number,
@@ -21,17 +22,17 @@ const answerLine = (view: ReturnType<typeof turnView>): string => {
 };
 
 const firstLine = (item: TimelineItem | undefined, group: TurnGroup): string =>
-  plainPasted(item ? publicBody(item) : group.request).replace(/\s+/g, ' ').trim() || '（未取得本轮请求）';
+  plainPasted(item ? publicBody(item) : group.request).replace(/\s+/g, ' ').trim() || t('(no request recorded for this turn)', '（未取得本轮请求）');
 
 export function contentsEntries(groups: TurnGroup[], provider: Provider, status: SessionStatus, _caps: Pick<Capabilities, 'symbols'>, _now: number): ContentsEntry[] {
   return groups.map((group, index) => {
     const latest = index === groups.length - 1;
     const view = viewOf(group, latest, provider);
     let state = '', stateStyle: Style = { dim: true };
-    if (latest && status.kind === 'waiting') { state = '等你批准'; stateStyle = { fg: 'yellow' }; }
-    else if (latest && status.kind === 'running') { state = '运行中'; stateStyle = { fg: 'yellow' }; }
-    else if (view.turn.aborted) { state = '中断'; stateStyle = { fg: 'red' }; }
-    else if (view.live) state = '无新记录';
+    if (latest && status.kind === 'waiting') { state = t('waiting for you', '等你批准'); stateStyle = { fg: 'yellow' }; }
+    else if (latest && status.kind === 'running') { state = t('running', '运行中'); stateStyle = { fg: 'yellow' }; }
+    else if (view.turn.aborted) { state = t('interrupted', '中断'); stateStyle = { fg: 'red' }; }
+    else if (view.live) state = t('no new records', '无新记录');
     return { index, ordinal: group.ordinal ?? index + 1, request: firstLine(view.turn.request, group), at: clock(view.turn.start), answer: state ? '' : answerLine(view), state, stateStyle };
   }).reverse();
 }

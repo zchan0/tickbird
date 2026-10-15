@@ -7,6 +7,11 @@ What each release changed, as users see it. The format follows [Keep a Changelog
 
 ## Unreleased
 
+### Added
+
+- The pages speak English, or Chinese where your language is Chinese: the turn page, the contents, the keys and messages in the terminal; the side bar, the session list and the detail page's toolbar in VS Code. Detail pages still have some Chinese text.
+- Choose the language yourself with `TICKBIRD_LANG=en|zh` (terminal) or the `tickbird.language` setting (VS Code).
+
 ## 0.8.1 - 2026-10-15
 
 ### Added

@@ -2,7 +2,12 @@
 
 The [README](../README.md) has the short install steps. This page has the details for after you install: how to read each version, how to use it, and what you can run into while you install.
 
-Some text on the page is in Chinese for now. Where this page names it, the English meaning follows in parentheses.
+## Language
+
+The pages are in English, or in Chinese where your language is Chinese. Detail pages still have some Chinese text.
+
+- Terminal: the pane follows the locale (`LC_ALL`, `LC_MESSAGES`, `LANG`). Set `TICKBIRD_LANG=en` or `TICKBIRD_LANG=zh` in your shell profile to choose; new panes take it.
+- VS Code: the side bar follows VS Code's display language. Set `tickbird.language` to `en` or `zh` to choose, then run Developer: Reload Window.
 
 ## While you install
 
@@ -24,7 +29,7 @@ The VS Code version and the terminal version lay out a turn the same way: one tu
 
 1. Click the Tickbird icon in the activity bar (or run `Tickbird: Open Process Observer`). The view opens in the primary side bar. It takes no editor group, so files that other extensions open do not cover it.
 2. The view's title bar: choose a session, refresh, and under `…` the coverage records. After the title is the session's name (only the name the agent saved). The session list shows each session's title, source, short ID, last update and latest message, and you can search it. It lists the main sessions of the current project only.
-3. One turn to a page. The page head says 「第 n 轮 / 共 N 轮 · start time」 (turn n of N). ‹ › or `[` `]` go to the turn before and after; ☰ or `t` open the contents, one entry a turn, each with its request.
+3. One turn to a page. The page head says "Turn n of N · start time". ‹ › or `[` `]` go to the turn before and after; ☰ or `t` open the contents, one entry a turn, each with its request.
 4. A turn, top to bottom:
    - **Prompt**: your request, on a sheet one step lighter than the page: the only raised part of the page. Messages you send during the turn are set the same way.
    - **Agent calls** (subagents) are a block of their own: the tool's name on one line (when the descriptions share a lead, the lead goes on this line, as in `Agent · Name brainstorm`). Each subagent has a dot whose colour is its state (yellow running, green done, red failed, grey stopped), then its description in the body colour. Under it, in grey: background or not, how long, tokens and the number of calls (tokens and the final count of calls come from its notification; while it runs, the time so far and the calls so far). Calls that deal with another agent are set the same way. **SendMessage**: → the task of the agent it went to, the message's summary in grey under it. **Skill**: ◆ the skill's name, its arguments under it. **Workflow**: its name beside the tool's name, what it does after the dot, its phases hung under that, and a last line with background and time.
@@ -36,14 +41,14 @@ The VS Code version and the terminal version lay out a turn the same way: one tu
    - Read (and read-only commands such as `cat` and `sed -n`): opens the file in the editor with the lines it read selected. If the file changed and those lines moved, the new place is selected; if the lines are gone, the record of that time opens.
    - An image, a local file or a web address it read: opens in VS Code or the browser.
    - Edit and Write, and files in Changes: open a diff in the editor area, with the line numbers from the record and the changed words in a brighter colour (Claude Code's colours). If the turn changed a file more than once, switch between the changes with ‹ › or `<` `>`.
-   - Agent (a Claude Code subagent): if the subagent kept its own record, its turn opens. What it was given is labelled Task (folded to its first 3 lines in the terminal; ⏎ or a click opens and folds it, `y` copies all of it), then its words and calls, then what it gave back, labelled Result, open. While the subagent runs, the page follows its record, with a gold dot breathing at the end. Go from subagent to subagent with `[` `]` (terminal) or click another row (VS Code; 「保留此页」 (keep this page) lets you see two side by side). Codex subagents are not supported yet.
+   - Agent (a Claude Code subagent): if the subagent kept its own record, its turn opens. What it was given is labelled Task (folded to its first 3 lines in the terminal; ⏎ or a click opens and folds it, `y` copies all of it), then its words and calls, then what it gave back, labelled Result, open. While the subagent runs, the page follows its record, with a gold dot breathing at the end. Go from subagent to subagent with `[` `]` (terminal) or click another row (VS Code; Keep this page lets you see two side by side). Codex subagents are not supported yet.
    - Other calls: open a detail page. Its title is what the row says, with the input and the return under it.
-   - The next call you open uses the same detail page. Click 「保留此页」 (keep this page) to keep it.
+   - The next call you open uses the same detail page. Click Keep this page to keep it.
 6. **Live**: once a session is chosen, new records are read as they are written.
-   - While a turn runs, a gold dot breathes at the end of the page, whether a call runs or the agent works out its next step. The call rows do not move. After 10 minutes with no new record, it says 「无新记录」 (no new records).
+   - While a turn runs, a gold dot breathes at the end of the page, whether a call runs or the agent works out its next step. The call rows do not move. After 10 minutes with no new record, it says No new records.
    - Background tasks (agents and Bash commands that run in the background): when the turn ends with tasks still out, a grey line at the end says "N background tasks running", but only while the agent still reports its state. When a task reports back, its notification becomes a row in the turn, what the agent says next becomes the new Final Answer, and the answer before goes back into the process.
    - New content comes in one part after another: the agent's words first, then the calls under them.
-   - Following: by default the page follows the end of the newest turn, and stays at the end when the turn is over. Scrolling up, opening a call or going to an older turn pauses it, and 「↓ 跟随」 (follow) shows in the page head; click it to go back to the newest turn. If a new turn starts while you read an older one, **New turn** shows at the bottom.
+   - Following: by default the page follows the end of the newest turn, and stays at the end when the turn is over. Scrolling up, opening a call or going to an older turn pauses it, and ↓ Follow shows in the page head; click it to go back to the newest turn. If a new turn starts while you read an older one, **New turn** shows at the bottom.
    - Whether the agent runs: for Claude Code, the `~/.claude/sessions/<pid>.json` file that Claude Code keeps (busy or idle); for Codex, the turn-end and interrupt events in the session.
    - **With `tickbird-state` installed** (`npm run install:vscode` installs it): the view follows the session most recently active in this window. When the agent stops for your approval, **Needs approval** shows at the end with the tool and file to approve. Claude Code's words show before they reach the transcript. If you choose another session by hand, following pauses; the notice bar can turn it back on.
 7. You can drag over the words of calls, Agent rows and files in Changes, and copy them with Cmd+C. A click still opens them.

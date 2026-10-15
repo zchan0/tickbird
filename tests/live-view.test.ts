@@ -5,6 +5,10 @@ import { LiveView } from '../packages/vscode/src/live-view';
 import { renderSidecar, renderInlineEvidence, inlineRevision } from '../packages/vscode/src/render';
 import { resolveOutlineEvidence } from '../packages/core/src/outline';
 import type { SessionData, TimelineItem } from '../packages/core/src/model';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 
 const health = { state: 'observing' as const, pendingBytes: 0, readBytes: 10 };
 const narrative = (id: string, turnId: string, text = id): TimelineItem => ({ id, turnId, sessionId: 's', kind: 'message', title: '过程说明',

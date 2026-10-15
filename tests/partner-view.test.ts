@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { parseClaude } from '../packages/core/src/claude';
 import { workflowMeta } from '../packages/core/src/agent-line';
 import { renderSidecar, renderSubagentTurn } from '../packages/vscode/src/render';
+import { setLanguage } from '../packages/core/src/i18n';
+
+// Written for the Chinese pages: their words are checked as they read in Chinese.
+setLanguage('zh');
 
 const at = (second: number) => new Date(Date.UTC(2026, 9, 6, 1, 0, second)).toISOString();
 let uuid = 0;

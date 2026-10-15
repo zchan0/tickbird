@@ -17,6 +17,7 @@ import { createSessionPickerMetadata, type SessionPickerEntry } from '../../core
 import { callLink, fileChanges, fileRead, findRow, locateLines, recordedImage, rowChanges, turnRows } from '../../core/src/call-target';
 import { callEnd, callText, callTool } from '../../core/src/call-line';
 import type { PatchFile } from '../../core/src/presentation';
+import { chooseLanguage, setLanguage, t, times } from '../../core/src/i18n';
 
 interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?: TimelineItem[]; provider: Provider; kept: boolean;
   /** The call the detail is about, named as its line in the panel names it. */
@@ -28,6 +29,9 @@ interface EvidenceView { panel: vscode.WebviewPanel; item: TimelineItem; items?:
 const observerType = 'tickbird.observer';
 
 export function activate(context: vscode.ExtensionContext) {
+  // The pages' language: tickbird.language when it names one, else VS Code's display language.
+  const readLanguage = () => setLanguage(chooseLanguage(vscode.workspace.getConfiguration('tickbird').get<string>('language'), vscode.env?.language));
+  readLanguage();
   let observer: vscode.WebviewView | undefined;
   let session: SessionData | undefined;
   let live: LiveSession | undefined;
@@ -72,7 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
   let gapShown: WorkspaceGap | undefined;
   function projectPath(): string {
     const gap = workspaceGap();
-    if (gap) throw new Error(workspaceGaps[gap].title);
+    if (gap) throw new Error(workspaceGaps()[gap].title);
     return vscode.workspace.workspaceFolders![0].uri.fsPath;
   }
   function discoveryOptions(): DiscoveryOptions {
@@ -92,7 +96,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (!observer) return;
     const named = snapshot && (snapshot.titleSource === 'claude-ai-title' || snapshot.titleSource === 'codex-index') ? snapshot.title : undefined;
     // A container's only view shows its title, not its description: the name goes in the title, 过程 without one.
-    const title = named ?? '过程';
+    const title = named ?? t('Process', '过程');
     if (observer.title !== title) observer.title = title;
   }
   function renderObserver() {
@@ -158,7 +162,7 @@ export function activate(context: vscode.ExtensionContext) {
   }, 1000);
   context.subscriptions.push({ dispose: () => clearInterval(subagentPoll) });
   function renderEvidence(view: EvidenceView) {
-    view.panel.title = `${view.kept ? '已保留' : '预览'} · ${view.change?.title ?? view.call?.label ?? view.item.title}`;
+    view.panel.title = `${view.kept ? t('Kept', '已保留') : t('Preview', '预览')} · ${view.change?.title ?? view.call?.label ?? view.item.title}`;
     view.panel.webview.html = renderDetail({ item: view.item, items: view.items, provider: view.provider, kept: view.kept, nonce: nonce(), locale: vscode.env?.language, ...(view.call ? { call: view.call } : {}),
       ...(view.subagent ? { subagent: { session: view.subagent.session, running: subagentRunning(view.subagent) } } : {}), ...(view.change ? { change: { files: [view.change.steps[view.change.index]], paths: [view.change.path], title: view.change.title,
       ...(view.change.steps.length > 1 ? { edit: { index: view.change.index, total: view.change.steps.length } } : {}) } } : {}) });
@@ -175,7 +179,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (disposed || token !== generation) return;
     checkSessionChange(key);
     const selected = candidates.find(item => sessionKey(item) === key);
-    if (!selected) throw new Error('选定会话当前不可用；未自动替换或清除已保存选择。');
+    if (!selected) throw new Error(t('The chosen session is not available now; the saved choice was not replaced or cleared.', '选定会话当前不可用；未自动替换或清除已保存选择。'));
     loading?.abort();
     const controller = new AbortController(); loading = controller;
     let opened: LiveSession;
@@ -184,7 +188,7 @@ export function activate(context: vscode.ExtensionContext) {
     finally { if (loading === controller) loading = undefined; }
     if (disposed || token !== generation || !observer) { await opened.close(); return; }
     // A detail may have opened while the selected log was loading.
-    try { checkSessionChange(key); if (selected.projectPath !== await realpath(projectPath())) throw new Error('工作区已改变；未绑定旧项目会话。'); }
+    try { checkSessionChange(key); if (selected.projectPath !== await realpath(projectPath())) throw new Error(t('The workspace changed; the old project\'s session was not bound.', '工作区已改变；未绑定旧项目会话。')); }
     catch (error) { await opened.close(); throw error; }
     if (disposed || token !== generation || !observer) { await opened.close(); return; }
     const previous = live;
@@ -212,15 +216,15 @@ export function activate(context: vscode.ExtensionContext) {
     const result = await scan();
     if (disposed || token !== generation) return;
     if (!candidates.length) {
-      throw new Error(`没有取得可验证的当前项目候选。无候选恢复规则待确认，本次不自动选择其他项目。${result.warnings.join(' ')}`);
+      throw new Error(`${t('No session of this project could be checked, so no other project\'s session was chosen.', '没有取得可验证的当前项目候选。无候选恢复规则待确认，本次不自动选择其他项目。')}${result.warnings.join(' ')}`);
     }
     const choices = [...candidates];
     const metadata = createSessionPickerMetadata();
     const entries = new Map(choices.map(item => [sessionKey(item), metadata.base(item)]));
     type Choice = vscode.QuickPickItem & { key: string };
     const picker = vscode.window.createQuickPick<Choice>();
-    picker.title = '切换会话';
-    picker.placeholder = '搜索标题或最近对话 · 仅当前项目';
+    picker.title = t('Choose Session', '切换会话');
+    picker.placeholder = t('Search titles or latest messages · this project only', '搜索标题或最近对话 · 仅当前项目');
     picker.matchOnDescription = true;
     picker.matchOnDetail = true;
     let closed = false;
@@ -230,7 +234,7 @@ export function activate(context: vscode.ExtensionContext) {
       picker.items = choices.map(item => {
         const entry = entries.get(sessionKey(item))!;
         return { key: entry.key, label: entry.title,
-          description: `${entry.providerLabel} · ${entry.shortId} · ${entry.updatedLabel}${candidate && entry.key === sessionKey(candidate) ? ' · 正在观察' : ''}`,
+          description: `${entry.providerLabel} · ${entry.shortId} · ${entry.updatedLabel}${candidate && entry.key === sessionKey(candidate) ? t(' · watching', ' · 正在观察') : ''}`,
           detail: entry.latestText || entry.reason };
       });
       const restored = picker.items.find(item => item.key === active);
@@ -381,7 +385,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
     const end = found && boundSession ? callEnd(found.row, boundSession, false) : undefined;
     const call = found && boundSession && !found.row.output ? { tool: callTool(found.row, boundSession),
-      label: callText(found.row, boundSession).text + (found.row.count > 1 ? ` · ${found.row.count} 次` : ''), ...(end?.kind === 'failed' ? { word: end.word } : {}) } : undefined;
+      label: callText(found.row, boundSession).text + (found.row.count > 1 ? ` · ${times(found.row.count)}` : ''), ...(end?.kind === 'failed' ? { word: end.word } : {}) } : undefined;
     const transcript = candidate?.file;
     const action = detailOpening.then(async () => {
       if (disposed || !boundSession || session !== boundSession || observer !== boundObserver) return;
@@ -396,7 +400,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (subagent) subagent.running = subagentRunning(subagent);
       const column = detailColumn();
       if (!preview) {
-        const panel = vscode.window.createWebviewPanel('tickbird.evidence', '证据预览',
+        const panel = vscode.window.createWebviewPanel('tickbird.evidence', t('Evidence Preview', '证据预览'),
           { viewColumn: column, preserveFocus: true }, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
         const view: EvidenceView = { panel, item: structuredClone(item), ...(items ? { items: structuredClone(items) } : {}), provider: boundSession.provider, kept: false, ...(change ? { change } : {}), ...(call ? { call } : {}), ...(subagent ? { subagent } : {}) };
         preview = view;
@@ -421,7 +425,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (!preview) return;
     const kept = preview;
     kept.kept = true;
-    kept.panel.title = `已保留 · ${kept.change?.title ?? kept.call?.label ?? kept.item.title}`;
+    kept.panel.title = `${t('Kept', '已保留')} · ${kept.change?.title ?? kept.call?.label ?? kept.item.title}`;
     preview = undefined;
     // Confirm the state in place: do not destroy the reader's DOM or scroll position.
     void Promise.resolve(kept.panel.webview.postMessage({ type: 'kept' })).catch(reportError);

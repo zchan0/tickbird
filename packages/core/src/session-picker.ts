@@ -1,6 +1,7 @@
 import { lstat } from 'node:fs/promises';
 import type { SessionCandidate, SessionData, TimelineItem } from './model';
 import { loadSession, sessionKey } from './sessions';
+import { t } from './i18n';
 
 export interface SessionPickerEntry {
   key: string;
@@ -39,7 +40,7 @@ function plainLabel(value: string, limit: number): string {
 const providerLabel = (candidate: SessionCandidate): string => candidate.provider === 'codex' ? 'Codex' : 'Claude Code';
 function updatedLabel(value: number): string {
   return Number.isFinite(value) && !Number.isNaN(new Date(value).getTime())
-    ? `日志更新 ${new Date(value).toLocaleString('zh-CN', { hour12: false })}` : '日志更新时间未知';
+    ? t(`updated ${new Date(value).toLocaleString('en-GB', { hour12: false })}`, `日志更新 ${new Date(value).toLocaleString('zh-CN', { hour12: false })}`) : t('update time unknown', '日志更新时间未知');
 }
 const bound = (value: number | undefined, fallback: number, maximum: number): number =>
   value !== undefined && Number.isFinite(value) ? Math.max(0, Math.min(maximum, Math.floor(value))) : fallback;
@@ -61,7 +62,7 @@ function latestConversation(data: SessionData): Pick<SessionPickerEntry, 'latest
     const snippet = plainLabel(body || item.summary, 150);
     if (!snippet) continue;
     const latestRole = item.kind === 'request' ? 'user' : 'assistant';
-    return { latestRole, latestText: `${latestRole === 'user' ? '用户' : 'Agent'}：${snippet}` };
+    return { latestRole, latestText: `${latestRole === 'user' ? t('You', '用户') : 'Agent'}${t(': ', '：')}${snippet}` };
   }
   return {};
 }
@@ -81,7 +82,7 @@ export function createSessionPickerMetadata(options: SessionPickerOptions = {}):
     key: sessionKey(candidate), title: `${providerLabel(candidate)} · ${plainLabel(candidate.id, 8)}`,
     shortId: plainLabel(candidate.id.slice(0, 8), 8),
     providerLabel: providerLabel(candidate), updatedAt: candidate.updatedAt, updatedLabel: updatedLabel(candidate.updatedAt),
-    metadataStatus: 'deferred', reason: '选中后读取名称与最近对话',
+    metadataStatus: 'deferred', reason: t('the name and latest message are read once chosen', '选中后读取名称与最近对话'),
   });
   const read = (candidate: SessionCandidate): Promise<SessionPickerEntry> => {
     const key = cacheKey(candidate);
@@ -101,11 +102,11 @@ export function createSessionPickerMetadata(options: SessionPickerOptions = {}):
         const latest = latestConversation(data);
         return { ...fallback, title: plainLabel(data.title, 120) || fallback.title,
           updatedAt: after.mtimeMs, updatedLabel: updatedLabel(after.mtimeMs), ...latest,
-          metadataStatus: 'ready', reason: latest.latestText ? undefined : '未取得可读的公开对话正文' };
+          metadataStatus: 'ready', reason: latest.latestText ? undefined : t('no readable message found', '未取得可读的公开对话正文') };
       } catch {
         // No path, record body, raw exception or inferred session identity enters
         // this fallback. Selecting later still revalidates through loadSession.
-        return { ...fallback, metadataStatus: 'unavailable', reason: '暂时无法核对会话内容' };
+        return { ...fallback, metadataStatus: 'unavailable', reason: t('the session cannot be checked for now', '暂时无法核对会话内容') };
       }
     })();
     cache.set(key, pending);
@@ -122,12 +123,12 @@ export function createSessionPickerMetadata(options: SessionPickerOptions = {}):
       try {
         const info = await lstat(candidate.file);
         if (!info.isFile() || info.isSymbolicLink()) {
-          result[index] = { ...result[index], metadataStatus: 'unavailable', reason: '暂时无法核对会话内容' }; continue;
+          result[index] = { ...result[index], metadataStatus: 'unavailable', reason: t('the session cannot be checked for now', '暂时无法核对会话内容') }; continue;
         }
         if (info.size > 64 * 1024 * 1024 || info.size > maxBytes - reservedBytes) continue;
         reservedBytes += info.size;
         jobs.push({ index, candidate });
-      } catch { result[index] = { ...result[index], metadataStatus: 'unavailable', reason: '暂时无法核对会话内容' }; }
+      } catch { result[index] = { ...result[index], metadataStatus: 'unavailable', reason: t('the session cannot be checked for now', '暂时无法核对会话内容') }; }
     }
     let next = 0;
     await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {

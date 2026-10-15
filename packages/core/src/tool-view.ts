@@ -1,5 +1,6 @@
 import { exploreText } from './command-line';
 import { shellReadRange, shellReadTargets, skillPath, summarizeShell, execCommandHint, type ActionType } from './actions';
+import { t } from './i18n';
 
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -35,7 +36,7 @@ const lines = (path: string, start?: number, end?: number): string =>
 
 function readView(paths: string[], range?: { start?: number; end?: number }): ToolView {
   const skills = paths.map(skillPath);
-  if (skills.every(Boolean)) return { name: 'Skill', label: `${skills.join('、')} · 读取定义`, type: 'SKILL', paths };
+  if (skills.every(Boolean)) return { name: 'Skill', label: `${skills.join(t(', ', '、'))} · ${t('read its definition', '读取定义')}`, type: 'SKILL', paths };
   if (paths.every(path => /(?:^|\/)(?:AGENTS|CLAUDE)\.md$/.test(path))) return { name: 'Instructions', label: paths.map(basename).join('、'), type: 'READ', paths };
   if (paths.every(path => /(?:^|\/)(?:MEMORY|memory_summary)\.md$/.test(path) || /\/(?:\.codex\/memories|\.claude\/[^\s]*memory)\//.test(path))) return { name: 'Memory', label: paths.map(basename).join('、'), type: 'READ', paths };
   return { name: 'Read', label: paths.length === 1 && range ? lines(paths[0], range.start, range.end) : paths.map(basename).join('、'), type: 'READ', paths };
@@ -87,7 +88,7 @@ export function toolView(rawName: string, input: unknown): ToolView {
     // A command that only reads, searches or lists files goes by that tool's name, as Codex names it.
     const explored = command ? exploreText(command, '', '') : undefined;
     if (explored) return { name: explored.tool, label: compact(text(args.description)) || explored.text, type: explored.tool === 'Read' ? 'READ' : 'SEARCH' };
-    return { name: 'Bash', label: compact(text(args.description)) || (command ? summarizeShell(command) : '命令未记录'), type: 'BASH' };
+    return { name: 'Bash', label: compact(text(args.description)) || (command ? summarizeShell(command) : t('command not recorded', '命令未记录')), type: 'BASH' };
   }
   if (name === 'Read' && text(args.file_path)) {
     const offset = typeof args.offset === 'number' ? args.offset : undefined, limit = typeof args.limit === 'number' ? args.limit : undefined;
@@ -110,21 +111,21 @@ export function toolView(rawName: string, input: unknown): ToolView {
   if (['Edit', 'Write', 'apply_patch'].includes(name)) return { name: 'Write', label: basename(text(args.file_path)), type: 'WRITE' };
   if (name === 'exec') {
     const hint = execCommandHint(text(input));
-    return { name: 'Script', label: hint ? /\[cmd:/.test(hint) ? '调用 Bash · 动态参数' : '调用 Bash · ' + hint.replace(/^\[|\]$/g, '') : '运行工具编排脚本', type: 'TOOL' };
+    return { name: 'Script', label: hint ? /\[cmd:/.test(hint) ? t('calls Bash · dynamic arguments', '调用 Bash · 动态参数') : t('calls Bash · ', '调用 Bash · ') + hint.replace(/^\[|\]$/g, '') : t('runs a tool script', '运行工具编排脚本'), type: 'TOOL' };
   }
-  const goals: Record<string, string> = { get_goal: '查看目标', create_goal: '设定目标', update_goal: '更新目标' };
+  const goals: Record<string, string> = { get_goal: t('view the goal', '查看目标'), create_goal: t('set the goal', '设定目标'), update_goal: t('update the goal', '更新目标') };
   if (goals[name]) return { name: 'Goal', label: compact([goals[name], text(args.objective) || text(args.status)].filter(Boolean).join(' · ')), type: 'TOOL', operation: goals[name] };
-  if (['update_plan', 'TodoWrite'].includes(name)) return { name: 'Plan', label: text(args.explanation) || '更新计划', type: 'TOOL' };
-  if (['wait', 'write_stdin'].includes(name)) return { name: 'Terminal', label: text(args.chars) ? '输入 · ' + compact(keys(text(args.chars))) : '读取后续输出', type: 'WAIT' };
+  if (['update_plan', 'TodoWrite'].includes(name)) return { name: 'Plan', label: text(args.explanation) || t('update the plan', '更新计划'), type: 'TOOL' };
+  if (['wait', 'write_stdin'].includes(name)) return { name: 'Terminal', label: text(args.chars) ? t('type · ', '输入 · ') + compact(keys(text(args.chars))) : t('read more output', '读取后续输出'), type: 'WAIT' };
   if (name === 'SendMessage') return { name, label: compact([text(args.to), text(args.message) || text(args.summary)].filter(Boolean).join(' · ')), type: 'AGENT' };
   if (['request_user_input', 'request_user_input_async', 'AskUserQuestion'].includes(name)) return { name: 'Ask', label: compact(Array.isArray(args.questions) ? args.questions.map(value => text(object(value).question) || text(object(value).title)).join('；') : ''), type: 'ASK' };
   const agent = /^(?:collaboration[._/]+)?(spawn_agent|followup_task|send_message|interrupt_agent|list_agents|wait_agent)$/.exec(name);
   if (agent || ['Agent', 'Task'].includes(name)) {
-    const verbs: Record<string, string> = { spawn_agent: '分派', followup_task: '继续', send_message: '发送消息', interrupt_agent: '中断', list_agents: '查看子任务', wait_agent: '等待子任务' };
+    const verbs: Record<string, string> = { spawn_agent: t('start', '分派'), followup_task: t('continue', '继续'), send_message: t('message', '发送消息'), interrupt_agent: t('interrupt', '中断'), list_agents: t('list subagents', '查看子任务'), wait_agent: t('wait for subagents', '等待子任务') };
     return { name: 'Agent', label: compact([agent ? verbs[agent[1]] : '', text(args.description) || text(args.task_name) || text(args.target)].filter(Boolean).join(' · ')), type: 'AGENT' };
   }
   if (name === 'view_image') return { name: 'Image', label: basename(text(args.path)), type: 'IMAGE' };
-  if (name === 'clock__curr_time') return { name: 'Clock', label: '读取当前时间', type: 'TOOL' };
+  if (name === 'clock__curr_time') return { name: 'Clock', label: t('read the current time', '读取当前时间'), type: 'TOOL' };
   const mcp = /^mcp__(.+?)(?:__|\.)(.+)$/.exec(name);
   if (mcp) {
     let [, server, operation] = mcp;
@@ -133,8 +134,8 @@ export function toolView(rawName: string, input: unknown): ToolView {
     if (connected) [, server, operation] = connected;
     const title = text(args.title) || text(args.description);
     const target = ['query', 'url', 'path', 'search', 'pattern', 'target', 'id'].map(key => text(args[key])).find(Boolean) || '';
-    if (server === 'cua_repl') return { name: 'Computer', label: compact(title || (operation === 'js' ? '执行 JavaScript' : humanize(operation))), type: 'TOOL', operation };
-    if (server === 'node_repl') return { name: 'JS', label: compact(title || (operation === 'js' ? '运行代码' : '重置运行环境')), type: 'TOOL', operation };
+    if (server === 'cua_repl') return { name: 'Computer', label: compact(title || (operation === 'js' ? t('run JavaScript', '执行 JavaScript') : humanize(operation))), type: 'TOOL', operation };
+    if (server === 'node_repl') return { name: 'JS', label: compact(title || (operation === 'js' ? t('run code', '运行代码') : t('reset the runtime', '重置运行环境'))), type: 'TOOL', operation };
     const app = mcpApp(server);
     return { name: app, label: compact([mcpOperation(app, operation), title || site(target) || text(args.action)].filter(Boolean).join(' · ')), type: 'TOOL', operation };
   }

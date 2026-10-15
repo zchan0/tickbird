@@ -6,6 +6,7 @@ import { announcedRow, callEnd, callSteps, callText, callTool } from '../../core
 import { shortFileLabels } from '../../core/src/presentation';
 import { partnerOf, partnerRun } from '../../core/src/agent-line';
 import { renderMarkdown } from './markdown';
+import { count, t, times } from '../../core/src/i18n';
 import type { LiveExtras } from '../../core/src/live-extras';
 
 export type { LiveExtras };
@@ -43,7 +44,7 @@ function callHtml(row: ChapterRow, key: string, session: SessionData, live: bool
   const words = callText(row, session);
   const end = callEnd(row, session, live);
   const state = end?.kind === 'failed' ? 'failed' : end?.kind === 'empty' ? 'empty' : view.out || row.running ? 'running' : 'info';
-  const label = words.text + (row.count > 1 ? ` · ${row.count} 次` : '');
+  const label = words.text + (row.count > 1 ? ` · ${times(row.count)}` : '');
   const tail = (words.more ? `<span class="cmore">+${words.more}</span>` : '')
     + (end?.kind === 'failed' ? `<span class="cbad" title="${escapeHtml(end.reason)}">${escapeHtml(end.word)}</span>`
       : end?.kind === 'empty' ? '<span class="cnote">no match</span>'
@@ -53,14 +54,14 @@ function callHtml(row: ChapterRow, key: string, session: SessionData, live: bool
   const out = view.out && asking ? ' data-ask' : '';
   const copy = `<span class="cbranch" aria-hidden="true">${out ? '?' : ''}</span>`
     + `<span class="clabel${words.command ? ' command' : ''}">${escapeHtml(label)}</span>${tail}`;
-  const title = [callTool(row, session), label, end?.kind === 'failed' ? `${end.word} ${end.reason}`.trim() : '', view.out || row.running ? '进行中' : '', row.openable ? '' : unavailable(row.items)].filter(Boolean).join(' · ');
+  const title = [callTool(row, session), label, end?.kind === 'failed' ? `${end.word} ${end.reason}`.trim() : '', view.out || row.running ? t('running', '进行中') : '', row.openable ? '' : unavailable(row.items)].filter(Boolean).join(' · ');
   const tool = escapeHtml(callTool(row, session));
   const body = row.openable
     ? `<div class="crow node-button" role="button" tabindex="0" data-item-id="${escapeHtml(row.id)}" data-tool="${tool}" data-status="${state}"${out} aria-pressed="false" title="${escapeHtml(title)}">${copy}</div>`
     : `<div class="crow" data-tool="${tool}" data-status="${state}"${out} role="group" aria-label="${escapeHtml(title)}">${copy}</div>`;
   // A question's chosen answers, under it on the tree.
   const choices = (view.choices ?? []).map(choice => {
-    const chosen = choice.chosen.length ? choice.chosen.map(value => `<b class="cchoice">✓ ${escapeHtml(value)}</b>`).join('') : choice.waiting ? '<i class="cwaiting">等待你的选择</i>' : '';
+    const chosen = choice.chosen.length ? choice.chosen.map(value => `<b class="cchoice">✓ ${escapeHtml(value)}</b>`).join('') : choice.waiting ? `<i class="cwaiting">${t('waiting for your choice', '等待你的选择')}</i>` : '';
     return chosen ? `<div class="cchoices">${choice.header ? `<i class="cq">${escapeHtml(choice.header)}</i>` : ''}${chosen}</div>` : '';
   }).join('');
   return `<li class="crow-item" data-observation-key="${escapeHtml(key)}">${body}${choices}</li>`;
@@ -113,7 +114,7 @@ function callsHtml(all: ChapterRow[], key: string, session: SessionData, live: b
  */
 function agentsHtml(rows: ChapterRow[], key: string, rowKey: string, session: SessionData, unavailable: ChapterRenderers['unavailable']): string {
   const run = partnerRun(rows, session, Date.now());
-  const states: Record<string, string> = { running: '运行中', done: '已完成', failed: '失败', stopped: '已停止' };
+  const states: Record<string, string> = { running: t('running', '运行中'), done: t('done', '已完成'), failed: t('failed', '失败'), stopped: t('stopped', '已停止') };
   const items = rows.map((row, index) => {
     const line = run.lines[index];
     const state = line.state;
@@ -151,7 +152,7 @@ function changesHtml(files: ChangedFile[], turnKey: string): string {
   const rows = files.map((file, index) => `<li data-observation-key="${escapeHtml(file.id)}"><div class="cfile node-button" role="button" tabindex="0" data-item-id="${escapeHtml(file.id)}" data-path="${escapeHtml(file.path)}" aria-pressed="false" title="${escapeHtml(file.path)}">`
     + `<span class="cmark" data-mark="${file.mark}">${file.mark}</span><span class="cname">${escapeHtml(names[index] || base(file.path))}</span><span class="csize">${size(file.added, file.removed)}</span></div></li>`).join('');
   return `<details class="cfold cchanges" data-fold="changes:${escapeHtml(turnKey)}" data-observation-key="changes:${escapeHtml(turnKey)}"><summary>${label('Changes')}`
-    + `<span class="fline"><span class="ftext">${files.length} 个文件 <span class="csize">${size(added, removed)}</span>${partial ? '<span class="cnote">等</span>' : ''}</span><span class="fchev" aria-hidden="true">▾</span></span></summary>`
+    + `<span class="fline"><span class="ftext">${count(files.length, 'file', 'files', '个文件')} <span class="csize">${size(added, removed)}</span>${partial ? `<span class="cnote">${t('and more', '等')}</span>` : ''}</span><span class="fchev" aria-hidden="true">▾</span></span></summary>`
     + `<ol class="cfiles">${rows}</ol></details>`;
 }
 
@@ -180,7 +181,7 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { 
   const waiting = latest && !turn.ended && extras.approval;
   const open = live || Boolean(waiting);
   const words = (item: TimelineItem) => `<div class="csay" data-observation-key="say:${escapeHtml(item.id)}" data-text-id="${escapeHtml(item.id)}" data-status="${escapeHtml(item.status)}">`
-    + `${item.status === 'failed' ? '<span class="availability">失败</span>' : ''}${renderMarkdown(render.publicBody(item))}${render.attachments(item)}</div>`;
+    + `${item.status === 'failed' ? `<span class="availability">${t('failed', '失败')}</span>` : ''}${renderMarkdown(render.publicBody(item))}${render.attachments(item)}</div>`;
   const segmentHtml = (segment: TurnSegment) => {
     if (segment.kind === 'answer') return `<li class="cseg" data-observation-key="${escapeHtml(segment.item.id)}">${words(segment.item)}</li>`;
     // Your own words sent during the turn: a prompt too.
@@ -202,7 +203,7 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { 
     const [tool, what] = waitingFor(waiting);
     end = `<li class="cseg tend awaiting" data-observation-key="live-tail:${escapeHtml(group.key)}">${label('Needs approval', 'yellow')}`
       + `${tool ? `<div class="cwait-what"><b>${escapeHtml(tool)}</b>${what ? ` · ${escapeHtml(what.replace(/\s+/g, ' '))}` : ''}</div>` : ''}`
-      + `<div class="cnote">在 ${session.provider === 'claude' ? 'Claude Code' : 'Codex'} 里选择批准或拒绝。</div></li>`;
+      + `<div class="cnote">${t(`Approve or deny in ${session.provider === 'claude' ? 'Claude Code' : 'Codex'}.`, `在 ${session.provider === 'claude' ? 'Claude Code' : 'Codex'} 里选择批准或拒绝。`)}</div></li>`;
   } else if (live) {
     // The agent works out its next step: a dot breathes where the answer will come. The client hides it while what came last is still appearing.
     end = `<li class="cseg tend live-tail" data-observation-key="live-tail:${escapeHtml(group.key)}"><span class="cbranch"><span class="cspin"></span></span><span class="cquiet" data-live-verb=""></span><span class="cquiet" data-since=""></span></li>`;
@@ -219,14 +220,14 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { 
   const started = clock(turn.start);
   const background = backgroundLine(session);
   return `<section class="turn-panel chapter-turn" data-turn-panel="${escapeHtml(group.key)}" data-ordinal="${ordinal}"${live ? ` data-last-at="${escapeHtml(turn.lastAt)}"` : ''} aria-label="${escapeHtml(view.label)}">`
-    + `<header class="turn-heading">${group.turnId ? `<b>第 ${ordinal} 轮</b><span class="tsub"> / 共 <span data-turn-total>${ordinal}</span> 轮${started ? ` · ${started}` : ''}</span>` : '<span class="tsub">未归属回合的记录</span>'}</header>`
+    + `<header class="turn-heading">${group.turnId ? t(`<b>Turn ${ordinal}</b><span class="tsub"> of <span data-turn-total>${ordinal}</span>${started ? ` · ${started}` : ''}</span>`, `<b>第 ${ordinal} 轮</b><span class="tsub"> / 共 <span data-turn-total>${ordinal}</span> 轮${started ? ` · ${started}` : ''}</span>`) : `<span class="tsub">${t('Records outside any turn', '未归属回合的记录')}</span>`}</header>`
     + prompt
     + `<ol class="cstream">${stream}${draft}${announced}${end}</ol>`
     + closing
     + (open ? '' : changesHtml(turn.files, group.key))
     // Over, but tasks it left running have not reported back. Shown only while the agent reports its state (live-client).
     + (latest && !open && background ? `<p class="tbackground" data-observation-key="background:${escapeHtml(group.key)}">${escapeHtml(background)}</p>` : '')
-    + (turn.segments.length || end ? '' : '<p class="empty">暂未取得本轮过程。</p>')
+    + (turn.segments.length || end ? '' : `<p class="empty">${t('No process recorded for this turn yet.', '暂未取得本轮过程。')}</p>`)
     + `<div class="turn-content-end" aria-hidden="true"></div></section>`;
 }
 

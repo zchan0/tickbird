@@ -88,6 +88,26 @@
           "name": "过程"
         }
       ]
+    },
+    "configuration": {
+      "title": "Tickbird",
+      "properties": {
+        "tickbird.language": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "en",
+            "zh"
+          ],
+          "enumDescriptions": [
+            "VS Code's display language",
+            "English",
+            "中文"
+          ],
+          "default": "auto",
+          "description": "The language of Tickbird's pages. Reload the window after a change."
+        }
+      }
     }
   },
   "scripts": {

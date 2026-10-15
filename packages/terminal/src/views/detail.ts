@@ -15,6 +15,7 @@ import { MARGIN, turnBody, type PageContext } from './turn-page';
 import { visibleTurnGroups } from '../../../core/src/outline';
 import { publicBody, turnView } from '../../../core/src/turn-view';
 import type { Capabilities } from '../caps';
+import { count, t } from '../../../core/src/i18n';
 
 /**
  * A call opened in the pane: a read shows the file as read, a change shows the
@@ -220,7 +221,7 @@ function subagentDoc(row: ChapterRow, subagent: SessionData, width: number, caps
   const lines = foldable && !promptOpen ? cut : full;
   const word = running ? 'running' : row.outcome ? outcomeWord(row.outcome) : '';
   return { kind: 'call', title: row.label || 'Agent', meta: ['Agent', word].filter(Boolean).join(' · '),
-    copy: { text: view.turn.request ? publicBody(view.turn.request) : row.label, what: '任务' }, lines,
+    copy: { text: view.turn.request ? publicBody(view.turn.request) : row.label, what: t('task', '任务') }, lines,
     ...(foldable ? { fold: { open: promptOpen, lines: promptEnd(lines) } } : {}) };
 }
 
@@ -243,11 +244,11 @@ export function detailDoc({ session, group, row, width, glyph, edit, background,
   });
   if (reads.length && reads.every(Boolean)) {
     const first = reads[0]!;
-    const range = (reading: FileReading) => reading.start !== undefined ? `第 ${reading.start}–${reading.start + reading.lines.length - 1} 行` : `${reading.lines.length} 行`;
-    const blocks = reads.map((reading, index) => [...(reads.length > 1 ? [section(`第 ${index + 1} 次读取 · ${range(reading!)}`)] : []), ...fileLines(reading!, width, glyph)]);
+    const range = (reading: FileReading) => reading.start !== undefined ? t(`lines ${reading.start}–${reading.start + reading.lines.length - 1}`, `第 ${reading.start}–${reading.start + reading.lines.length - 1} 行`) : count(reading.lines.length, 'line', 'lines', '行');
+    const blocks = reads.map((reading, index) => [...(reads.length > 1 ? [section(t(`Read ${index + 1} · ${range(reading!)}`, `第 ${index + 1} 次读取 · ${range(reading!)}`))] : []), ...fileLines(reading!, width, glyph)]);
     return {
       kind: 'file', title: base(first.path), directory: dir(shown(first.path, session)), path: absolute(first.path, session), line: first.start ?? 1,
-      meta: `${tool} · ${reads.length > 1 ? `${reads.length} 次读取` : range(first)}`, copy: { text: absolute(first.path, session), what: '路径' }, lines: join2(blocks),
+      meta: `${tool} · ${reads.length > 1 ? count(reads.length, 'read', 'reads', '次读取') : range(first)}`, copy: { text: absolute(first.path, session), what: t('path', '路径') }, lines: join2(blocks),
     };
   }
 
@@ -262,16 +263,16 @@ export function detailDoc({ session, group, row, width, glyph, edit, background,
     const current = changes[index] ?? { row, file: files[0] };
     const shownFiles = changes.length ? [current.file] : files;
     const failed = current.row.outcome ? ` · ${outcomeWord(current.row.outcome)}` : '';
-    const what = current.file.operation === 'write' ? ` · 写入 ${current.file.lines.length} 行` : '';
+    const what = current.file.operation === 'write' ? ` · ${t(`wrote ${count(current.file.lines.length, 'line', 'lines', '')}`, `写入 ${current.file.lines.length} 行`)}` : '';
     const outputs = current.row.items.flatMap(item => presentEvidence(item).outputs).filter(block => block.label === '修改返回错误' || current.row.outcome);
     return {
       kind: 'diff', title: base(path), directory: dir(shown(path, session)), path: absolute(path, session),
-      meta: `${current.row.tool === 'Write' && current.file.operation === 'update' ? 'Edit' : current.row.tool}${changes.length > 1 ? ` · 第 ${index + 1} 次 / 共 ${changes.length} 次` : what}${failed}`,
-      copy: { text: absolute(path, session), what: '路径' },
+      meta: `${current.row.tool === 'Write' && current.file.operation === 'update' ? 'Edit' : current.row.tool}${changes.length > 1 ? ` · ${t(`change ${index + 1} of ${changes.length}`, `第 ${index + 1} 次 / 共 ${changes.length} 次`)}` : what}${failed}`,
+      copy: { text: absolute(path, session), what: t('path', '路径') },
       ...(changes.length > 1 ? { edits: { index, total: changes.length } } : {}),
       lines: join2([
         ...shownFiles.map((file, n) => [...(shownFiles.length > 1 || n ? [[{ text: ' ' + shown(file.path, session), style: { bold: true } } as Span]] : []), ...diffLines(file, width, glyph, background)]),
-        outputs.length ? [section('返回'), ...codePanel(outputs.map(block => block.text ?? '').join('\n'), undefined, width, glyph)] : [],
+        outputs.length ? [section(t('Output', '返回')), ...codePanel(outputs.map(block => block.text ?? '').join('\n'), undefined, width, glyph)] : [],
       ]),
     };
   }
@@ -285,15 +286,15 @@ export function detailDoc({ session, group, row, width, glyph, edit, background,
     const state = parents.length === 1 ? row.outcome : undefined;
     return [
       [...(parents.length > 1 ? [section(describeDisplayAction(record).label)] : []),
-        ...(presentation.calls.some(call => call.contents.length) ? [section('输入'), ...presentation.calls.flatMap(call => inputLines(call.contents, width, glyph))] : [])],
-      outputs.length ? [section(`返回${state ? ' · ' + outcomeWord(state) : ''}`), ...outputLines(outputs, width, glyph)]
-        : [[{ text: ' ' + (record.status === 'running' ? '还没有返回' : '没有记录返回内容'), style: DIM }]],
+        ...(presentation.calls.some(call => call.contents.length) ? [section(t('Input', '输入')), ...presentation.calls.flatMap(call => inputLines(call.contents, width, glyph))] : [])],
+      outputs.length ? [section(`${t('Output', '返回')}${state ? ' · ' + outcomeWord(state) : ''}`), ...outputLines(outputs, width, glyph)]
+        : [[{ text: ' ' + (record.status === 'running' ? t('No output yet', '还没有返回') : t('No output recorded', '没有记录返回内容')), style: DIM }]],
     ];
   });
   const command = calls.map(call => { const args = call.input as Record<string, unknown>; return typeof args?.command === 'string' ? args.command : typeof args?.cmd === 'string' ? args.cmd : ''; }).filter(Boolean).join('\n');
   return {
     kind: 'call', title: row.label || tool, meta: [tool, word].filter(Boolean).join(' · '),
-    copy: command ? { text: command, what: '命令' } : { text: row.label, what: '标签' }, lines: join2(blocks),
+    copy: command ? { text: command, what: t('command', '命令') } : { text: row.label, what: t('label', '标签') }, lines: join2(blocks),
   };
 }
 

@@ -30,6 +30,8 @@ const { wrapSpans } = dist('packages/terminal/src/views/prose.js');
 const { spans, cutLine } = dist('packages/terminal/src/screen.js');
 const { charWidth } = dist('packages/terminal/src/width.js');
 const { renderSidecar } = dist('packages/vscode/src/render.js');
+// The README's pictures are in English.
+dist('packages/core/src/i18n.js').setLanguage('en');
 
 const FPS = 10, END = 13300, HOLD = 3500;
 const LEFT = 62, RIGHT = 48, ROWS = 32, CW = 9, CH = 20, PAD = 16, TITLE = 30;

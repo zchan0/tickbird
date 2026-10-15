@@ -15,6 +15,7 @@ import { renderCode, renderFile } from './code';
 import { diffRows } from '../../core/src/call-target';
 import type { PatchFile } from '../../core/src/presentation';
 import { uiLabel } from './labels';
+import { count, language, t } from '../../core/src/i18n';
 import { publicBody, publicBodyLabels } from '../../core/src/turn-view';
 
 export interface SidecarRenderOptions {
@@ -43,7 +44,7 @@ export interface DetailRenderOptions { item: TimelineItem; items?: TimelineItem[
  */
 export function renderSubagentTurn(session: SessionData, running: boolean, locale?: string): string {
   const group = visibleTurnGroups(session)[0];
-  if (!group) return '<p class="empty">子任务还没有记录。</p>';
+  if (!group) return `<p class="empty">${t('The subagent has no records yet.', '子任务还没有记录。')}</p>`;
   return renderTurn(group, session, locale, running, undefined, true)
     // The page's only turn: current, as the panel marks the turn on screen.
     .replace('<section class="turn-panel', `<section data-current${running ? ' data-fresh' : ''} class="turn-panel`)
@@ -82,7 +83,7 @@ function unavailableReason(items: TimelineItem[]): string {
   const item = items.find(record => record.availability === 'unavailable');
   if (!item) return '';
   const explanation = item.detail?.notice || (item.summary !== item.title ? item.summary : '');
-  return `未取得可读的记录内容${explanation ? `：${explanation.replace(/\s+/g, ' ').trim().slice(0, 160)}` : '；可在覆盖记录中核对来源。'}`;
+  return `${t('No readable record', '未取得可读的记录内容')}${explanation ? `${t(': ', '：')}${explanation.replace(/\s+/g, ' ').trim().slice(0, 160)}` : t('; check the source in the coverage records.', '；可在覆盖记录中核对来源。')}`;
 }
 
 const styles = `
@@ -461,6 +462,8 @@ const styles = `
 `;
 
 const script = `(() => {
+  // What the page's scripts say, in the page's language (clientText).
+  const TEXT = __TB_TEXT__;
   const vscode = acquireVsCodeApi();
   const sidecar = document.querySelector('.sidecar');
   const timeline = document.querySelector('.timeline');
@@ -673,8 +676,8 @@ const script = `(() => {
     const status = document.querySelector('[data-keep-status]');
     if (!button || !status) return;
     button.disabled = true;
-    button.textContent = '已保留';
-    status.textContent = '已保留';
+    button.textContent = TEXT.kept;
+    status.textContent = TEXT.kept;
   });
   ${liveClient}
   // Calls folded under an earlier chapter stay as the reader left them, across updates and reloads.
@@ -724,6 +727,22 @@ const script = `(() => {
   else ready();
 })();`;
 
+/** The words the page's scripts set themselves (live-client, follow-client), in the page's language. */
+const clientText = () => ({
+  kept: t('Kept', '已保留'),
+  follow: t('↓ Follow', '↓ 跟随'),
+  followTitle: t('Following paused: go to the end of the newest turn and follow it again', '已暂停跟随：回到最新一轮的末尾，恢复跟随'),
+  inOrder: t('In the order it happened', '轮内按发生顺序'),
+  followPaused: t('Following paused', '已暂停跟随'),
+  minutes: t(' min', ' 分钟'), hours: t(' h', ' 小时'),
+  noNewRecords: t('No new records', '无新记录'),
+  running: t('Running', '运行中'),
+  paused: t('Paused', '已暂停'),
+  workspaceChanged: t('The workspace changed, so reading stopped. Choose this project\'s session again.', '工作区已改变，已停止读取。请重新选择当前项目会话。'),
+  sourceReplaced: t('The session\'s source was replaced or rewritten, so reading paused; what is shown stays. Refresh to check it again.', '会话来源发生替换或改写，已暂停；保留当前内容。可刷新后重新核验。'),
+  unreadable: t('The session cannot be read for now, so reading paused; what is shown stays. Refresh to try again.', '暂时无法读取会话，已暂停；保留当前内容。可刷新后重试。'),
+});
+
 /** The fonts every page is drawn in until the next change (fonts.ts); the extension sets them from VS Code's settings. */
 let fonts: Record<string, string> = {};
 export function setFonts(variables: Record<string, string>): void { fonts = variables; }
@@ -732,7 +751,7 @@ function documentHtml(title: string, body: string, nonce: string, sessionId = ''
   const pageStyles = styles + chapterStyles + (Object.keys(fonts).length ? `:root { ${fontDeclarations(fonts)} }` : '');
   if (!/^[A-Za-z0-9+/_=-]+$/.test(nonce)) throw new Error('Invalid webview CSP nonce');
   const csp = `default-src 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'`;
-  return `<!DOCTYPE html><html lang="${escapeHtml(locale)}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="${escapeHtml(csp)}"><title>${escapeHtml(title)}</title><style nonce="${nonce}">${pageStyles}</style></head><body data-session-id="${escapeHtml(sessionId)}">${body}<script nonce="${nonce}">${script}</script></body></html>`;
+  return `<!DOCTYPE html><html lang="${language() === 'zh' ? 'zh-CN' : 'en'}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="${escapeHtml(csp)}"><title>${escapeHtml(title)}</title><style nonce="${nonce}">${pageStyles}</style></head><body data-session-id="${escapeHtml(sessionId)}">${body}<script nonce="${nonce}">${script.replace('__TB_TEXT__', () => JSON.stringify(clientText()).replace(/</g, '\\u003c'))}</script></body></html>`;
 }
 
 const isCompaction = (item: TimelineItem) => item.kind === 'notice' && (item.noticeType === 'context-compacted' || item.title === '上下文已压缩');
@@ -863,9 +882,9 @@ function renderAttachments(item: TimelineItem): string {
 function renderRequest(item: TimelineItem): string {
   const extras = item.detail?.blocks.some(block => !(block.kind === 'text' && publicBodyLabels.has(block.label)));
   const more = canOpen(item)
-    ? `<button type="button" class="question-more" data-item-id="${escapeHtml(item.id)}" data-open-text${extras ? ' data-always' : ''} aria-pressed="false"${extras ? '' : ' hidden'}>展开全文</button>`
-    : '<button type="button" class="question-more" data-toggle-text aria-expanded="false" hidden>展开全文</button>';
-  return `<section class="turn-question" data-text-id="${escapeHtml(item.id)}" aria-label="用户问题"><div class="question-text">${renderUserText(publicBody(item))}</div><div class="question-foot">${more}</div></section>`;
+    ? `<button type="button" class="question-more" data-item-id="${escapeHtml(item.id)}" data-open-text${extras ? ' data-always' : ''} aria-pressed="false"${extras ? '' : ' hidden'}>${t('Show all', '展开全文')}</button>`
+    : `<button type="button" class="question-more" data-toggle-text aria-expanded="false" hidden>${t('Show all', '展开全文')}</button>`;
+  return `<section class="turn-question" data-text-id="${escapeHtml(item.id)}" aria-label="${t('Your request', '用户问题')}"><div class="question-text">${renderUserText(publicBody(item))}</div><div class="question-foot">${more}</div></section>`;
 }
 
 function renderTurn(group: TurnGroup, session: SessionData, locale?: string, latest = false, extras?: LiveExtras, subagent = false): string {
@@ -884,7 +903,7 @@ function requestFirstSentence(group: TurnGroup): string {
   // These are source words, never a generated title or inferred task summary.
   const request = plainPasted(group.request).trim();
   const sentence = request.match(/^[\s\S]*?(?:[。！？!?]|\.(?=\s|$)|\n|$)/)?.[0].trim() ?? request;
-  return sentence || '未取得本轮问题';
+  return sentence || t('(no request recorded)', '未取得本轮问题');
 }
 
 export function projectSidecar({ projectName, session, locale, live }: Pick<SidecarRenderOptions, 'projectName' | 'session' | 'locale' | 'live'>, cache?: TurnRenderCache): SidecarProjection {
@@ -893,20 +912,20 @@ export function projectSidecar({ projectName, session, locale, live }: Pick<Side
   const turns = groups.filter(group => group.turnId);
   const selected = groups[0];
   const lens = groups.map(group => {
-    const label = group.turnId ? `第 ${group.ordinal} 轮` : '未归属';
+    const label = group.turnId ? t(`Turn ${group.ordinal}`, `第 ${group.ordinal} 轮`) : t('Outside turns', '未归属');
     const requestItem = group.items.find(item => item.kind === 'request');
-    const request = plainPasted(requestItem ? publicBody(requestItem) : group.request).slice(0, 2000) || '未取得本轮问题';
+    const request = plainPasted(requestItem ? publicBody(requestItem) : group.request).slice(0, 2000) || t('(no request recorded)', '未取得本轮问题');
     const title = requestFirstSentence(group);
     return `<button type="button" data-lens-turn-id="${escapeHtml(group.key)}" aria-label="${escapeHtml(`${label} · ${title}`)}" aria-pressed="${group === selected}"><span class="turn-lens-number">${label}</span><span class="turn-lens-request">${escapeHtml(request)}</span></button>`;
   }).join('');
   const warnings = session?.warnings.map(warning => `<p class="notice session-warning">${escapeHtml(warning)}</p>`).join('') ?? '';
-  const name = session?.title.trim() || (session ? `${providerName(session.provider)} · ${session.id.slice(0, 8)}` : '选择会话');
-  const nameSource = session?.titleSource === 'codex-index' ? '名称来自 Codex 会话索引，刷新时重新读取。'
-    : session?.titleSource === 'claude-ai-title' ? '名称来自 Claude 会话记录，刷新时重新读取。'
-    : '当前以首条请求作为会话名称；未取得单独保存的名称。';
-  const identity = session ? `${name}\n${providerName(session.provider)} · ${session.id}\n${projectName} · ${turns.length} 轮\n${nameSource}` : projectName;
-  const empty = session ? groups.length ? '' : '<div class="empty"><h2>暂没有可展示的过程</h2><p>可在覆盖记录中查看来源与未支持项。</p></div>'
-    : '<div class="empty"><h2>选择要观察的会话</h2><p>点标题栏的切换按钮选一个会话；开着接入时，会自动跟随这个窗口里正在进行的会话。</p></div>';
+  const name = session?.title.trim() || (session ? `${providerName(session.provider)} · ${session.id.slice(0, 8)}` : t('Choose a session', '选择会话'));
+  const nameSource = session?.titleSource === 'codex-index' ? t('The name comes from the Codex session index and is read again on refresh.', '名称来自 Codex 会话索引，刷新时重新读取。')
+    : session?.titleSource === 'claude-ai-title' ? t('The name comes from the Claude session record and is read again on refresh.', '名称来自 Claude 会话记录，刷新时重新读取。')
+    : t('The first request stands in as the name; no saved name was found.', '当前以首条请求作为会话名称；未取得单独保存的名称。');
+  const identity = session ? `${name}\n${providerName(session.provider)} · ${session.id}\n${projectName} · ${count(turns.length, 'turn', 'turns', '轮')}\n${nameSource}` : projectName;
+  const empty = session ? groups.length ? '' : `<div class="empty"><h2>${t('Nothing to show yet', '暂没有可展示的过程')}</h2><p>${t('The coverage records list the sources and what is not supported yet.', '可在覆盖记录中查看来源与未支持项。')}</p></div>`
+    : `<div class="empty"><h2>${t('Choose a session to watch', '选择要观察的会话')}</h2><p>${t('Choose one with the switch button in the title bar. With the plugin installed, the view follows the session running in this window.', '点标题栏的切换按钮选一个会话；开着接入时，会自动跟随这个窗口里正在进行的会话。')}</p></div>`;
   const keys = new Set(groups.map(group => group.key));
   if (cache) for (const key of cache.keys()) if (!keys.has(key)) cache.delete(key);
   return { sessionKey: session ? `${session.provider}:${session.id}` : '', name, identity, lens, warnings, empty,
@@ -915,7 +934,7 @@ export function projectSidecar({ projectName, session, locale, live }: Pick<Side
       // Retain only a digest, not another copy of all evidence bodies.
       const latest = group === groups[0];
       const extras = latest ? live : undefined;
-      const digest = cache ? createHash('sha256').update(JSON.stringify([locale, latest, group, extras ?? null])).digest('hex') : '';
+      const digest = cache ? createHash('sha256').update(JSON.stringify([locale, language(), latest, group, extras ?? null])).digest('hex') : '';
       const previous = cache?.get(group.key);
       const html = previous?.digest === digest ? previous.html : renderTurn(group, session!, locale, latest, extras);
       cache?.set(group.key, { digest, html });
@@ -926,29 +945,29 @@ export function projectSidecar({ projectName, session, locale, live }: Pick<Side
 export function renderSidecar({ projectName, session, nonce, streamId = '', locale, live, followPaused = false, integrationHint = false }: SidecarRenderOptions, projection?: SidecarProjection): string {
   const p = projection ?? projectSidecar({ projectName, session, locale, live });
   const nav = (action: string, label: string, glyph: string) => `<button type="button" class="icon-button ph-nav" data-nav="${action}" aria-label="${label}" title="${label}">${glyph}</button>`;
-  const body = `<main class="sidecar" data-observation-stream="${escapeHtml(streamId)}" aria-label="Tickbird 过程观察">
-    <div class="integration-hint"${integrationHint ? '' : ' hidden'}><span>装上 Tickbird 接入后，可以自动跟随当前会话，Agent 等你批准时会显示出来。</span><button type="button" data-action="dismissHint">不再提示</button></div>
-    <div class="integration-hint follow-session"${followPaused ? '' : ' hidden'}><span>自动跟随已暂停：你选了另一个会话。</span><button type="button" data-action="resumeFollow">跟随当前会话</button></div>
+  const body = `<main class="sidecar" data-observation-stream="${escapeHtml(streamId)}" aria-label="${t('Tickbird process view', 'Tickbird 过程观察')}">
+    <div class="integration-hint"${integrationHint ? '' : ' hidden'}><span>${t('With the Tickbird plugin installed, the view follows the current session and shows when the agent waits for your approval.', '装上 Tickbird 接入后，可以自动跟随当前会话，Agent 等你批准时会显示出来。')}</span><button type="button" data-action="dismissHint">${t('Don\'t show again', '不再提示')}</button></div>
+    <div class="integration-hint follow-session"${followPaused ? '' : ' hidden'}><span>${t('Following paused: you chose another session.', '自动跟随已暂停：你选了另一个会话。')}</span><button type="button" data-action="resumeFollow">${t('Follow the current session', '跟随当前会话')}</button></div>
     <div class="observation-problem" hidden></div>
-    <header class="page-head"><span class="ph-turn"></span><span class="ph-aside">${streamId ? '<button type="button" class="ph-follow" data-follow-toggle aria-pressed="true"></button>' : ''}${nav('older', '上一轮 [', '‹')}${nav('newer', '下一轮 ]', '›')}${nav('toc', '目录 t', '☰')}</span></header>
-    <nav class="toc" aria-label="目录（从新到旧）" hidden><div class="toc-head"><b>目录</b><span class="tsub"> 共 <span data-turn-total></span> 轮</span></div><div class="toc-list">${p.lens}</div></nav>
-    <section class="timeline" tabindex="0" aria-label="这一轮的过程"><div data-live-warnings>${p.warnings}</div><div data-live-empty>${p.empty}</div>${p.turns.map(turn => turn.html).join('')}</section>
+    <header class="page-head"><span class="ph-turn"></span><span class="ph-aside">${streamId ? '<button type="button" class="ph-follow" data-follow-toggle aria-pressed="true"></button>' : ''}${nav('older', t('Turn before [', '上一轮 ['), '‹')}${nav('newer', t('Turn after ]', '下一轮 ]'), '›')}${nav('toc', t('Contents t', '目录 t'), '☰')}</span></header>
+    <nav class="toc" aria-label="${t('Contents (newest first)', '目录（从新到旧）')}" hidden><div class="toc-head"><b>${t('Contents', '目录')}</b><span class="tsub">${t(' <span data-turn-total></span> turns', ' 共 <span data-turn-total></span> 轮')}</span></div><div class="toc-list">${p.lens}</div></nav>
+    <section class="timeline" tabindex="0" aria-label="${t('This turn\'s process', '这一轮的过程')}"><div data-live-warnings>${p.warnings}</div><div data-live-empty>${p.empty}</div>${p.turns.map(turn => turn.html).join('')}</section>
     <button type="button" class="new-turn" data-nav="newest" hidden><span class="tlabel" data-tone="yellow">New turn</span><span class="nt-text"></span></button></main>`;
   return documentHtml('Tickbird', body, nonce, p.sessionKey, locale);
 }
 
 /** Workspaces the Tickbird cannot map to one local project directory. */
 export type WorkspaceGap = 'untrusted' | 'empty' | 'multi' | 'remote';
-export const workspaceGaps: Readonly<Record<WorkspaceGap, { title: string; body: string; openFolder?: boolean }>> = {
-  empty: { title: '打开一个项目文件夹', body: 'Tickbird 按项目目录查找 Claude Code 和 Codex 的会话记录；当前窗口还没有打开文件夹。', openFolder: true },
-  multi: { title: '暂不支持多文件夹工作区', body: 'Tickbird 按单个项目目录匹配会话。请在单独的窗口里打开要观察的项目文件夹。' },
-  remote: { title: '暂不支持远程工作区', body: 'Tickbird 目前只读取本机的会话记录，远程工作区的记录在远程机器上。' },
-  untrusted: { title: '需要先信任此工作区', body: '信任后 Tickbird 才读取这个项目的本地会话记录。' },
-};
+export const workspaceGaps = (): Readonly<Record<WorkspaceGap, { title: string; body: string; openFolder?: boolean }>> => ({
+  empty: { title: t('Open a project folder', '打开一个项目文件夹'), body: t('Tickbird finds Claude Code and Codex sessions by project folder, and this window has no folder open.', 'Tickbird 按项目目录查找 Claude Code 和 Codex 的会话记录；当前窗口还没有打开文件夹。'), openFolder: true },
+  multi: { title: t('Multi-folder workspaces are not supported yet', '暂不支持多文件夹工作区'), body: t('Tickbird matches sessions to one project folder. Open the project you want to watch in a window of its own.', 'Tickbird 按单个项目目录匹配会话。请在单独的窗口里打开要观察的项目文件夹。') },
+  remote: { title: t('Remote workspaces are not supported yet', '暂不支持远程工作区'), body: t('Tickbird reads only the session records on this machine; a remote workspace keeps its records on the remote machine.', 'Tickbird 目前只读取本机的会话记录，远程工作区的记录在远程机器上。') },
+  untrusted: { title: t('Trust this workspace first', '需要先信任此工作区'), body: t('Tickbird reads this project\'s local session records only once you trust it.', '信任后 Tickbird 才读取这个项目的本地会话记录。') },
+});
 
 export function renderWorkspaceGap(gap: WorkspaceGap, nonce: string, locale?: string): string {
-  const copy = workspaceGaps[gap];
-  const body = `<main class="workspace-gap" data-workspace-gap="${gap}"><div class="empty"><h2>${escapeHtml(copy.title)}</h2><p>${escapeHtml(copy.body)}</p>${copy.openFolder ? '<button type="button" class="gap-action" data-action="openFolder">打开文件夹…</button>' : ''}</div></main>`;
+  const copy = workspaceGaps()[gap];
+  const body = `<main class="workspace-gap" data-workspace-gap="${gap}"><div class="empty"><h2>${escapeHtml(copy.title)}</h2><p>${escapeHtml(copy.body)}</p>${copy.openFolder ? '<button type="button" class="gap-action" data-action="openFolder">' + t('Open Folder…', '打开文件夹…') + '</button>' : ''}</div></main>`;
   return documentHtml('Tickbird', body, nonce, '', locale);
 }
 
@@ -1179,6 +1198,6 @@ export function renderDetail({ item, items, provider, kept, nonce, locale, chang
     : records
     ? `${records.map((record) => `<section class="evidence-record" data-source-item-id="${escapeHtml(record.id)}">${multiple ? `<header class="evidence-record-heading"><h2>${escapeHtml(describeDisplayAction(record).label)}</h2>${detailState(record)}</header>` : ''}${evidenceContent(record)}</section>`).join('')}`
     : evidenceContent(item));
-  const body = `<main class="detail" aria-label="过程证据详情"><header class="toolbar"><span class="detail-identity">${providerName(provider)}<span aria-hidden="true">·</span><span data-keep-status>${kept ? '已保留' : '临时预览'}</span></span><button type="button" class="quiet-button" data-action="keep"${kept ? ' disabled' : ''}>${kept ? '已保留' : '保留此页'}</button></header><section class="detail-heading">${change?.edit ? `<div class="edit-steps"><button type="button" class="quiet-button" data-action="olderEdit" title="上一次修改 &lt;"${change.edit.index ? '' : ' disabled'}>‹</button><span>第 ${change.edit.index + 1} 次 / 共 ${change.edit.total} 次</span><button type="button" class="quiet-button" data-action="newerEdit" title="下一次修改 &gt;"${change.edit.index < change.edit.total - 1 ? '' : ' disabled'}>›</button></div>` : ''}<h1>${escapeHtml(change ? change.title : reading ? reading.path.replace(/\\/g, '/').split('/').at(-1) || reading.path : call ? call.label : title)}</h1>${change ? (item.status === 'failed' ? detailState(item) : '') : subagent && call ? `<div class="detail-meta"><b>${escapeHtml(call.tool)}</b>${subagent.running ? ' · 运行中' : call.word ? ` · <span class="detail-bad">${escapeHtml(call.word)}</span>` : ''}</div>` : call ? callMeta(call, all, reading) : multiple ? '' : detailState(records?.[0] ?? item)}</section><div class="detail-content">${content}</div></main>`;
+  const body = `<main class="detail" aria-label="${t('Evidence details', '过程证据详情')}"><header class="toolbar"><span class="detail-identity">${providerName(provider)}<span aria-hidden="true">·</span><span data-keep-status>${kept ? t('Kept', '已保留') : t('Preview', '临时预览')}</span></span><button type="button" class="quiet-button" data-action="keep"${kept ? ' disabled' : ''}>${kept ? t('Kept', '已保留') : t('Keep this page', '保留此页')}</button></header><section class="detail-heading">${change?.edit ? `<div class="edit-steps"><button type="button" class="quiet-button" data-action="olderEdit" title="${t('Change before &lt;', '上一次修改 &lt;')}"${change.edit.index ? '' : ' disabled'}>‹</button><span>${t(`Change ${change.edit.index + 1} of ${change.edit.total}`, `第 ${change.edit.index + 1} 次 / 共 ${change.edit.total} 次`)}</span><button type="button" class="quiet-button" data-action="newerEdit" title="${t('Change after &gt;', '下一次修改 &gt;')}"${change.edit.index < change.edit.total - 1 ? '' : ' disabled'}>›</button></div>` : ''}<h1>${escapeHtml(change ? change.title : reading ? reading.path.replace(/\\/g, '/').split('/').at(-1) || reading.path : call ? call.label : title)}</h1>${change ? (item.status === 'failed' ? detailState(item) : '') : subagent && call ? `<div class="detail-meta"><b>${escapeHtml(call.tool)}</b>${subagent.running ? ` · ${t('running', '运行中')}` : call.word ? ` · <span class="detail-bad">${escapeHtml(call.word)}</span>` : ''}</div>` : call ? callMeta(call, all, reading) : multiple ? '' : detailState(records?.[0] ?? item)}</section><div class="detail-content">${content}</div></main>`;
   return documentHtml(title, body, nonce, item.sessionId, locale);
 }

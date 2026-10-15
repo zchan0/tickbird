@@ -3,6 +3,7 @@ import type { TurnGroup } from './timeline';
 import { chapterTurn, type ChapterRow, type ChapterTurn, type RowOutcome, type TurnSegment } from './chapters';
 import { presentEvidence } from './presentation';
 import { doneVerb, statusVerb } from './verbs';
+import { count, t } from './i18n';
 
 /**
  * What each view says about a turn and its calls, before any markup. The VS
@@ -62,7 +63,7 @@ export function rowView(row: ChapterRow, live: boolean): RowView {
   const output = row.output ? presentEvidence(row.items[0]).outputs.map(block => block.text ?? '').join('\n') : '';
   return {
     tool: row.output ? 'OUT' : row.tool,
-    label: row.output ? `返回内容 · ${output.split(/\r?\n/).length} 行` : row.label || '无记录参数',
+    label: row.output ? `${t('Output', '返回内容')} · ${count(output.split(/\r?\n/).length, 'line', 'lines', '行')}` : row.label || t('No recorded input', '无记录参数'),
     word: row.outcome ? outcomeWord(row.outcome) : '',
     reason: row.outcome?.reason ?? '',
     empty: row.outcome?.kind === 'empty',
@@ -111,7 +112,7 @@ export function turnView(group: TurnGroup, latest: boolean, provider?: Provider)
   const process = turn.segments.slice(0, closing > turn.segments.length ? 0 : closing);
   return {
     turn,
-    label: group.turnId ? `第 ${group.ordinal} 轮` : '未归属回合的记录',
+    label: group.turnId ? t(`Turn ${group.ordinal}`, `第 ${group.ordinal} 轮`) : t('Records outside any turn', '未归属回合的记录'),
     live,
     process,
     answers: turn.segments.slice(process.length),

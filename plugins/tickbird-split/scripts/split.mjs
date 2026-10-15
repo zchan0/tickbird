@@ -24,8 +24,8 @@ import { frontOf } from './front.mjs';
 import { run, which } from './run.mjs';
 
 const LOG_LIMIT = 256 * 1024;
-/** What the pane needs from the agent's environment: a kitty window starts with kitty's own. */
-const PASSED = ['PATH', 'XDG_STATE_HOME', 'VISUAL', 'EDITOR'];
+/** What the pane needs from the agent's environment: a kitty window starts with kitty's own. The locale and TICKBIRD_LANG choose its language. */
+const PASSED = ['PATH', 'XDG_STATE_HOME', 'VISUAL', 'EDITOR', 'TICKBIRD_LANG', 'LC_ALL', 'LC_MESSAGES', 'LANG'];
 
 /** The program this plugin carries, built at each version (npm run bundle:plugin), run with this node. */
 export const BUNDLED = fileURLToPath(new URL('../program/tickbird.cjs', import.meta.url));

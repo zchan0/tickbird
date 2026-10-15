@@ -2,6 +2,7 @@
 import { NONE, probe, symbol, SYMBOLS, type Capabilities, type ProbeIO } from './caps';
 import { describe, InputParser, type InputEvent } from './input';
 import { parseWatchArgs, watch } from './watch';
+import { chooseLanguage, setLanguage } from '../../core/src/i18n';
 import { consoleReport, kitty, setup, uninstall } from './setup';
 import { createInterface } from 'node:readline/promises';
 import { cutLine, enterBytes, leaveBytes, row, Screen, type Color, type Line, type Span } from './screen';
@@ -132,6 +133,8 @@ async function demo(): Promise<void> {
 }
 
 async function main(argv: string[]): Promise<void> {
+  // The pane's language: TICKBIRD_LANG (en or zh) when set, else the terminal's locale.
+  setLanguage(chooseLanguage(process.env.TICKBIRD_LANG, process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG));
   const [command, ...args] = argv;
   if (command === 'caps') return caps(args);
   if (command === 'demo') return demo();

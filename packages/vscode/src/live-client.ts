@@ -173,7 +173,7 @@ export const liveClient = `
     // Only the newest turn, still open in the source, carries data-last-at. Running
     // means records keep coming; a long silence is shown as such, a day-old one not at all.
     const QUIET = 10 * 60 * 1000, GONE = 6 * 60 * 60 * 1000;
-    const span = ms => ms < 3600000 ? Math.max(1, Math.round(ms / 60000)) + ' 分钟' : Math.round(ms / 3600000) + ' 小时';
+    const span = ms => ms < 3600000 ? Math.max(1, Math.round(ms / 60000)) + TEXT.minutes : Math.round(ms / 3600000) + TEXT.hours;
     // Claude Code publishes busy/idle for its session; when it does, that wins over any guess from silence.
     let agentState = '';
     const tickActivity = () => {
@@ -189,18 +189,18 @@ export const liveClient = `
         live.toggleAttribute('data-idle', agentState === 'idle');
         const verb = live.querySelector('[data-live-verb]'), since = live.querySelector('[data-since]');
         // Quiet for long: the spinner gives way to how long it has been. Otherwise the spinner says enough.
-        if (verb) verb.textContent = stale ? '无新记录' : '';
+        if (verb) verb.textContent = stale ? TEXT.noNewRecords : '';
         if (since) since.textContent = stale ? ' · ' + span(quiet) : '';
       }
       if (status && status.dataset.state !== 'paused') {
         const state = !live || gone ? '' : stale ? 'quiet' : 'running';
         status.dataset.state = state;
-        status.textContent = state === 'running' ? '运行中' : state === 'quiet' ? '无新记录 · ' + span(quiet) : '';
+        status.textContent = state === 'running' ? TEXT.running : state === 'quiet' ? TEXT.noNewRecords + ' · ' + span(quiet) : '';
       }
     };
     setInterval(tickActivity, 1000);
     const pause = text => {
-      if (status) { status.textContent = '已暂停'; status.dataset.state = 'paused'; }
+      if (status) { status.textContent = TEXT.paused; status.dataset.state = 'paused'; }
       if (problem) { problem.textContent = text; problem.hidden = false; }
     };
     const resync = () => {
@@ -211,7 +211,7 @@ export const liveClient = `
     window.addEventListener('message', event => {
       const message = event.data;
       if (!message || typeof message !== 'object') return;
-      if (message.type === 'workspaceChanged') { scopeStopped = true; pause('工作区已改变，已停止读取。请重新选择当前项目会话。'); return; }
+      if (message.type === 'workspaceChanged') { scopeStopped = true; pause(TEXT.workspaceChanged); return; }
       if (scopeStopped) return;
       if (message.type !== 'observation' || message.streamId !== streamId || message.sessionId !== sessionId) return;
       if (!Number.isSafeInteger(message.version) || message.version <= version) return;
@@ -268,7 +268,7 @@ export const liveClient = `
       const health = message.health;
       agentState = health && (health.agent === 'busy' || health.agent === 'waiting') ? 'busy' : health && health.agent === 'idle' ? 'idle' : '';
       if (health && health.state === 'paused') pause(health.reason === 'source-changed'
-        ? '会话来源发生替换或改写，已暂停；保留当前内容。可刷新后重新核验。' : '暂时无法读取会话，已暂停；保留当前内容。可刷新后重试。');
+        ? TEXT.sourceReplaced : TEXT.unreadable);
       else if (health && health.state === 'observing') {
         if (status && status.dataset.state === 'paused') status.dataset.state = '';
         if (problem) problem.hidden = true;

@@ -1,3 +1,4 @@
+import { t } from './i18n';
 /**
  * How a recorded call ended, from fields the harness actually wrote. Nothing is
  * executed and no exit code is guessed; absent evidence stays absent.
@@ -39,16 +40,17 @@ const SIGNALS: Record<number, string> = { 1: 'SIGHUP', 2: 'SIGINT', 9: 'SIGKILL'
  */
 export function exitReason(code: number | undefined): string {
   if (code === undefined || code === 0) return '';
-  if (code === 127) return '命令未找到';
-  if (code === 126) return '找到了但不可执行';
-  if (code === 128) return '128 在不同工具里含义不同（git 用它表示 fatal 错误），看返回内容';
+  if (code === 127) return t('command not found', '命令未找到');
+  if (code === 126) return t('found but not executable', '找到了但不可执行');
+  if (code === 128) return t('128 means different things in different tools (git uses it for a fatal error); see the output', '128 在不同工具里含义不同（git 用它表示 fatal 错误），看返回内容');
   if (code > 128 && code < 160) {
     const signal = code - 128;
-    return `被信号 ${signal}${SIGNALS[signal] ? ' ' + SIGNALS[signal] : ''} 终止`;
+    const name = `${signal}${SIGNALS[signal] ? ' ' + SIGNALS[signal] : ''}`;
+    return t(`killed by signal ${name}`, `被信号 ${name} 终止`);
   }
-  if (code === 2) return '多数命令用 2 表示用法或参数错误';
-  if (code >= 1 && code <= 125) return '该命令自定的失败码，具体含义看返回内容';
-  return '非常规退出码';
+  if (code === 2) return t('most commands use 2 for a usage or argument error', '多数命令用 2 表示用法或参数错误');
+  if (code >= 1 && code <= 125) return t('a failure code of the command\'s own; see the output', '该命令自定的失败码，具体含义看返回内容');
+  return t('an unusual exit code', '非常规退出码');
 }
 
 /** Claude writes a failed Bash result as `Error: Exit code N\n<output>` (the
