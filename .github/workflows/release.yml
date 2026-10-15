@@ -1,7 +1,7 @@
 # A tag v<version> makes a GitHub release of that version (npm run release
 # does it all): the tag must name the version in package.json, the tests must
 # pass, and the release carries the VS Code extension and the terminal
-# program. Its notes list the commits since the release before.
+# program. Its notes are the version's section of CHANGELOG.md.
 name: Release
 
 on:
@@ -39,16 +39,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(node -p "require('./package.json').version")
-          previous=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
           {
-            echo "## Changes"
+            # What this version changed, as CHANGELOG.md says it (npm run release wrote the section).
+            node scripts/changelog.mjs notes "$version"
             echo
-            # Every commit's title since the release before, but the bare version commit npm run release makes.
-            git log --no-merges --format='- %s' ${previous:+$previous..}"$GITHUB_REF_NAME" | grep -vE '^- [0-9]+\.[0-9]+\.[0-9]+$' || true
+            echo "## 安装"
             echo
-            echo "## Install"
-            echo
-            echo "VS Code: \`code --install-extension tickbird-$version.vsix\`. The terminal version and the agents' plugins install from the repository: see README, 安装."
+            echo "VS Code：\`code --install-extension tickbird-$version.vsix\`。终端版和 Agent 插件从仓库安装，见 README 的「安装」。"
           } > build/notes.md
           gh release create "$GITHUB_REF_NAME" "build/tickbird-$version.vsix" build/tickbird-cli.cjs \
             --title "Tickbird $version" --notes-file build/notes.md

@@ -36,6 +36,8 @@ await build({ entryPoints: [join(root, 'packages/vscode/src/extension.ts')], bun
 const { scripts: _scripts, dependencies: _dependencies, devDependencies: _devDependencies, private: _private, ...fields } = manifest;
 await writeFile(join(stage, 'package.json'), JSON.stringify({ ...fields, main: './extension.js' }, null, 2) + '\n');
 await cp(join(root, 'resources'), join(stage, 'resources'), { recursive: true });
+// VS Code shows it as the extension's Changelog.
+await cp(join(root, 'CHANGELOG.md'), join(stage, 'CHANGELOG.md'));
 await writeFile(join(stage, 'README.md'), `# Tickbird\n\nVS Code 侧边栏里的只读过程观察器：读取当前项目的 Claude Code / Codex 本地会话记录，把 Agent 每一轮做了什么整理成章节。由本地仓库的 \`npm run install:vscode\` 构建安装，未在扩展市场发布。\n`);
 const packaged = run(process.execPath, [join(root, 'node_modules/@vscode/vsce/vsce'), 'package', '--no-dependencies', '--allow-missing-repository', '--skip-license', '--out', vsix], { cwd: stage });
 report(packaged.ok, '打包 .vsix', packaged.ok ? vsix.replace(root + '/', '') : packaged.out);
