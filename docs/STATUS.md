@@ -15,7 +15,7 @@
 | 插件 `tickbird-state` | 可用 | Claude Code 与 Codex 的 hook，写会话状态。格式见 [SESSION_STATE.md](./SESSION_STATE.md) |
 | 插件 `tickbird-split` | 可用 | 终端版的自动分屏，只随终端版安装 |
 
-安装：`npm run install:vscode`、`npm run install:terminal`（见 README）。未在任何市场公开发布。
+安装：`npm run install:vscode`、`npm run install:terminal`（见 [DEVELOPMENT.md](./DEVELOPMENT.md)）。未在任何市场公开发布。
 
 两个版本共用 core：解析、章节、调用的一行（`call-line.ts`）、点开调用时打开什么（`call-target.ts`）。界面上的规则只写一处。
 

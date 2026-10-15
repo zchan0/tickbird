@@ -1,6 +1,6 @@
 # tickbird-split
 
-Tickbird 终端版：开始一个 Claude Code 或 Codex 会话时，在 Agent 旁边开一栏 Tickbird，焦点留在 Agent。行为与原理见 [TERMINAL_DESIGN.md](../../docs/TERMINAL_DESIGN.md) 第 9 节；各终端的支持情况见仓库 README 的「安装」。
+Tickbird 终端版：开始一个 Claude Code 或 Codex 会话时，在 Agent 旁边开一栏 Tickbird，焦点留在 Agent。行为与原理见 [TERMINAL_DESIGN.md](../../docs/TERMINAL_DESIGN.md) 第 9 节；各终端的支持情况见 [TERMINALS.md](../../docs/TERMINALS.md)。
 
 ```
 /plugin install tickbird-split --marketplace zchan0/tickbird
