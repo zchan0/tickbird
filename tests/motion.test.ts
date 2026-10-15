@@ -106,3 +106,19 @@ test('the waiting dot rests until everything is in, then breathes without going 
   assert.equal(still.resting(), true, 'Drawn still, it is there at once');
   assert.ok(Math.abs(breathAt(0) - 0.3) < 1e-9 && Math.abs(breathAt(BREATH_MS / 2) - 1) < 1e-9);
 });
+
+test('words that grow while the calls under them wait hold those calls back until the rest is typed', () => {
+  const motion = new Motion();
+  motion.live = true;
+  motion.begin(0);
+  motion.reveal('say', 20);
+  assert.equal(motion.shows('a'), false);
+  // Before the call's turn, the hook sends the rest of the words.
+  motion.begin(SAY_MIN);
+  assert.ok(motion.reveal('say', 120) < 120);
+  motion.begin(SAY_MIN + REST_MS + 10);
+  assert.equal(motion.shows('a'), false, 'Not in the middle of the words');
+  motion.begin(SAY_MIN + 100 * WORD_MS + REST_MS);
+  assert.equal(motion.reveal('say', 120), 120);
+  assert.equal(motion.shows('a'), true, 'Once the words are out and a beat more');
+});

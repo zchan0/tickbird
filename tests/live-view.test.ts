@@ -228,6 +228,24 @@ test('a burst is revealed one part at a time, off the page until its turn: the w
   assert.equal(arrived[1].textContent!.trim(), '然后改视图。', 'Typed out whole');
 });
 
+test('words already on screen as an early copy do not type again when their record comes, and nothing waits for them', async t => {
+  const f = await fixture(t), { document } = f;
+  const now = new Date().toISOString();
+  f.data.items.find(item => item.id === 'current')!.timestamp = now; f.update();
+  // The agent's words come first from the hook, then the record with them and a call.
+  f.send(f.view.update(f.data, health, false, { draft: '先看解析器为什么把这一行切成了两段。' }));
+  const panel = document.querySelector('[data-turn-panel="turn:t2"]')!;
+  await new Promise(resolve => setTimeout(resolve, 600));
+  f.data.items.push(narrative('said-1', 't2', '先看解析器为什么把这一行切成了两段。'), input('read-c'));
+  f.data.items.slice(-2).forEach(item => { item.turnId = 't2'; item.timestamp = now; });
+  f.send(f.view.update(f.data, health, false, {}));
+  const words = panel.querySelector<HTMLElement>('[data-observation-key="say:said-1"]')!;
+  assert.ok(!words.classList.contains('pending') && !words.classList.contains('typing'), 'Simply there, whole');
+  assert.equal(words.textContent!.trim(), '先看解析器为什么把这一行切成了两段。');
+  const row = [...panel.querySelectorAll<HTMLElement>('.crow-item')].at(-1)!;
+  assert.ok(!row.classList.contains('pending') || Number(row.dataset.reveal) <= 200, 'The call does not wait for words already read');
+});
+
 test('the newest open turn ends in a waiting dot while records come, says how long it has been quiet after a silence, and nothing for a stale turn', async t => {
   const f = await fixture(t), { document } = f;
   const panel = () => document.querySelector('[data-turn-panel="turn:t2"]')!;

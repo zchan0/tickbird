@@ -26,6 +26,7 @@ export const SPIN_MS = 80;
 export const BREATH_MS = 1600;
 
 interface Words { length: number; from: number; at: number; ms: number }
+interface Call { at: number; shown: boolean }
 
 const pace = (chars: number): number => Math.min(SAY_MAX, Math.max(SAY_MIN, chars * WORD_MS));
 
@@ -35,7 +36,7 @@ export class Motion {
   /** Set while a page is drawn: something on it is still coming in or turning. */
   busy = false;
   private words = new Map<string, Words>();
-  private calls = new Map<string, number>();
+  private calls = new Map<string, Call>();
   private now = 0;
   /** When the words now typing are all out: the calls under them wait for it. */
   private typed = -Infinity;
@@ -68,11 +69,12 @@ export class Motion {
     const shown = (words: Words) => words.ms
       ? Math.min(words.length, words.from + Math.floor((words.length - words.from) * Math.max(0, Math.min(1, (this.now - words.at) / words.ms))))
       : words.length;
-    // Words that grow (the hook sends long ones in pieces) go on typing from where they are.
+    // Words that grow (the hook sends long ones in pieces) go on typing from where they are,
+    // and the calls still waiting under them wait for the rest: none comes in mid-sentence.
     if (length > seen.length) {
       const from = this.live ? shown(seen) : length, ms = this.live ? pace(length - from) : 0;
       this.words.set(key, { length, from, at: this.now, ms });
-      if (this.live) { this.typed = Math.max(this.typed, this.now + ms); this.settled = Math.max(this.settled, this.now + ms); }
+      if (this.live) { this.typed = Math.max(this.typed, this.now + ms); this.settled = Math.max(this.settled, this.now + ms); this.hold(this.now + ms + REST_MS); }
     }
     else if (length < seen.length) this.words.set(key, { length, from: length, at: -Infinity, ms: 0 });
     const count = shown(this.words.get(key)!);
@@ -86,18 +88,31 @@ export class Motion {
    * above them: a call never comes before what explains it.
    */
   age(key: string): number | undefined {
-    let at = this.calls.get(key);
-    if (at === undefined) {
+    let call = this.calls.get(key);
+    if (!call) {
       if (this.live) {
-        at = this.next(Math.max(this.typed + REST_MS, this.queued + STAGGER_MS));
+        const at = this.next(Math.max(this.typed + REST_MS, this.queued + STAGGER_MS));
         this.queued = at;
         this.settled = Math.max(this.settled, at + FADE_MS);
-      } else at = -Infinity;
-      this.calls.set(key, at);
+        call = { at, shown: false };
+      } else call = { at: -Infinity, shown: true };
+      this.calls.set(key, call);
     }
-    if (at > this.now) { this.busy = true; return undefined; }
-    if (this.now - at < FADE_MS) this.busy = true;
-    return this.now - at;
+    if (call.at > this.now) { this.busy = true; return undefined; }
+    call.shown = true;
+    if (this.now - call.at < FADE_MS) this.busy = true;
+    return this.now - call.at;
+  }
+
+  /** The calls not yet in come in from `start` on, still one after another. */
+  private hold(start: number): void {
+    let at = start;
+    for (const call of this.calls.values()) {
+      if (call.shown || call.at >= at) continue;
+      call.at = at;
+      at += STAGGER_MS;
+    }
+    this.queued = Math.max(this.queued, at - STAGGER_MS);
   }
 
   /** Whether the call under `key` shows yet. */

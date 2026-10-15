@@ -33,13 +33,31 @@ export const liveClient = `
     // waiting dot comes back WAIT after all of it is in. A part is not on the
     // page until its turn, so the page only grows at its end and following
     // scrolls with what shows. A new burst waits for the one still appearing;
-    // one more than BACKLOG behind shows at once.
+    // one more than BACKLOG behind shows at once. Words or a call already shown
+    // once (the agent's words on screen before they reach the transcript, a call
+    // announced before it runs) do not come in again when their record does.
     const WORD = 5, SAY_MIN = 120, SAY_MAX = 480, REST = 120, ROW = 90, FADE = 200, WAIT = 240, BACKLOG = 1200;
     const calm = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const nextFrame = typeof window.requestAnimationFrame === 'function' ? step => window.requestAnimationFrame(step) : step => setTimeout(step, 16);
-    const words = part => part.matches('.csay, .tprompt, .turn-heading, .cfold');
-    const typed = part => part.matches('.csay') && !calm;
-    const typeTime = part => Math.max(SAY_MIN, Math.min(SAY_MAX, part.textContent.length * WORD));
+    // The agent's words in a part: the part itself, or the one block of words in an answer's or a draft's segment.
+    const sayOf = part => part.matches('.csay') ? part : part.matches('.cseg') ? part.querySelector(':scope > .csay') : null;
+    const words = part => Boolean(sayOf(part)) || part.matches('.tprompt, .turn-heading, .cfold');
+    const typed = part => Boolean(sayOf(part)) && !calm;
+    const typeTime = part => Math.max(SAY_MIN, Math.min(SAY_MAX, sayOf(part).textContent.length * WORD));
+    // What a part says, the same for its early copy and its record: the words' opening, or a call's tool and line.
+    const identity = part => {
+      const say = sayOf(part);
+      if (say) return 'w:' + say.textContent.replace(/\s+/g, '').slice(0, 80);
+      const row = part.matches('.crow-item, .cagent-item') && part.querySelector('.crow');
+      return row ? 'c:' + row.dataset.tool + '|' + row.textContent.replace(/\s+/g, ' ').trim() : '';
+    };
+    const seen = new Set();
+    // Before a record replaces its early copy: what is on the page now has been seen.
+    const remember = () => timeline.querySelectorAll('.csay, .crow-item, .cagent-item').forEach(node => {
+      const part = node.matches('.csay') && node.parentElement && node.parentElement.matches('.cseg') && !node.hasAttribute('data-observation-key') ? node.parentElement : node;
+      // Words still typing count too: their record shows them whole.
+      if (!part.closest('.pending')) { const id = identity(part); if (id) seen.add(id); }
+    });
     // Types the part's text out, every text node in order; the layout is the whole text's from the start, cut short.
     const typeOut = (part, ms) => {
       const walker = document.createTreeWalker(part, 4);
@@ -74,13 +92,14 @@ export const liveClient = `
     const show = (part, quiet) => {
       part.revealing = 0;
       part.classList.remove('pending'); part.removeAttribute('data-reveal');
-      if (!quiet && !calm) typed(part) ? typeOut(part, typeTime(part)) : fadeIn(part);
+      if (!quiet && !calm) typed(part) ? typeOut(sayOf(part), typeTime(part)) : fadeIn(part);
       if (part.isConnected) followLatest();
     };
     // Off the page until \`delay\` ms from now; a part already waiting or fading goes back to waiting.
     const reveal = (part, delay, quiet) => {
       if (part.revealing) clearTimeout(part.revealing);
-      if (part.typing) part.typing.finish();
+      const say = sayOf(part);
+      if (say && say.typing) say.typing.finish();
       if (delay <= 0) { show(part, quiet); return; }
       part.classList.add('pending'); part.dataset.reveal = String(Math.round(delay));
       part.revealing = setTimeout(() => show(part, quiet), delay);
@@ -109,8 +128,11 @@ export const liveClient = `
       let at = Math.max(now, revealAt), last = now;
       // Too far behind: what is queued shows now.
       if (at - now > BACKLOG) at = now;
-      const delays = new Map();
+      const delays = new Map(), quietly = new Set();
       for (const part of ordered) {
+        const id = identity(part);
+        // Shown once already, as an early copy: it is simply there, in its place, and nothing waits for it.
+        if (id && seen.has(id)) { reveal(part, 0, true); delays.set(part, now); quietly.add(part); continue; }
         reveal(part, at - now); delays.set(part, at);
         const takes = typed(part) ? typeTime(part) : FADE;
         last = Math.max(last, at + takes);
@@ -122,7 +144,7 @@ export const liveClient = `
         if (!first) continue;
         reveal(holder, delays.get(first) - now, true);
         const name = holder.querySelector(':scope > .ctool');
-        if (name && !calm) setTimeout(() => fadeIn(name), Math.max(0, delays.get(first) - now));
+        if (name && !calm && !quietly.has(first)) setTimeout(() => fadeIn(name), Math.max(0, delays.get(first) - now));
       }
       revealAt = at;
       // The waiting dot always comes back last, once what arrived above it is all in.
@@ -207,6 +229,7 @@ export const liveClient = `
       const active = document.activeElement, activeKey = active && key(active);
       const expanded = new Set(groups().filter(group => group.open).map(group => group.dataset.actionGroup));
       const hadFocus = document.hasFocus() && active && sidecar.contains(active);
+      remember();
       const existing = new Map(panels().map(panel => [panel.dataset.turnPanel, panel]));
       const latestChanged = message.order[0] !== panels()[0]?.dataset.turnPanel || message.turns.some(turn => turn.key === message.order[0]);
       const wasNewest = panels()[0]?.dataset.turnPanel || '';
