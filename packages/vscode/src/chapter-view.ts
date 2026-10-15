@@ -236,16 +236,16 @@ export const chapterStyles = `
   .chapter-turn { --ink-2: color-mix(in oklch, var(--vscode-foreground) 78%, var(--surface)); --ink-3: color-mix(in oklch, var(--vscode-foreground) 58%, var(--surface));
     --ink-4: color-mix(in oklch, var(--vscode-foreground) 42%, var(--surface)); --hair: color-mix(in oklch, var(--vscode-foreground) 16%, var(--surface));
     --raise: color-mix(in oklch, var(--vscode-foreground) 6%, var(--surface)); --edge: color-mix(in oklch, var(--vscode-foreground) 13%, var(--surface));
-    --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
+    --mono: var(--tb-code-family);
     --gold: color-mix(in oklch, var(--vscode-editorWarning-foreground, #cca700) 80%, var(--vscode-foreground));
     --green: color-mix(in oklch, var(--vscode-charts-green, var(--vscode-gitDecoration-addedResourceForeground, #388a34)) 84%, var(--vscode-foreground));
     --red: color-mix(in oklch, var(--vscode-errorForeground, #f85149) 78%, var(--vscode-foreground));
     --left: 20px; --right: 16px; padding: 0 var(--right) 0 var(--left); font-variant-numeric: tabular-nums; }
-  .chapter-turn .turn-heading { justify-content: flex-start; gap: 0; margin: 0 calc(-1 * var(--right)) 0 calc(-1 * var(--left)); padding: 8px var(--right) 8px var(--left); font-size: 12px; color: var(--vscode-foreground); }
+  .chapter-turn .turn-heading { justify-content: flex-start; gap: 0; margin: 0 calc(-1 * var(--right)) 0 calc(-1 * var(--left)); padding: 8px var(--right) 8px var(--left); font-size: var(--tb-small); color: var(--vscode-foreground); }
   .chapter-turn .turn-heading b { font-weight: 600; }
   .chapter-turn .tsub { color: var(--ink-3); white-space: pre; }
   /* A label over a block: a small grey word on a line of its own, the block right under it. */
-  .tlabel { font-weight: 500; font-size: 10.5px; line-height: 1.6; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; }
+  .tlabel { font-weight: 500; font-size: var(--tb-label); line-height: 1.6; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; }
   .tlabel[data-tone="yellow"] { color: var(--gold); } .tlabel[data-tone="red"] { color: var(--red); }
   /* What you asked: the one thing raised, a sheet a step lighter than the page with a hairline edge. */
   .tprompt { margin: 12px -4px 0 -10px; padding: 8px 10px 9px; background: var(--raise); border: 1px solid var(--edge); border-radius: 6px; }
@@ -257,7 +257,7 @@ export const chapterStyles = `
   .cagent-list { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 4px; }
   .crow.cagent { display: grid; grid-template-columns: 7px minmax(0, 1fr); column-gap: 8px; align-items: baseline; color: var(--vscode-foreground); }
   .cagent .clabel { -webkit-line-clamp: 2; }
-  .cagent .cfacts { grid-column: 2; font: 12px/1.6 var(--vscode-font-family, sans-serif); color: var(--ink-3); }
+  .cagent .cfacts { grid-column: 2; font: var(--tb-small)/1.6 var(--tb-family); color: var(--ink-3); }
   .cdot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); transform: translateY(-1px); }
   .cagent[data-state="running"] .cdot { background: var(--gold); }
   .cagent[data-state="done"] .cdot { background: var(--green); }
@@ -270,12 +270,12 @@ export const chapterStyles = `
   .csay + .csay { margin-top: 8px; }
   .csay .markdown { line-height: 1.65; }
   /* Code in the words: the editor's font, a step grey, nothing behind it. */
-  .csay :not(pre) > code { background: transparent; padding: 0; font-size: 12px; color: var(--ink-2); }
+  .csay :not(pre) > code { background: transparent; padding: 0; font-size: var(--tb-small); color: var(--ink-2); }
   /* A step's calls on the page itself, under the words that explain them. */
   .ccalls { margin: 8px 0 0; }
   .chapter > .ccalls:first-child { margin-top: 0; }
   .crun + .crun { margin-top: 4px; }
-  .ctool { font-weight: 600; font-size: 12px; line-height: 1.6; }
+  .ctool { font-weight: 600; font-size: var(--tb-small); line-height: 1.6; }
   .ctree { list-style: none; margin: 0; padding: 0; }
   /* The tree: a line down from the tool's name, a tick to each call. Drawn, not typed, so it stays joined in any font. */
   .crow-item { position: relative; padding-left: 16px; }
@@ -285,8 +285,8 @@ export const chapterStyles = `
   .crow-item:has(> .crow[data-ask])::after { display: none; }
   .crow-item:has(> .crow[data-ask])::before { top: 1.45em; }
   .crow-item:last-child:has(> .crow[data-ask])::before { display: none; }
-  .crow { display: flex; align-items: last baseline; gap: 8px; width: 100%; min-width: 0; padding: 0; margin: 0; border: 0; background: transparent; text-align: left; color: var(--ink-3); font: 12px/1.6 var(--mono); }
-  .cbranch { position: absolute; left: 0; top: 0; width: 11px; text-align: center; color: var(--gold); font: 700 12px/1.6 var(--mono); }
+  .crow { display: flex; align-items: last baseline; gap: 8px; width: 100%; min-width: 0; padding: 0; margin: 0; border: 0; background: transparent; text-align: left; color: var(--ink-3); font: var(--tb-code)/1.6 var(--mono); font-weight: var(--tb-code-weight); }
+  .cbranch { position: absolute; left: 0; top: 0; width: 11px; text-align: center; color: var(--gold); font: 700 var(--tb-code)/1.6 var(--mono); }
   .clabel { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .clabel.command { -webkit-line-clamp: 1; word-break: break-all; }
   .cmore { flex: none; font-weight: 600; color: var(--ink-4); }
@@ -298,24 +298,24 @@ export const chapterStyles = `
   .crow.node-button:hover > :is(.clabel, .cmore, .cnote), .crow[aria-pressed="true"] > :is(.clabel, .cmore, .cnote),
   .cagent.node-button:hover .cfacts, .cagent[aria-pressed="true"] .cfacts, .cfile:hover .cmark[data-mark="M"], .cfile[aria-pressed="true"] .cmark[data-mark="M"] { color: var(--vscode-foreground); }
   .cagent.node-button:hover .clabel, .cagent[aria-pressed="true"] .clabel, .cfile:hover .cname, .cfile[aria-pressed="true"] .cname { text-decoration: underline; text-underline-offset: 2px; }
-  .cchoices { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 10px; font-size: 12px; }
+  .cchoices { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 10px; font-size: var(--tb-small); }
   .cchoice { font-weight: 600; color: var(--vscode-foreground); }
   .cq, .cwaiting { font-style: normal; color: var(--ink-3); }
   .chapter > .nodes { margin-top: 8px; }
   /* The end of a running turn: a gold dot breathing where the answer will come, or how long it has been quiet. */
   .tend { margin-top: 16px; }
-  .live-tail { display: flex; align-items: center; gap: 8px; min-height: 1.6em; font-size: 12px; color: var(--ink-3); }
+  .live-tail { display: flex; align-items: center; gap: 8px; min-height: 1.6em; font-size: var(--tb-small); color: var(--ink-3); }
   .live-tail .cbranch { position: static; display: inline-flex; align-items: center; width: auto; height: 1.6em; }
   .cspin { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); animation: sidecar-breathe 1.6s ease-in-out infinite; }
   @keyframes sidecar-breathe { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
   .live-tail .cquiet:empty { display: none; }
   .turn-panel:not([data-fresh]) .live-tail, .turn-panel[data-idle] .live-tail { display: none; }
   .turn-panel[data-stale] .live-tail .cbranch { display: none; }
-  .tbackground { display: none; margin: 12px 0 0; font-size: 12px; color: var(--ink-3); }
+  .tbackground { display: none; margin: 12px 0 0; font-size: var(--tb-small); color: var(--ink-3); }
   [data-agent-known] .tbackground { display: block; }
-  .awaiting .cwait-what { font-size: 12px; overflow-wrap: anywhere; }
+  .awaiting .cwait-what { font-size: var(--tb-small); overflow-wrap: anywhere; }
   .awaiting .cwait-what b { font-weight: 600; }
-  .awaiting .cnote { font-size: 12px; color: var(--ink-3); }
+  .awaiting .cnote { font-size: var(--tb-small); color: var(--ink-3); }
   /* The answer and the changes fold to a line each: the label, then one full line and ▾. A hairline sets them, or how the turn broke off, apart from the process. */
   .cfold { margin-top: 8px; }
   .cstream ~ .cfold:first-of-type, .cstream + .tend { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--hair); }
@@ -331,10 +331,10 @@ export const chapterStyles = `
   .cchanges .ftext { display: flex; gap: 8px; }
   .cfiles { list-style: none; margin: 0; padding: 0; }
   .cfile { display: grid; grid-template-columns: 1em minmax(0, 1fr) auto; align-items: baseline; gap: 8px; width: 100%; padding: 0; border: 0; background: transparent; text-align: left; }
-  .cmark { font: 12px/1.6 var(--mono); color: var(--ink-3); }
+  .cmark { font: var(--tb-code)/1.6 var(--mono); color: var(--ink-3); }
   .cmark[data-mark="A"] { color: var(--green); } .cmark[data-mark="D"] { color: var(--red); }
   .cname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cfile .csize { font: 12px/1.6 var(--mono); }
+  .cfile .csize { font: var(--tb-code)/1.6 var(--mono); }
   /* Live arrivals (design v12): not on the page until their turn, so the page only grows at its end; then a 200ms fade. The words type out instead (live-client). */
   .pending { display: none !important; }
   @keyframes sidecar-arrive { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }

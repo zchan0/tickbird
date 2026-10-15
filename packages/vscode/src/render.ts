@@ -8,6 +8,7 @@ import { plainPasted } from '../../core/src/pasted';
 import { liveClient } from './live-client';
 import { followClient } from './follow-client';
 import { inlineClient } from './inline-client';
+import { FONT_VARIABLES, fontDeclarations } from './fonts';
 import { createHash } from 'node:crypto';
 import { describeDisplayAction, presentEvidence, parsePatch, publicLabels, toolOutputContents, invocationInput, recordedFiles, fileEvidenceId, shortFileLabels, fileReading, type FileReading, type InputContent } from '../../core/src/presentation';
 import { renderCode, renderFile } from './code';
@@ -91,12 +92,20 @@ const styles = `
     --border: var(--vscode-panel-border, var(--vscode-widget-border, transparent));
     --muted: var(--vscode-descriptionForeground);
     --warning: var(--vscode-editorWarning-foreground, var(--vscode-foreground));
+    /* Fonts (fonts.ts): the words in chat.fontSize / chat.fontFamily, code in chat.editor.*, as the agents' panels; else VS Code's own. Other sizes follow the words'. */
+    --tb-text: var(--tb-font-size, var(--vscode-font-size, 13px));
+    --tb-small: calc(var(--tb-text) * 12 / 13);
+    --tb-label: calc(var(--tb-text) * 10.5 / 13);
+    --tb-family: var(--tb-font-family, var(--vscode-font-family, sans-serif));
+    --tb-code: var(--tb-code-font-size, var(--tb-small));
+    --tb-code-family: var(--tb-code-font-family, var(--vscode-editor-font-family, monospace));
+    --tb-code-weight: var(--tb-code-font-weight, normal);
   }
   * { box-sizing: border-box; }
   /* VS Code injects body { padding: 0 20px } into every webview; a sidebar view must reach both edges. */
   html, body { height: 100%; margin: 0; padding: 0; }
   body:has(> main.detail) { background: var(--vscode-editor-background); }
-  body { color: var(--vscode-foreground); background: var(--surface); font: var(--vscode-font-size, 13px)/1.6 var(--vscode-font-family, sans-serif); }
+  body { color: var(--vscode-foreground); background: var(--surface); font: var(--tb-text)/1.6 var(--tb-family); }
   button { color: inherit; font: inherit; cursor: pointer; }
   button:disabled { cursor: default; opacity: .65; }
   button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
@@ -127,7 +136,7 @@ const styles = `
   .nodes { list-style: none; margin: 0; padding: 0; }
   .turn-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; margin-bottom: 7px; }
   .turn-question { padding: 10px 11px; margin: 0 0 16px; border: 1px solid var(--border); border-radius: 6px; background: var(--vscode-textBlockQuote-background, color-mix(in srgb, var(--vscode-foreground) 5%, transparent)); }
-  .question-text { font-size: 13px; line-height: 1.65; font-weight: 500; overflow-wrap: anywhere; max-height: 9.9em; overflow: hidden; }
+  .question-text { font-size: var(--tb-text); line-height: 1.65; font-weight: 500; overflow-wrap: anywhere; max-height: 9.9em; overflow: hidden; }
   .question-more { display: block; margin-top: 6px; padding: 0; border: 0; background: transparent; font-size: 11px; color: var(--muted); }
   .question-more:hover, .narrative-more:hover { color: var(--vscode-foreground); text-decoration: underline; }
   .pasted { margin: .5em 0 .8em; padding: 1px 0 1px 10px; border-left: 2px solid var(--vscode-textBlockQuote-border, var(--border)); }
@@ -146,7 +155,7 @@ const styles = `
   .markdown blockquote { border-left: 2px solid var(--vscode-textBlockQuote-border, var(--border)); padding-left: .85em; margin: .75em 0; color: var(--muted); }
   .markdown hr { border: 0; border-top: 1px solid var(--border); margin: 1.25em 0; }
   .markdown pre { overflow: auto; max-width: 100%; white-space: pre; margin: .7em 0; padding: 10px; border-radius: 5px; }
-  .markdown code { font-family: var(--vscode-editor-font-family, monospace); font-size: .93em; background: var(--vscode-textCodeBlock-background); border-radius: 3px; padding: .08em .25em; }
+  .markdown code { font-family: var(--tb-code-family); font-size: .93em; background: var(--vscode-textCodeBlock-background); border-radius: 3px; padding: .08em .25em; }
   .markdown pre code { padding: 0; background: transparent; }
   .markdown-table { overflow-x: auto; }
   .markdown table { border-collapse: collapse; font-size: .95em; }
@@ -417,7 +426,7 @@ const styles = `
   .write-removed { color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-errorForeground)); }
   /* One turn to a page: the header says which, ‹ › go to the turn before and after, ☰ lists them all. */
   .sidecar:not(:has([data-turn-panel])) .page-head { display: none; }
-  .page-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 8px 3px 20px; font-size: 12px; }
+  .page-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 8px 3px 20px; font-size: var(--tb-small); }
   .ph-turn { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ph-turn b { font-weight: 600; }
   .ph-turn .tsub { color: var(--muted); }
@@ -436,16 +445,16 @@ const styles = `
   .turn-panel .turn-heading { display: none; }
   .sidecar[data-toc] .timeline, .sidecar[data-toc] .new-turn { display: none; }
   .toc { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 8px 16px 12px; }
-  .toc-head { padding: 4px 8px 8px; font-size: 12px; }
+  .toc-head { padding: 4px 8px 8px; font-size: var(--tb-small); }
   .toc-head .tsub { color: var(--muted); }
   .toc-list button { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; text-align: left; }
   .toc-list button:hover, .toc-list button:focus-visible { background: var(--vscode-list-hoverBackground); }
   .toc-list button[aria-pressed="true"] { background: var(--vscode-list-inactiveSelectionBackground); }
-  .toc-list .turn-lens-number { color: var(--muted); font-size: 11px; }
-  .toc-list .turn-lens-request { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12.5px; line-height: 1.5; }
+  .toc-list .turn-lens-number { color: var(--muted); font-size: var(--tb-label); }
+  .toc-list .turn-lens-request { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; font-size: var(--tb-small); line-height: 1.5; }
   /* A turn that started while an older one is on the page: one line at the bottom, its prompt after the label. */
   .new-turn { flex: none; display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 5px 14px 6px 20px; border: 0; border-top: 1px solid var(--border); background: var(--surface); text-align: left; }
-  .new-turn .nt-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
+  .new-turn .nt-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: var(--tb-small); }
   .new-turn:hover .nt-text { color: var(--vscode-foreground); }
   .new-turn .tlabel { margin: 0; color: color-mix(in oklch, var(--vscode-editorWarning-foreground, #cca700) 80%, var(--vscode-foreground)); }
 `;
@@ -628,6 +637,14 @@ const script = `(() => {
     if (message && typeof message === 'object' && !Array.isArray(message)) {
       if (message.type === 'follow') { const button = document.querySelector('.follow-session'); if (button) button.hidden = !message.paused; return; }
       if (message.type === 'integrationHint') { const hint = document.querySelector('.integration-hint'); if (hint) hint.hidden = !message.show; return; }
+      // The fonts changed in VS Code's settings: the page takes them in place.
+      if (message.type === 'fonts' && message.variables && typeof message.variables === 'object') {
+        for (const name of ${JSON.stringify(FONT_VARIABLES)}) {
+          const value = message.variables[name];
+          if (typeof value === 'string') document.documentElement.style.setProperty(name, value); else document.documentElement.style.removeProperty(name);
+        }
+        return;
+      }
     }
     // A subagent's record grew: its turn is replaced where it is. Reading at the end, the page stays at the end.
     if (message && typeof message === 'object' && message.type === 'subagentTurn' && typeof message.html === 'string') {
@@ -695,8 +712,12 @@ const script = `(() => {
   else ready();
 })();`;
 
+/** The fonts every page is drawn in until the next change (fonts.ts); the extension sets them from VS Code's settings. */
+let fonts: Record<string, string> = {};
+export function setFonts(variables: Record<string, string>): void { fonts = variables; }
+
 function documentHtml(title: string, body: string, nonce: string, sessionId = '', locale = 'zh-CN'): string {
-  const pageStyles = styles + chapterStyles;
+  const pageStyles = styles + chapterStyles + (Object.keys(fonts).length ? `:root { ${fontDeclarations(fonts)} }` : '');
   if (!/^[A-Za-z0-9+/_=-]+$/.test(nonce)) throw new Error('Invalid webview CSP nonce');
   const csp = `default-src 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'`;
   return `<!DOCTYPE html><html lang="${escapeHtml(locale)}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="${escapeHtml(csp)}"><title>${escapeHtml(title)}</title><style nonce="${nonce}">${pageStyles}</style></head><body data-session-id="${escapeHtml(sessionId)}">${body}<script nonce="${nonce}">${script}</script></body></html>`;

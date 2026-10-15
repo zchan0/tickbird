@@ -8,7 +8,8 @@ import { openLiveSession, type LiveSession } from '../../core/src/live-session';
 import { LiveView } from './live-view';
 import type { SessionCandidate, SessionData, TimelineItem, Provider } from '../../core/src/model';
 import { readClaudeSubagents, type SubagentCache } from '../../core/src/subagents';
-import { renderDetail, renderSubagentTurn, renderSidecar, renderInlineEvidence, inlineRevision, renderWorkspaceGap, workspaceGaps, type WorkspaceGap } from './render';
+import { renderDetail, renderSubagentTurn, renderSidecar, renderInlineEvidence, inlineRevision, renderWorkspaceGap, setFonts, workspaceGaps, type WorkspaceGap } from './render';
+import { fontVariables } from './fonts';
 import { hasReadableEvidence, outlineCoverage, resolveOutlineEvidence } from '../../core/src/outline';
 import { currentSession, readSessionStates, sessionStateDirectory, type SessionState, type SessionStateCache } from '../../core/src/session-state';
 import { lastRecordAt, liveExtras as coreLiveExtras, type LiveExtras } from '../../core/src/live-extras';
@@ -471,6 +472,20 @@ export function activate(context: vscode.ExtensionContext) {
       } catch (error) { resolved?.(); resolved = undefined; await reportError(error); }
     }
   }, { webviewOptions: { retainContextWhenHidden: true } }));
+  // The fonts of the agents' panels beside it (fonts.ts): read now, and again when the settings change, into every open page.
+  const readFonts = () => {
+    const chat = vscode.workspace.getConfiguration('chat');
+    return fontVariables({ size: chat.get('fontSize'), family: chat.get('fontFamily'), codeSize: chat.get('editor.fontSize'), codeFamily: chat.get('editor.fontFamily'), codeWeight: chat.get('editor.fontWeight') });
+  };
+  setFonts(readFonts());
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+    if (!['chat.fontSize', 'chat.fontFamily', 'chat.editor.fontSize', 'chat.editor.fontFamily', 'chat.editor.fontWeight'].some(name => event.affectsConfiguration(name))) return;
+    const variables = readFonts();
+    setFonts(variables);
+    for (const webview of [observer?.webview, ...[...evidence].map(view => view.panel.webview)]) {
+      if (webview) void Promise.resolve(webview.postMessage({ type: 'fonts', variables })).catch(() => undefined);
+    }
+  }));
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
     ++generation; ++scanGeneration;
     stopObservation();

@@ -158,6 +158,9 @@ function harness(initialOrientation = 0) {
     Uri: { parse: (value: string) => ({ toString: () => value }) },
     workspace: {
       onDidChangeWorkspaceFolders: workspaceChange.event,
+      // Settings: nothing set, so the pages keep VS Code's own fonts.
+      getConfiguration: () => ({ get: () => undefined }),
+      onDidChangeConfiguration: () => ({ dispose() {} }),
       isTrusted: true, workspaceFolders: [{ uri: { scheme: 'file', fsPath: '/fixture' } }],
       registerTextDocumentContentProvider: (_scheme: string, value: typeof provider) => {
         provider = value;
