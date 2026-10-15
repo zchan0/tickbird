@@ -34,6 +34,8 @@ export interface ChapterRow {
   note?: string;
   /** A question to the user: its options, and what was chosen as the source recorded it. */
   choices?: QuestionChoice[];
+  /** A call announced by the hook, before its record: its input as the hook sent it. */
+  input?: Record<string, unknown>;
 }
 export interface QuestionChoice { header?: string; question: string; options: string[]; chosen: string[] }
 /** Words said back to back, with no call between them, head one chapter together. */

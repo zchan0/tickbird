@@ -21,7 +21,7 @@ const emptyReturn = (value: unknown): boolean => typeof value === 'string' ? !va
 });
 const hidden = new Set(['thinking', 'redacted_thinking', 'reasoning', 'encrypted_content']);
 const metadata = new Set(['mode', 'permission-mode', 'atis-latch', 'bridge-session', 'ai-title', 'last-prompt', 'queue-operation', 'cost-state', 'frame-link', 'artifact-comment-monitor', 'artifact-autoreact-ledger']);
-const knownTools = new Set(['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'ToolSearch', 'WebSearch', 'WebFetch', 'AskUserQuestion', 'Skill', 'Agent', 'Task', 'Artifact']);
+const knownTools = new Set(['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'ToolSearch', 'WebSearch', 'WebFetch', 'AskUserQuestion', 'Skill', 'Agent', 'Task', 'Artifact', 'SendMessage', 'Workflow']);
 // These are the two MCP input shapes observed in the fixed CL1 sample. A
 // recognized tool name never authorizes dumping additional raw input fields.
 const sampledMcpInput = (name: string, input: Obj): { value?: Obj; extraFields: boolean } | undefined => {
@@ -178,8 +178,17 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
     const field = (name: string) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(raw)?.[1].trim();
     const id = field('task-id');
     const status = field('status');
-    const task = id ? tasks.get(id) : undefined;
+    const called = calls.get(field('tool-use-id') ?? '');
+    const task = (id ? tasks.get(id) : undefined) ?? (called?.title === 'Workflow' ? called : undefined);
     if (task?.backgroundTask) task.backgroundTask.state = status === 'killed' ? 'stopped' : 'returned';
+    // A workflow done: how it ended, and how long it ran, from the notification or else from when it started.
+    if (task?.title === 'Workflow') {
+      task.status = status === 'failed' ? 'failed' : status === 'killed' ? task.status : status === 'completed' ? 'completed' : task.status;
+      if (status === 'killed') task.interrupted = true;
+      const reported = Number(field('duration_ms')), started = Date.parse(task.timestamp ?? ''), heard = Date.parse(timestamp ?? '');
+      const durationMs = field('duration_ms') && Number.isFinite(reported) ? reported : Number.isFinite(started) && Number.isFinite(heard) && heard >= started ? heard - started : undefined;
+      if (durationMs !== undefined) task.agentUsage = { ...task.agentUsage, durationMs };
+    }
     const agent = id ? agents.get(id) : undefined;
     if (!agent) {
       // A background command or monitor reporting back: one row saying what
@@ -408,6 +417,7 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
         const metadataFields: Record<string, string[]> = {
           Bash: ['isImage', 'noOutputExpected', 'returnCodeInterpretation'],
           Skill: ['commandName'],
+          SendMessage: ['message', 'resumedAgentId', 'pin'],
           ToolSearch: ['query', 'total_deferred_tools'],
           Read: ['type'],
           AskUserQuestion: ['questions', 'answers', 'annotations'],
@@ -443,10 +453,16 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
         if (block.is_error === true || structured.interrupted === true || structured.status === 'failed' || (exitCode !== undefined && exitCode !== 0)) item.status = 'failed';
         else if (structured.status === 'async_launched' || structured.isAsync === true) { item.status = 'running'; append(item, [], '本次返回仅为异步启动记录；最终状态以另行取得的后续通知为准。'); }
         else if (item.status !== 'failed') item.status = block.is_error === false || structured.status === 'completed' || structured.success === true || exitCode === 0 ? 'completed' : 'unknown';
-        if (item.kind === 'subagent' && typeof structured.agentId === 'string') agents.set(structured.agentId, item);
+        if (item.kind === 'subagent' && typeof structured.agentId === 'string') { agents.set(structured.agentId, item); item.agentId = structured.agentId; }
         const backgroundId = structured.status === 'async_launched' && typeof structured.agentId === 'string' ? structured.agentId
           : typeof structured.backgroundTaskId === 'string' ? structured.backgroundTaskId : undefined;
         if (backgroundId) { item.backgroundTask = { id: backgroundId, state: 'running' }; tasks.set(backgroundId, item); }
+        // A workflow runs in the background by definition: it returns at once, and a notification says when it is done.
+        else if (item.title === 'Workflow' && item.status !== 'failed') {
+          const taskId = string(structured.taskId) || string(structured.task_id) || callId;
+          item.backgroundTask = { id: taskId, state: 'running' }; tasks.set(taskId, item);
+          if (item.status === 'completed') item.status = 'running';
+        }
         const raw = output.map(b => b.text ?? '').join('\n');
         if (/^(?:Warning: truncated output|\[output truncated\])/im.test(raw)) append(item, [], '来源输出已截断，只展示实际取得的片段。');
         if (returned.some(b => /^(?:Warning: truncated output|\[output truncated\])/im.test(b.text ?? ''))) observeResult(item, 'partial');

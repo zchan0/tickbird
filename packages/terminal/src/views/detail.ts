@@ -212,7 +212,7 @@ function subagentDoc(row: ChapterRow, subagent: SessionData, width: number, caps
   const view = turnView(group, true, subagent.provider);
   const running = row.items[0]?.status === 'running';
   const status: PageContext['status'] = running ? { kind: 'running', since: view.turn.start, verb: view.verb } : { kind: 'idle' };
-  const page = (max?: number) => turnBody({ session: subagent, groups: [group], index: 0, status, extras: {}, caps, width, now, answerOpen: true, ...(max ? { promptMax: max } : {}) });
+  const page = (max?: number) => turnBody({ session: subagent, groups: [group], index: 0, status, extras: {}, caps, width, now, answerOpen: true, subagentPage: true, ...(max ? { promptMax: max } : {}) });
   // The prompt is the page's first block, up to its first empty line.
   const promptEnd = (lines: Line[]) => { const at = lines.findIndex(line => !plainText(line).trim()); return at < 0 ? lines.length : at; };
   const full = page(), cut = page(PROMPT_LINES);

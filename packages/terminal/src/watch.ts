@@ -174,9 +174,12 @@ export async function watch(options: WatchOptions, caps: Capabilities): Promise<
     if (effect.kind === 'view') { say(viewImage(effect.image), 4000); return; }
     if (effect.kind === 'link') { say(openLink(effect.link), 4000); return; }
     if (effect.kind === 'copy') {
-      // OSC 52 only where the terminal says it takes it; otherwise the text is shown to copy by hand.
-      if (caps.clipboard) out.write(clipboardBytes(effect.text));
-      else say(`这个终端不能直接复制，请手动复制：${effect.text}`, 15000);
+      // OSC 52 where the terminal says it takes it; on this Mac, the system clipboard; otherwise the text is shown to copy by hand.
+      const copied = caps.clipboard ? (out.write(clipboardBytes(effect.text)), true)
+        : process.platform === 'darwin' && !process.env.SSH_CONNECTION && spawnSync('pbcopy', [], { input: effect.text, timeout: 2000 }).status === 0;
+      // Copied, it says nothing (y), but for words dragged over: their inverse is gone on release, and nothing else would tell.
+      if (!copied) say(`这个终端不能直接复制，请手动复制：${effect.text}`, 15000);
+      else if (effect.selected) say('已复制', 1500);
       return;
     }
     say(openFile(effect.path, effect.line, {

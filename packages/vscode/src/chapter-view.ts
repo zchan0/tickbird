@@ -4,7 +4,7 @@ import type { ChapterRow, ChangedFile, TurnSegment } from '../../core/src/chapte
 import { backgroundLine, clock, rowView, turnView } from '../../core/src/turn-view';
 import { announcedRow, callEnd, callSteps, callText, callTool } from '../../core/src/call-line';
 import { shortFileLabels } from '../../core/src/presentation';
-import { agentFacts, agentGroup, agentState } from '../../core/src/agent-line';
+import { partnerOf, partnerRun } from '../../core/src/agent-line';
 import { renderMarkdown } from './markdown';
 import type { LiveExtras } from '../../core/src/live-extras';
 
@@ -12,8 +12,9 @@ export type { LiveExtras };
 
 /**
  * One turn as chapters: the agent's own commentary heads each chapter and the
- * calls it made follow in source order. Rows are `button[data-item-id]`, so a
- * click takes the same path to the editor-area detail as every other row.
+ * calls it made follow in source order. Rows are `[role="button"][data-item-id]`,
+ * so a click takes the same path to the editor-area detail as every other row,
+ * and their words can still be selected and copied, as a button's cannot.
  * Every block keeps a `data-observation-key` for the live morph.
  */
 export interface ChapterRenderers {
@@ -55,7 +56,7 @@ function callHtml(row: ChapterRow, key: string, session: SessionData, live: bool
   const title = [callTool(row, session), label, end?.kind === 'failed' ? `${end.word} ${end.reason}`.trim() : '', view.out || row.running ? '进行中' : '', row.openable ? '' : unavailable(row.items)].filter(Boolean).join(' · ');
   const tool = escapeHtml(callTool(row, session));
   const body = row.openable
-    ? `<button type="button" class="crow node-button" data-item-id="${escapeHtml(row.id)}" data-tool="${tool}" data-status="${state}"${out} aria-pressed="false" title="${escapeHtml(title)}">${copy}</button>`
+    ? `<div class="crow node-button" role="button" tabindex="0" data-item-id="${escapeHtml(row.id)}" data-tool="${tool}" data-status="${state}"${out} aria-pressed="false" title="${escapeHtml(title)}">${copy}</div>`
     : `<div class="crow" data-tool="${tool}" data-status="${state}"${out} role="group" aria-label="${escapeHtml(title)}">${copy}</div>`;
   // A question's chosen answers, under it on the tree.
   const choices = (view.choices ?? []).map(choice => {
@@ -77,7 +78,8 @@ function callsHtml(all: ChapterRow[], key: string, session: SessionData, live: b
   if (!rows.length) return '';
   const names = rows.map(row => callTool(row, session));
   // Agent calls are other agents set to work, not tools: set off from them, each with a dot for its state, as in the terminal.
-  const agent = (row: ChapterRow) => row.items[0]?.kind === 'subagent';
+  // So are the calls that deal with another agent or take on a way of working (SendMessage, Skill, Workflow).
+  const agent = (row: ChapterRow) => partnerOf(row, session) !== undefined;
   let html = '', block = '', start = 0;
   const close = (end: number) => {
     if (!block) return;
@@ -105,23 +107,26 @@ function callsHtml(all: ChapterRow[], key: string, session: SessionData, live: b
 /**
  * Agent calls, as in the terminal (design v10): the tool's name and the lead
  * their descriptions share, then each a dot coloured by its state, its own
- * words, and under them what the run came to.
+ * words, and under them what the run came to. A message, a skill and a
+ * workflow are set the same way (design v14): → the agent written to, ◆ the
+ * skill, a workflow's dot with its phases under it.
  */
 function agentsHtml(rows: ChapterRow[], key: string, rowKey: string, session: SessionData, unavailable: ChapterRenderers['unavailable']): string {
-  const group = agentGroup(rows.map(row => callText(row, session).text));
+  const run = partnerRun(rows, session, Date.now());
   const states: Record<string, string> = { running: '运行中', done: '已完成', failed: '失败', stopped: '已停止' };
   const items = rows.map((row, index) => {
-    const state = agentState(row);
-    const facts = agentFacts(row, Date.now());
-    const label = group.names[index] + (row.count > 1 ? ` · ${row.count} 次` : '');
-    const title = [callTool(row, session), callText(row, session).text, states[state], facts, row.openable ? '' : unavailable(row.items)].filter(Boolean).join(' · ');
-    const copy = `<span class="cdot" aria-hidden="true"></span><span class="clabel">${escapeHtml(label)}</span>${facts ? `<span class="cfacts">${escapeHtml(facts)}</span>` : ''}`;
+    const line = run.lines[index];
+    const state = line.state;
+    const title = [run.tool, run.lead, line.name, line.mark === 'dot' ? states[state] : '', line.facts, row.openable ? '' : unavailable(row.items)].filter(Boolean).join(' · ');
+    const mark = line.mark === 'dot' ? '<span class="cdot" aria-hidden="true"></span>' : `<span class="csym" aria-hidden="true">${line.mark}</span>`;
+    const phases = line.phases.length ? `<ol class="cphases">${line.phases.map(phase => `<li>${escapeHtml(phase)}</li>`).join('')}</ol>` : '';
+    const copy = `${mark}<span class="clabel">${escapeHtml(line.name)}</span>${phases}${line.facts ? `<span class="cfacts">${escapeHtml(line.facts)}</span>` : ''}`;
     const body = row.openable
-      ? `<button type="button" class="crow cagent node-button" data-item-id="${escapeHtml(row.id)}" data-tool="Agent" data-state="${state}" aria-pressed="false" title="${escapeHtml(title)}">${copy}</button>`
-      : `<div class="crow cagent" data-tool="Agent" data-state="${state}" role="group" aria-label="${escapeHtml(title)}">${copy}</div>`;
+      ? `<div class="crow cagent node-button" role="button" tabindex="0" data-item-id="${escapeHtml(row.id)}" data-tool="${escapeHtml(run.tool)}" data-state="${state}" aria-pressed="false" title="${escapeHtml(title)}">${copy}</div>`
+      : `<div class="crow cagent" data-tool="${escapeHtml(run.tool)}" data-state="${state}" role="group" aria-label="${escapeHtml(title)}">${copy}</div>`;
     return `<li class="cagent-item" data-observation-key="${escapeHtml(`${rowKey}+${index}`)}">${body}</li>`;
   }).join('');
-  return `<div class="crun" data-observation-key="${escapeHtml(key)}"><div class="ctool">${escapeHtml(callTool(rows[0], session))}${group.lead ? `<span class="clead"> · ${escapeHtml(group.lead)}</span>` : ''}</div><ol class="cagent-list">${items}</ol></div>`;
+  return `<div class="crun" data-observation-key="${escapeHtml(key)}"><div class="ctool">${escapeHtml(run.tool)}${run.lead ? `<span class="clead"> · ${escapeHtml(run.lead)}</span>` : ''}</div><ol class="cagent-list">${items}</ol></div>`;
 }
 
 /** The label over a block, as in the terminal: a small grey word on a line of its own; coloured only for what is going on (Needs approval, Interrupted). */
@@ -143,8 +148,8 @@ function changesHtml(files: ChangedFile[], turnKey: string): string {
   // 等: some files' lines are counted and some are not; with none counted there is no total to qualify.
   const partial = files.some(file => file.added === undefined) && files.some(file => file.added !== undefined);
   const names = shortFileLabels(files.map(file => file.path));
-  const rows = files.map((file, index) => `<li data-observation-key="${escapeHtml(file.id)}"><button type="button" class="cfile node-button" data-item-id="${escapeHtml(file.id)}" data-path="${escapeHtml(file.path)}" aria-pressed="false" title="${escapeHtml(file.path)}">`
-    + `<span class="cmark" data-mark="${file.mark}">${file.mark}</span><span class="cname">${escapeHtml(names[index] || base(file.path))}</span><span class="csize">${size(file.added, file.removed)}</span></button></li>`).join('');
+  const rows = files.map((file, index) => `<li data-observation-key="${escapeHtml(file.id)}"><div class="cfile node-button" role="button" tabindex="0" data-item-id="${escapeHtml(file.id)}" data-path="${escapeHtml(file.path)}" aria-pressed="false" title="${escapeHtml(file.path)}">`
+    + `<span class="cmark" data-mark="${file.mark}">${file.mark}</span><span class="cname">${escapeHtml(names[index] || base(file.path))}</span><span class="csize">${size(file.added, file.removed)}</span></div></li>`).join('');
   return `<details class="cfold cchanges" data-fold="changes:${escapeHtml(turnKey)}" data-observation-key="changes:${escapeHtml(turnKey)}"><summary>${label('Changes')}`
     + `<span class="fline"><span class="ftext">${files.length} 个文件 <span class="csize">${size(added, removed)}</span>${partial ? '<span class="cnote">等</span>' : ''}</span><span class="fchev" aria-hidden="true">▾</span></span></summary>`
     + `<ol class="cfiles">${rows}</ol></details>`;
@@ -154,7 +159,11 @@ function changesHtml(files: ChangedFile[], turnKey: string): string {
 const waitingFor = ({ tool, summary }: { tool: string; summary: string }): string[] =>
   [tool, /^\/.+\/[^/]+$/.test(summary) ? summary.split('/').at(-1)! : summary].filter(Boolean);
 
-export interface TurnContext { latest: boolean; session: SessionData; extras?: LiveExtras }
+export interface TurnContext {
+  latest: boolean; session: SessionData; extras?: LiveExtras;
+  /** A subagent's own turn: what it was given is its Task, what it gave back its Result. */
+  subagent?: boolean;
+}
 
 /**
  * The whole turn, top to bottom, as the terminal sets it (design v11 B): what
@@ -164,7 +173,7 @@ export interface TurnContext { latest: boolean; session: SessionData; extras?: L
  * Needs approval. Over, the answer and the changes fold to a line each; the
  * process stays open.
  */
-export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { latest, session, extras = {} }: TurnContext): string {
+export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { latest, session, extras = {}, subagent = false }: TurnContext): string {
   const view = turnView(group, latest, session.provider);
   const { turn, live } = view;
   // Waiting for the reader keeps the turn open, whatever its record clock says.
@@ -175,7 +184,7 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { 
   const segmentHtml = (segment: TurnSegment) => {
     if (segment.kind === 'answer') return `<li class="cseg" data-observation-key="${escapeHtml(segment.item.id)}">${words(segment.item)}</li>`;
     // Your own words sent during the turn: a prompt too.
-    if (segment.kind === 'interjection') return `<li class="cseg tprompt" data-observation-key="${escapeHtml(segment.item.id)}">${label('Prompt')}${render.request(segment.item)}</li>`;
+    if (segment.kind === 'interjection') return `<li class="cseg tprompt" data-observation-key="${escapeHtml(segment.item.id)}">${label(subagent ? 'Task' : 'Prompt')}${render.request(segment.item)}</li>`;
     const { chapter } = segment;
     return `<li class="chapter" data-observation-key="${escapeHtml(chapter.key)}">${chapter.headings.map(words).join('')}`
       + callsHtml(chapter.rows, chapter.key, session, open, Boolean(waiting), render.unavailable)
@@ -201,11 +210,11 @@ export function renderChapterTurn(group: TurnGroup, render: ChapterRenderers, { 
   const answers = open ? [] : view.answers.map(segment => segment.kind === 'answer' ? render.publicBody(segment.item) : '').filter(Boolean);
   const answerItems = open ? [] : view.answers.flatMap(segment => segment.kind === 'answer' ? [segment.item] : []);
   const closing = answers.length
-    ? `<details class="cfold fanswer" data-fold="answer:${escapeHtml(group.key)}" data-observation-key="answer:${escapeHtml(group.key)}"><summary>${label('Final Answer')}`
+    ? `<details class="cfold fanswer" data-fold="answer:${escapeHtml(group.key)}" data-observation-key="answer:${escapeHtml(group.key)}"><summary>${label(subagent ? 'Result' : 'Final Answer')}`
       + `<span class="fline"><span class="ftext">${escapeHtml(flatAnswer(answers.join('\n')))}</span><span class="fchev" aria-hidden="true">▾</span></span></summary>`
       + `<div class="fbody">${answerItems.map(words).join('')}</div></details>`
     : !open && turn.aborted ? `<div class="tend" data-observation-key="interrupted:${escapeHtml(group.key)}">${label('Interrupted', 'red')}</div>` : '';
-  const prompt = turn.request ? `<section class="tprompt" data-observation-key="prompt:${escapeHtml(group.key)}">${label('Prompt')}${render.request(turn.request)}</section>` : '';
+  const prompt = turn.request ? `<section class="tprompt" data-observation-key="prompt:${escapeHtml(group.key)}">${label(subagent ? 'Task' : 'Prompt')}${render.request(turn.request)}</section>` : '';
   const ordinal = group.ordinal ?? 0;
   const started = clock(turn.start);
   const background = backgroundLine(session);
@@ -258,6 +267,14 @@ export const chapterStyles = `
   .crow.cagent { display: grid; grid-template-columns: 7px minmax(0, 1fr); column-gap: 8px; align-items: baseline; color: var(--vscode-foreground); }
   .cagent .clabel { -webkit-line-clamp: 2; }
   .cagent .cfacts { grid-column: 2; font: var(--tb-small)/1.6 var(--tb-family); color: var(--ink-3); }
+  /* → the agent a message went to, ◆ a skill: grey, where an agent's dot stands. */
+  .csym { justify-self: center; width: 7px; display: flex; justify-content: center; color: var(--ink-3); font-size: var(--tb-small); }
+  /* A workflow's phases under what it does, on a tree of their own. */
+  .cphases { grid-column: 2; list-style: none; margin: 0; padding: 0; font: var(--tb-small)/1.6 var(--tb-family); color: var(--ink-3); }
+  .cphases li { position: relative; padding-left: 16px; }
+  .cphases li::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; border-left: 1px solid var(--hair); }
+  .cphases li:last-child::before { bottom: auto; height: .8em; }
+  .cphases li::after { content: ""; position: absolute; left: 4px; top: .8em; width: 7px; border-top: 1px solid var(--hair); }
   .cdot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); transform: translateY(-1px); }
   .cagent[data-state="running"] .cdot { background: var(--gold); }
   .cagent[data-state="done"] .cdot { background: var(--green); }

@@ -44,7 +44,7 @@ export interface DetailRenderOptions { item: TimelineItem; items?: TimelineItem[
 export function renderSubagentTurn(session: SessionData, running: boolean, locale?: string): string {
   const group = visibleTurnGroups(session)[0];
   if (!group) return '<p class="empty">子任务还没有记录。</p>';
-  return renderTurn(group, session, locale, running)
+  return renderTurn(group, session, locale, running, undefined, true)
     // The page's only turn: current, as the panel marks the turn on screen.
     .replace('<section class="turn-panel', `<section data-current${running ? ' data-fresh' : ''} class="turn-panel`)
     .replace('<details class="cfold fanswer"', '<details open class="cfold fanswer"');
@@ -107,6 +107,7 @@ const styles = `
   body:has(> main.detail) { background: var(--vscode-editor-background); }
   body { color: var(--vscode-foreground); background: var(--surface); font: var(--tb-text)/1.6 var(--tb-family); }
   button { color: inherit; font: inherit; cursor: pointer; }
+  [role="button"][data-item-id] { cursor: pointer; user-select: text; }
   button:disabled { cursor: default; opacity: .65; }
   button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
   h1, h2, h3, p { margin: 0; }
@@ -471,7 +472,9 @@ const script = `(() => {
   let focusGroupId = typeof saved.focusGroupId === 'string' ? saved.focusGroupId : '';
   const actions = ['chooseSession', 'refresh', 'coverage', 'keep', 'openFolder', 'resumeFollow', 'dismissHint', 'olderEdit', 'newerEdit'];
   let focusAction = typeof saved.focusAction === 'string' && actions.includes(saved.focusAction) ? saved.focusAction : '';
-  const nodes = () => [...document.querySelectorAll('button[data-item-id]')];
+  // A row that opens its detail: a button, or a call or a file on the page, whose words can be selected.
+  const ROW = 'button[data-item-id], [role="button"][data-item-id]';
+  const nodes = () => [...document.querySelectorAll(ROW)];
   const panels = () => [...document.querySelectorAll('[data-turn-panel]')];
   const lensTurns = () => [...document.querySelectorAll('.toc button[data-lens-turn-id]')];
   const groups = () => [...document.querySelectorAll('details[data-action-group]')];
@@ -580,9 +583,18 @@ const script = `(() => {
     else if ((event.key === '<' || event.key === '>') && document.querySelector('[data-action="olderEdit"]')) { event.preventDefault(); vscode.postMessage({ type: event.key === '<' ? 'olderEdit' : 'newerEdit' }); }
   });
   selectTurn();
+  // A row's words dragged over are being selected to copy, not clicked: the row stays as it is.
+  const selecting = target => { const chosen = window.getSelection && window.getSelection(); return Boolean(chosen && !chosen.isCollapsed && String(chosen).trim() && target.contains(chosen.anchorNode)); };
+  // Enter or Space on a row opens it, as on a button.
+  document.addEventListener('keydown', event => {
+    const target = event.target instanceof Element && event.target.matches('[role="button"][data-item-id]') ? event.target : null;
+    if (!target || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault(); target.click();
+  });
   document.addEventListener('click', event => {
-    const target = event.target instanceof Element ? event.target.closest('button') : null;
+    const target = event.target instanceof Element ? event.target.closest('button, [role="button"][data-item-id]') : null;
     if (!target || target.disabled) return;
+    if (!target.matches('button') && selecting(target)) return;
     const turnId = target.dataset.lensTurnId;
     if (turnId) { focusAction = ''; focusGroupId = ''; goTo(turnId); return; }
     if (target.dataset.itemId) {
@@ -856,7 +868,7 @@ function renderRequest(item: TimelineItem): string {
   return `<section class="turn-question" data-text-id="${escapeHtml(item.id)}" aria-label="用户问题"><div class="question-text">${renderUserText(publicBody(item))}</div><div class="question-foot">${more}</div></section>`;
 }
 
-function renderTurn(group: TurnGroup, session: SessionData, locale?: string, latest = false, extras?: LiveExtras): string {
+function renderTurn(group: TurnGroup, session: SessionData, locale?: string, latest = false, extras?: LiveExtras, subagent = false): string {
   const keyed = (html: string, id: string) => html.slice(0, html.indexOf('>')).includes('data-observation-key=') ? html
     : html.replace(/^<(li|section)/, `<$1 data-observation-key="${escapeHtml(id)}"`);
   return renderChapterTurn(group, {
@@ -865,7 +877,7 @@ function renderTurn(group: TurnGroup, session: SessionData, locale?: string, lat
     record: item => keyed(renderItem(item, locale), item.id),
     attachments: renderAttachments,
     unavailable: unavailableReason,
-  }, { latest, session, extras });
+  }, { latest, session, extras, subagent });
 }
 
 function requestFirstSentence(group: TurnGroup): string {

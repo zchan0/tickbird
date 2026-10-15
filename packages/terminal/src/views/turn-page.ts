@@ -4,7 +4,7 @@ import type { ChapterRow, TurnSegment } from '../../../core/src/chapters';
 import type { LiveExtras } from '../../../core/src/live-extras';
 import { plainPasted } from '../../../core/src/pasted';
 import { backgroundLine, clock, publicBody, rowView, turnView, type TurnView } from '../../../core/src/turn-view';
-import { agentFacts, agentGroup, agentState } from '../../../core/src/agent-line';
+import { partnerOf, partnerRun } from '../../../core/src/agent-line';
 import { symbol, type Capabilities } from '../caps';
 import { cutLine, plainText, row, spans, type Color, type Line, type Span, type Style } from '../screen';
 import { textWidth } from '../width';
@@ -125,6 +125,8 @@ export interface PageContext {
   answerOpen?: boolean;
   /** At most this many lines of the prompt, then …: a subagent's task can run long. */
   promptMax?: number;
+  /** A subagent's own turn: what it was given is its Task, what it gave back its Result. */
+  subagentPage?: boolean;
   /** Subagents' own sessions, by the id of the call that started each: what a running one has done so far. */
   subagents?: ReadonlyMap<string, SessionData>;
   /** The turn's changes are listed a file a line. */
@@ -216,7 +218,7 @@ function promptLines(text: string, ctx: PageContext): Line[] {
   const bold = (line: Span[]): Span[] => line.map(span => ({ ...span, style: { ...span.style, bold: true } }));
   const words = text.replace(/\r/g, '').split('\n').flatMap(source => source.trim() ? wrapSpans(inlineSpans(source.trimEnd()), room).map(line => [...lead, ...bold(spans(line))]) : [lead.slice(0, 1)]);
   const max = ctx.promptMax;
-  const lines: Line[] = [heading('Prompt', quiet(ctx)), ...(max && words.length > max ? [...words.slice(0, max), [...lead, { text: '… ', style: quiet(ctx) }, { text: symbol(ctx.caps, '▾'), style: { ...quiet(ctx), bold: true } }]] : words)];
+  const lines: Line[] = [heading(ctx.subagentPage ? 'Task' : 'Prompt', quiet(ctx)), ...(max && words.length > max ? [...words.slice(0, max), [...lead, { text: '… ', style: quiet(ctx) }, { text: symbol(ctx.caps, '▾'), style: { ...quiet(ctx), bold: true } }]] : words)];
   // A line of the band's own above and below: room around the words.
   return tint ? band([[], ...lines, []], ctx.width, tint) : lines;
 }
@@ -344,41 +346,44 @@ function callLines(all: ChapterRow[], view: TurnView, ctx: PageContext, waitingO
     fades.set(chapterRow, faded(age));
     return true;
   });
-  // Runs of calls, and runs of Agent calls: another agent's work is set off from them (agentLines).
+  // Runs of calls, and runs of one partner tool's calls (Agent, SendMessage, Skill, Workflow): set off from them (agentLines).
   const runs: ChapterRow[][] = [];
+  const partner = (chapterRow: ChapterRow) => partnerOf(chapterRow, ctx.session);
   for (const chapterRow of rows) {
     const last = runs.at(-1);
-    if (last && isAgent(last[0]) === isAgent(chapterRow)) last.push(chapterRow); else runs.push([chapterRow]);
+    if (last && partner(last[0]) === partner(chapterRow) && (!partner(chapterRow) || callTool(last[0], ctx.session) === callTool(chapterRow, ctx.session))) last.push(chapterRow); else runs.push([chapterRow]);
   }
-  return runs.flatMap((run, index) => [...(index ? [[]] : []), ...(isAgent(run[0]) ? agentLines(run, view, ctx, waitingOn) : treeLines(run, view, ctx, waitingOn, fades, rows.at(-1)))]);
+  return runs.flatMap((run, index) => [...(index ? [[]] : []), ...(partner(run[0]) ? agentLines(run, view, ctx, waitingOn) : treeLines(run, view, ctx, waitingOn, fades, rows.at(-1)))]);
 }
-
-/** A subagent's call: its own session's work, opened on its own page. */
-const isAgent = (chapterRow: ChapterRow): boolean => chapterRow.items[0]?.kind === 'subagent';
 
 /**
  * Agent calls are other agents set to work, not tools the agent used: set off
  * from them, under their tool's name and the lead their descriptions share, each a
  * dot whose colour is its state (gold running, green done, red failed, grey
  * stopped) and its own words in the body colour; under it, in grey, what the
- * run came to: background or not, how long, its tokens and its calls.
+ * run came to: background or not, how long, its tokens and its calls. Calls
+ * that deal with another agent or take on a way of working are set the same
+ * way (design v14): a message → the agent it went to, the message under it; a
+ * skill ◆ by name, its arguments under it; a workflow's dot and what it does,
+ * its phases hung under it.
  */
 function agentLines(rows: ChapterRow[], view: TurnView, ctx: PageContext, waitingOn: boolean): Line[] {
   const lead = ' '.repeat(MARGIN);
-  const group = agentGroup(rows.map(chapterRow => wordsOf(chapterRow, ctx.session).text));
+  const run = partnerRun(rows, ctx.session, ctx.now, chapterRow => { const callId = chapterRow.items[0]?.callId; return callId ? ctx.subagents?.get(callId) : undefined; });
   const room = Math.max(8, ctx.width - MARGIN - 2 - MARGIN);
-  const lines: Line[] = [[{ text: lead }, { text: callTool(rows[0], ctx.session), style: TOOL }, ...(group.lead ? [{ text: ' · ' + group.lead }] : [])]];
+  const lines: Line[] = [[{ text: lead }, { text: run.tool, style: TOOL }, ...(run.lead ? [{ text: ' · ' + run.lead }] : [])]];
   rows.forEach((chapterRow, index) => {
-    const state = agentState(chapterRow);
-    const dot: Style = state === 'running' ? gold(ctx) : state === 'done' ? { fg: 'green' } : state === 'failed' ? { fg: 'red' } : quiet(ctx);
+    const line = run.lines[index];
+    const state = line.state;
+    const mark: Span = line.mark === 'dot'
+      ? { text: symbol(ctx.caps, '●'), style: state === 'running' ? gold(ctx) : state === 'done' ? { fg: 'green' } : state === 'failed' ? { fg: 'red' } : quiet(ctx) }
+      : { text: symbol(ctx.caps, line.mark), style: quiet(ctx) };
     const style = owned({}, chapterRow.id);
-    const label = group.names[index] + (chapterRow.count > 1 ? ` · ${chapterRow.count} 次` : '');
-    const parts = wrapSpans([{ text: label, style }], room);
+    const parts = wrapSpans([{ text: line.name, style }], room);
     if (parts.length > CALL_LINES) parts.splice(CALL_LINES - 1, Infinity, [...cutLine([{ text: parts.slice(CALL_LINES - 1).map(plainText).join(' ') + '  ', style }], room)]);
-    const callId = chapterRow.items[0]?.callId;
-    const facts = agentFacts(chapterRow, ctx.now, callId ? ctx.subagents?.get(callId) : undefined);
-    const own: Line[] = parts.map((part, piece) => [{ text: lead }, piece ? { text: '  ' } : { text: symbol(ctx.caps, '●'), style: dot }, ...(piece ? [] : [{ text: ' ' }]), ...part]);
-    if (facts) own.push(cutLine([{ text: lead + '  ' }, { text: facts, style: owned(quiet(ctx), chapterRow.id) }], ctx.width));
+    const own: Line[] = parts.map((part, piece) => [{ text: lead }, piece ? { text: '  ' } : mark, ...(piece ? [] : [{ text: ' ' }]), ...part]);
+    line.phases.forEach((phase, at) => own.push(cutLine([{ text: lead + '  ' + symbol(ctx.caps, at === line.phases.length - 1 ? '└' : '├') + ' ', style: hair(ctx) }, { text: phase, style: owned(quiet(ctx), chapterRow.id) }], ctx.width)));
+    if (line.facts) own.push(cutLine([{ text: lead + '  ' }, { text: line.facts, style: owned(quiet(ctx), chapterRow.id) }], ctx.width));
     if (chapterRow.openable) TARGETS.set(own[0] as object, [{ row: chapterRow, height: own.length }]);
     lines.push(...own);
   });
@@ -503,7 +508,7 @@ function answerLines(view: TurnView, ctx: PageContext): Line[] {
   const lead: Span[] = [{ text: ' '.repeat(MARGIN) }];
   if (!text) return view.turn.aborted ? [heading('Interrupted', 'red')] : [];
   // As the prompt is: the label over the answer; folded, one full line of it and a ▾ to open it.
-  const head = heading('Final Answer', quiet(ctx));
+  const head = heading(ctx.subagentPage ? 'Result' : 'Final Answer', quiet(ctx));
   if (ctx.answerOpen) {
     ANSWER.set(head, 1);
     return [head, ...wordLines(text, ctx)];

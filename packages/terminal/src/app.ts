@@ -2,8 +2,9 @@ import type { SessionData } from '../../core/src/model';
 import type { TurnGroup } from '../../core/src/timeline';
 import type { LiveExtras } from '../../core/src/live-extras';
 import { symbol, type Capabilities } from './caps';
-import type { InputEvent } from './input';
+import type { InputEvent, Key } from './input';
 import { cutLine, row, spans, type Line, type Span } from './screen';
+import { dragged, markSelection, selectedText, type Drag } from './selection';
 import { contentsEntries, contentsLines, contentsOffset, ENTRY_LINES } from './views/contents';
 import { callLink, detailDoc, recordedImage, type DetailDoc, type RecordedImage } from './views/detail';
 import { wrapSpans } from './views/prose';
@@ -35,7 +36,7 @@ export interface Model {
   subagentsRevision?: number;
 }
 
-export type Effect = { kind: 'open'; path: string; line?: number } | { kind: 'copy'; text: string; what: string } | { kind: 'focus' } | { kind: 'view'; image: RecordedImage } | { kind: 'link'; link: { target: string; name: string } };
+export type Effect = { kind: 'open'; path: string; line?: number } | { kind: 'copy'; text: string; what: string; selected?: boolean } | { kind: 'focus' } | { kind: 'view'; image: RecordedImage } | { kind: 'link'; link: { target: string; name: string } };
 
 export interface AppState {
   mode: 'turn' | 'contents' | 'help' | 'detail';
@@ -69,6 +70,8 @@ export interface AppState {
    * one after another; the pointer counts again only once it moves away.
    */
   scrolledAt?: { x: number; y: number };
+  /** The mouse button is down: from where, and the cell it is on now. A drag selects; let go in place, it is a click. */
+  drag?: Drag;
   /** For the controller: what to do outside the screen. */
   effect?: Effect;
   /** A short line in the footer, e.g. after copying. */
@@ -328,8 +331,23 @@ function targetAt(state: AppState, model: Model, y: number, x: number, targets =
 }
 
 export function key(state: AppState, event: InputEvent, model: Model): AppState {
-  const page = bodyHeight(state, model);
   if (event.type === 'mouse') {
+    // The button down starts a drag; let go where it went down, it is a click, as in any terminal.
+    if (event.action === 'press') return event.button === 0 ? { ...state, drag: { from: { x: event.x, y: event.y }, to: { x: event.x, y: event.y } } } : state;
+    if (event.action === 'release') {
+      if (!state.drag) return state;
+      const { drag, ...rest } = state;
+      if (!dragged(drag)) return click(rest, drag.from.x, drag.from.y, model);
+      // Dragged over: what it covers is copied, as soon as the button is let go.
+      const text = selectedText(frame(rest, model), drag);
+      return text ? { ...rest, effect: { kind: 'copy', text, what: '选中的文字', selected: true } } : rest;
+    }
+    if (state.drag) {
+      if (event.action !== 'move') return state;
+      // Moving with no button down: the release went unseen (let go outside the pane). The drag is over.
+      if (event.button !== 0) { const { drag: _, ...rest } = state; return rest; }
+      return state.drag.to.x === event.x && state.drag.to.y === event.y ? state : { ...state, drag: { ...state.drag, to: { x: event.x, y: event.y } } };
+    }
     if (event.action === 'move') {
       if (state.mode !== 'turn' || (state.pointer?.x === event.x && state.pointer.y === event.y)) return state;
       if (state.scrolledAt?.x === event.x && state.scrolledAt.y === event.y) return state;
@@ -348,36 +366,47 @@ export function key(state: AppState, event: InputEvent, model: Model): AppState 
       // The wheel says where the pointer is, even when no move came before it.
       return scrollTo({ ...state, pointer: { x: event.x, y: event.y }, ...(delta < 0 ? { follow: false } : {}) }, model, state.scroll + delta);
     }
-    if (event.action !== 'press') return state;
-    if (state.mode === 'detail') {
-      if (event.y === 1 && event.x <= MARGIN + 7) return detailKey(state, 'escape', model);
-      // A click on a subagent's task opens or folds it, as ⏎ does.
-      const doc = openDetail(state, model), at = event.y - DETAIL_HEADER - 1 + (state.detail?.scroll ?? 0);
-      return doc?.fold && at >= 0 && at < doc.fold.lines ? detailKey(state, 'enter', model) : state;
-    }
-    if (state.mode === 'turn' && event.y === 1) return { ...state, mode: 'contents', selected: state.index };
-    // The line saying a new turn started takes you there: a click works whatever the input method.
-    if (state.mode === 'turn' && state.notice !== undefined && event.y === HEADER + bodyHeight(state, model) + 1) return showTurn(state, model, state.notice);
-    if (state.mode === 'turn' && event.y > HEADER) {
-      // The pointer already shows what a click opens: one click opens a call, or opens and folds the answer.
-      const targets = layout(state, model).targets;
-      const at = targetAt(state, model, event.y, event.x, targets);
-      if (at < 0) return state;
-      const selected = selectCall(state, model, at, targets);
-      if (targets[at].answer) return toggleAnswer(selected, model, targets[at], state.scroll);
-      if (targets[at].changes) return { ...selected, changesOpen: !state.changesOpen };
-      const image = openTarget(model, targets[at]);
-      if (image) { const { call: _, ...rest } = selected; return { ...rest, effect: image }; }
-      return { ...selected, mode: 'detail', detail: { scroll: 0, clicked: true } };
-    }
-    if (state.mode === 'contents' && event.y > HEADER) {
-      const entries = entriesOf(model);
-      const at = Math.floor((event.y - HEADER - 1 + contentsScroll(state, model)) / ENTRY_LINES);
-      const entry = entries[at];
-      if (entry) return entry.index === state.selected ? showTurn(state, model, entry.index) : { ...state, selected: entry.index };
-    }
     return state;
   }
+  return keyPress(state, event, model);
+}
+
+/** A click: the button let go on the cell it went down on. */
+function click(state: AppState, x: number, y: number, model: Model): AppState {
+  const event = { x, y };
+  if (state.mode === 'help') return state;
+  if (state.mode === 'detail') {
+    if (event.y === 1 && event.x <= MARGIN + 7) return detailKey(state, 'escape', model);
+    // A click on a subagent's task opens or folds it, as ⏎ does.
+    const doc = openDetail(state, model), at = event.y - DETAIL_HEADER - 1 + (state.detail?.scroll ?? 0);
+    return doc?.fold && at >= 0 && at < doc.fold.lines ? detailKey(state, 'enter', model) : state;
+  }
+  if (state.mode === 'turn' && event.y === 1) return { ...state, mode: 'contents', selected: state.index };
+  // The line saying a new turn started takes you there: a click works whatever the input method.
+  if (state.mode === 'turn' && state.notice !== undefined && event.y === HEADER + bodyHeight(state, model) + 1) return showTurn(state, model, state.notice);
+  if (state.mode === 'turn' && event.y > HEADER) {
+    // The pointer already shows what a click opens: one click opens a call, or opens and folds the answer.
+    const targets = layout(state, model).targets;
+    const at = targetAt(state, model, event.y, event.x, targets);
+    if (at < 0) return state;
+    const selected = selectCall(state, model, at, targets);
+    if (targets[at].answer) return toggleAnswer(selected, model, targets[at], state.scroll);
+    if (targets[at].changes) return { ...selected, changesOpen: !state.changesOpen };
+    const image = openTarget(model, targets[at]);
+    if (image) { const { call: _, ...rest } = selected; return { ...rest, effect: image }; }
+    return { ...selected, mode: 'detail', detail: { scroll: 0, clicked: true } };
+  }
+  if (state.mode === 'contents' && event.y > HEADER) {
+    const entries = entriesOf(model);
+    const at = Math.floor((event.y - HEADER - 1 + contentsScroll(state, model)) / ENTRY_LINES);
+    const entry = entries[at];
+    if (entry) return entry.index === state.selected ? showTurn(state, model, entry.index) : { ...state, selected: entry.index };
+  }
+  return state;
+}
+
+function keyPress(state: AppState, event: Key, model: Model): AppState {
+  const page = bodyHeight(state, model);
   const { ctrl } = event;
   if (ctrl && event.name === 'c') return { ...state, quit: true };
   // Ctrl-d and Ctrl-u move half a page, as in vim and less; other Ctrl keys mean nothing here.
@@ -450,7 +479,7 @@ const HELP: Array<[string, string]> = [
   ['t  o  y', '目录 / 在编辑器打开 / 复制'],
   ['a', '切回 Agent'],
   ['q', '退出'],
-  ['shift+拖动', '选择文字（按住 shift，终端自己选择）'],
+  ['拖动', '选中文字，松开就复制'],
 ];
 
 function detailFrame(state: AppState, model: Model): Line[] {
@@ -493,8 +522,13 @@ function withMessage(lines: Line[], state: AppState, model: Model): Line[] {
   return [...lines.slice(0, lines.length - shown.length - 1), [dim('─'.repeat(model.width))], ...shown];
 }
 
-/** Everything on screen, row by row. */
+/** Everything on screen, row by row; words being dragged over, inverted. */
 export function frame(state: AppState, model: Model): Line[] {
+  const lines = screenLines(state, model);
+  return state.drag && dragged(state.drag) ? markSelection(lines, state.drag) : lines;
+}
+
+function screenLines(state: AppState, model: Model): Line[] {
   const { width, height } = model;
   const ctx = pageContext(state, model);
   const lines: Line[] = [];

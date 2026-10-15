@@ -44,12 +44,14 @@ export const liveClient = `
     const words = part => Boolean(sayOf(part)) || part.matches('.tprompt, .turn-heading, .cfold');
     const typed = part => Boolean(sayOf(part)) && !calm;
     const typeTime = part => Math.max(SAY_MIN, Math.min(SAY_MAX, sayOf(part).textContent.length * WORD));
-    // What a part says, the same for its early copy and its record: the words' opening, or a call's tool and line.
+    // What a part says, the same for its early copy and its record: the words' opening, or a call's tool and words
+    // (not what shows after them: an agent's time runs on, a call's outcome comes with its record).
     const identity = part => {
       const say = sayOf(part);
       if (say) return 'w:' + say.textContent.replace(/\s+/g, '').slice(0, 80);
       const row = part.matches('.crow-item, .cagent-item') && part.querySelector('.crow');
-      return row ? 'c:' + row.dataset.tool + '|' + row.textContent.replace(/\s+/g, ' ').trim() : '';
+      const words = row && (row.querySelector('.clabel') || row);
+      return row ? 'c:' + row.dataset.tool + '|' + words.textContent.replace(/\s+/g, ' ').trim() : '';
     };
     const seen = new Set();
     // Before a record replaces its early copy: what is on the page now has been seen.

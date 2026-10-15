@@ -24,6 +24,8 @@ export interface TimelineItem {
   agentUsage?: { tokens?: number; toolUses?: number; durationMs?: number };
   /** The agent's own id for a call (Claude Code's tool_use id): how a subagent's own record names the call that started it. */
   callId?: string;
+  /** For a subagent: the id Claude Code gave it, which a SendMessage names it by. */
+  agentId?: string;
   /** A call that started a task in the background: whether it has reported back, or was stopped, as the record says. */
   backgroundTask?: { id: string; state: 'running' | 'returned' | 'stopped' };
   /** A native file event matched one unique static patch input; sources remain separate. */

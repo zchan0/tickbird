@@ -20,6 +20,9 @@ import type { SessionState } from '../packages/core/src/session-state';
 import { commandText, headerLines, runningClock, sessionStatus, turnBody, type PageContext } from '../packages/terminal/src/views/turn-page';
 import { textWidth } from '../packages/terminal/src/width';
 
+/** A click: the button pressed and let go on the same cell. */
+const click = (state: AppState, cell: { x: number; y: number }, model: Model): AppState =>
+  key(key(state, { type: 'mouse', action: 'press', button: 0, ...cell }, model), { type: 'mouse', action: 'release', button: 0, ...cell }, model);
 const at = (second: number) => new Date(Date.UTC(2026, 9, 6, 1, 0, second)).toISOString();
 let uuid = 0;
 const rec = (type: string, content: unknown, second: number, extra = {}) => ({ type, uuid: `u${++uuid}`, timestamp: at(second), sessionId: 'cl', cwd: '/fixture', message: { role: type, content }, ...extra });
@@ -145,7 +148,7 @@ test('reads in a row hang from one Read, one per line; each is its own call to s
   assert.equal(spans(marked).find(span => span.text.includes('├'))?.style?.dim, true, 'The tree stays grey');
   // A click on a line opens its call.
   const y = text(frame(state, model)).findIndex(line => line.includes('c.ts')) + 1;
-  state = key(state, { type: 'mouse', action: 'press', button: 0, x: 5, y }, model);
+  state = click(state, { x: 5, y }, model);
   assert.deepEqual([state.mode, state.call], ['detail', 2]);
 });
 
@@ -304,12 +307,13 @@ test('an Agent call with its subagent\'s record opens on that subagent\'s turn: 
   const { doc } = open(true);
   const lines = text(doc.lines);
   assert.deepEqual([doc.title, doc.meta, doc.copy], ['Name brainstorm', 'Agent', { text: task, what: '任务' }]);
-  // The task as the prompt, cut to its first three lines; then the subagent's words and calls; the answer open in full.
-  const prompt = lines.indexOf('  Prompt');
+  // The task under Task, cut to its first three lines; then the subagent's words and calls; its result open in full.
+  assert.ok(!lines.includes('  Prompt') && !lines.includes('  Final Answer'), 'A subagent is given a task and gives back a result');
+  const prompt = lines.indexOf('  Task');
   assert.deepEqual(lines.slice(prompt + 1, prompt + 5).map(line => line.trimEnd()), ['┃ You are helping name a developer tool.', '┃ Brainstorm, then check availability.', '┃ Reply in Chinese.', '┃ … ▾']);
   assert.deepEqual(doc.fold, { open: false, lines: 5 });
   assert.ok(lines.some(line => /└ Check npm for railbird/.test(line)), lines.join('\n'));
-  const answer = lines.indexOf('  Final Answer');
+  const answer = lines.indexOf('  Result');
   assert.match(lines[answer + 1], /railbird 最好：三个平台都空着。/);
   // ⏎ opens the task in full and folds it again; a click on it does the same.
   {
@@ -322,7 +326,7 @@ test('an Agent call with its subagent\'s record opens on that subagent\'s turn: 
     state = key(state, keyOf('enter'), model);
     assert.equal(openDetail(state, model)!.fold?.open, false);
     // The page's first line is the screen's fourth: the header takes three.
-    state = key(base, { type: 'mouse', action: 'press', button: 0, x: 6, y: 5 }, model);
+    state = click(base, { x: 6, y: 5 }, model);
     assert.equal(openDetail(state, model)!.fold?.open, true);
   }
   // Still running: no answer yet, the spinner at its end.
@@ -353,6 +357,31 @@ test('Agent calls sit off the band: the shared lead beside the tool\'s name, a d
   lines = text(body).map(line => line.trimEnd());
   const stopped = spans(body[lines.indexOf('  ● reading')]).find(span => span.text === '●')!.style;
   assert.equal(stopped?.dim, true);
+});
+
+test('a message, a skill and a workflow are set as Agent calls are: → the agent written to, ◆ the skill, a workflow\'s dot and phases (design v14)', () => {
+  const script = "export const meta = {\n  name: 'review-changes',\n  description: 'Review changed files, verify each finding',\n  phases: [{ title: 'Review' }, { title: 'Verify', detail: 'one agent a finding' }],\n}\nawait agent('x')";
+  const records = [
+    rec('user', '整理经验文档，再审查改动', 0),
+    call('a1', 'Agent', { description: 'Compile lessons doc', prompt: 'p', run_in_background: true }, 1),
+    { ...result('a1', 1, false, 'launched'), toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'a8a1', description: 'Compile lessons doc', prompt: 'p', outputFile: '/tmp/o' } },
+    said('网络断了，让它接着做。', 2),
+    call('m1', 'SendMessage', { to: 'a8a1', summary: 'Resume lessons doc after network error', message: 'Resume the task.' }, 3),
+    { ...result('m1', 3, false, 'Resuming agent a8a1'), toolUseResult: { success: true, message: 'Resuming agent a8a1', resumedAgentId: 'a8a1' } },
+    said('设置提醒要用 schedule 技能。', 4),
+    call('k1', 'Skill', { skill: 'schedule', args: '为行程设置几个定时提醒' }, 5), result('k1', 5),
+    said('按你说的用 workflow。', 6),
+    call('w1', 'Workflow', { script }, 7), result('w1', 7, false, 'Workflow started: wf_abc'),
+  ];
+  const lines = (extra: unknown[] = [], now = 72) => text(turnBody(ctxOf({ ...modelOf(parse([...records, ...extra]), { width: 70, height: 80, now: Date.parse(at(now)) }), caps: ONE_CELL }, 0))).map(line => line.trimEnd());
+  let shown = lines();
+  const after = (head: string, count: number) => { const at = shown.indexOf(head); assert.ok(at >= 0, `${head}\n${shown.join('\n')}`); return shown.slice(at + 1, at + 1 + count); };
+  assert.deepEqual(after('  SendMessage', 2), ['  → Compile lessons doc', '    Resume lessons doc after network error']);
+  assert.deepEqual(after('  Skill', 2), ['  ◆ schedule', '    为行程设置几个定时提醒']);
+  assert.deepEqual(after('  Workflow · review-changes', 4), ['  ● Review changed files, verify each finding', '    ├ Review', '    └ Verify', '    后台 · 1m 5s']);
+  // Its notification: done, and how long it ran.
+  shown = lines([rec('user', '<task-notification>\n<task-id>wf_abc</task-id>\n<tool-use-id>w1</tool-use-id>\n<status>completed</status>\n<summary>Workflow review-changes completed</summary>\n</task-notification>', 40, { origin: { kind: 'task-notification' } })], 90);
+  assert.deepEqual(after('  Workflow · review-changes', 4).at(-1), '    后台 · 33s');
 });
 
 test('a background command stopped with TaskStop is not left running', () => {
@@ -522,7 +551,7 @@ test('following shows the newest turn and jumps to a new one; an older turn on s
   assert.deepEqual(spans(notice).find(span => span.text.includes('New turn'))?.style, { fg: 'yellow', bold: true });
   // A click on the notice, or 】 from a Chinese input method, does what ] does.
   const noticeY = text(frame(state, third)).length;
-  assert.deepEqual([key(state, { type: 'mouse', action: 'press', button: 0, x: 3, y: noticeY }, third).index, key(state, { type: 'mouse', action: 'press', button: 0, x: 3, y: noticeY - 1 }, third).index], [2, 0]);
+  assert.deepEqual([click(state, { x: 3, y: noticeY }, third).index, click(state, { x: 3, y: noticeY - 1 }, third).index], [2, 0]);
   assert.equal(key(state, new InputParser().feed('】')[0], third).index, 2);
   // ] jumps straight to the newest turn and follows again.
   state = key(state, keyOf(']'), third);
@@ -613,7 +642,7 @@ test('the pointer brings up the call under it; one click opens it', () => {
   assert.equal(spans(screen[y - 1]).find(span => span.text === 'Run only the width tests')?.style?.dim, false);
   assert.match(text(screen)[0], /⏎ 详情/);
   assert.equal(state.call, undefined);
-  state = key(state, { type: 'mouse', action: 'press', button: 0, x: 10, y }, model);
+  state = click(state, { x: 10, y }, model);
   assert.deepEqual([state.mode, state.call], ['detail', 1]);
 });
 
@@ -779,7 +808,7 @@ test('目录 opens with t, moves with ↑↓ and opens a turn with ⏎', () => {
   state = key(state, keyOf('enter'), model);
   assert.deepEqual([state.mode, state.index, state.follow], ['turn', 0, false]);
   // A click on "第 N 轮" opens it too.
-  state = key(state, { type: 'mouse', action: 'press', button: 0, x: 3, y: 1 }, model);
+  state = click(state, { x: 3, y: 1 }, model);
   assert.equal(state.mode, 'contents');
   state = key(state, keyOf('escape'), model);
   assert.equal(state.mode, 'turn');
@@ -1023,12 +1052,39 @@ test('back from a detail a click opened, nothing stays selected; from one opened
   const model = modelOf(parse([...FIRST, ...SECOND]));
   let state = key(update(initialState(), model), keyOf('['), model);
   const y = text(frame(state, model)).findIndex(line => line.includes('Run the unit tests')) + 1;
-  state = key(state, { type: 'mouse', action: 'press', button: 0, x: 6, y }, model);
+  state = click(state, { x: 6, y }, model);
   assert.equal(state.mode, 'detail');
   assert.equal(key(state, keyOf('escape'), model).call, undefined);
   const byKey = key(key(key(state, keyOf('escape'), model), keyOf('down'), model), keyOf('enter'), model);
   assert.equal(byKey.mode, 'detail');
   assert.equal(key(byKey, keyOf('escape'), model).call, 0);
+});
+
+test('dragging over words selects them, inverted, and letting go copies them; let go in place, it is a click', () => {
+  const model = modelOf(parse([...FIRST, ...SECOND]));
+  const base = key(update(initialState(), model), keyOf('['), model);
+  const lines = text(frame(base, model));
+  const y = lines.findIndex(line => line.includes('先跑一遍测试，看失败在哪一步。')) + 1;
+  const mouse = (state: AppState, action: 'press' | 'move' | 'release', x: number, at: number, button = 0) => key(state, { type: 'mouse', action, button, x, y: at }, model);
+  // Down on the words, across them and on to the next line: what is covered is inverted.
+  let state = mouse(base, 'press', 3, y);
+  assert.equal(state.mode, 'turn', 'Nothing opens on the press');
+  state = mouse(state, 'move', 10, y + 2);
+  const shown = frame(state, model);
+  assert.ok(spans(shown[y - 1]).some(span => span.style?.inverse && span.text.includes('先跑')), 'The words dragged over are inverted');
+  assert.ok(spans(shown[y + 3]).every(span => !span.style?.inverse), 'Nothing past the drag');
+  // Let go: copied, the page's margin left off, nothing opened or selected.
+  state = mouse(state, 'release', 10, y + 2);
+  assert.equal(state.effect?.kind, 'copy');
+  assert.equal(state.effect?.kind === 'copy' && state.effect.selected, true, 'Said to be copied: the inverse is gone');
+  const copied = state.effect?.kind === 'copy' ? state.effect.text : '';
+  assert.ok(copied.startsWith('先跑一遍测试，看失败在哪一步。\n'), copied);
+  assert.equal(copied.split('\n').length, 3);
+  assert.equal(state.mode, 'turn'); assert.equal(state.call, undefined); assert.equal(state.drag, undefined);
+  assert.ok(spans(frame(state, model)[y - 1]).every(span => !span.style?.inverse), 'Let go, the inverse is gone');
+  // A move with no button down means the release went unseen: the drag is over, nothing copied.
+  state = mouse(mouse(mouse(base, 'press', 3, y), 'move', 9, y), 'move', 9, y, 3);
+  assert.equal(state.drag, undefined); assert.equal(state.effect, undefined);
 });
 
 test('a call that read an image opens it in the system viewer, the bytes of the time, not a page of its path', () => {
@@ -1048,7 +1104,7 @@ test('a call that read an image opens it in the system viewer, the bytes of the 
   assert.deepEqual(opened.effect, { kind: 'view', image: { name: 'shot.png', data: png, mime: 'image/png', path: '/fixture/shot.png' } });
   // A click opens it too, and leaves nothing selected.
   const y = text(frame(state, model)).findIndex(line => line.includes('shot.png')) + 1;
-  state = key(update(initialState(), model), { type: 'mouse', action: 'press', button: 0, x: 6, y }, model);
+  state = click(update(initialState(), model), { x: 6, y }, model);
   assert.equal(state.effect?.kind, 'view');
   assert.equal(state.call, undefined);
 });

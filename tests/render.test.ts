@@ -169,7 +169,7 @@ function scriptFixture(options: { detail?: boolean; state?: Record<string, unkno
     addEventListener: (type: string, listener: (event: any) => void) => handlers.set(type, listener),
     querySelectorAll: (selector: string) => {
       if (options.detail || selector === '[data-text-id]' || selector === '[data-inline-id]' || selector === 'details[data-fold]') return [];
-      if (selector === 'button[data-item-id]') return [earlierNode, node, contextNode];
+      if (selector === 'button[data-item-id]' || selector === 'button[data-item-id], [role="button"][data-item-id]') return [earlierNode, node, contextNode];
       if (selector === 'button[data-turn-id]') return nav;
       if (selector === 'button[data-lens-turn-id]' || selector === '.toc button[data-lens-turn-id]') return lensNav;
       if (selector === '[data-turn-total]' || selector === '.cspin' || selector.startsWith('[data-nav=')) return [];
@@ -248,7 +248,7 @@ test('only evidence with readable incremental content becomes a detail button', 
     item({ id: 'empty', kind: 'question', detail: { title: '空记录', blocks: [] } }),
   ]) });
   // A question to the user is a call row: readable evidence opens in the editor.
-  assert.match(html, /class="crow node-button" data-item-id="available" data-tool="Ask"/);
+  assert.match(html, /class="crow node-button" role="button" tabindex="0" data-item-id="available" data-tool="Ask"/);
   assert.match(html, /data-item-id="partial"/);
   for (const id of ['display', 'missing', 'empty']) assert.ok(!html.includes(`data-item-id="${id}"`));
   assert.match(renderInlineEvidence({ item: item({ availability: 'partial' }) }), /部分内容/);
@@ -336,7 +336,7 @@ test('a subagent reads as an Agent call row in its place, named in text and open
   const html = renderSidecar({ projectName: 'project', nonce, session: session([item({ kind: 'subagent', title: '子 Agent 返回' })]) });
   // Off the band, a dot coloured by its state (design v10): done here.
   assert.match(html, /<div class="cagents"[^>]*><div class="crun"[^>]*><div class="ctool">Agent<\/div><ol class="cagent-list">/);
-  assert.match(html, /<button type="button" class="crow cagent node-button" data-item-id="tool-1" data-tool="Agent" data-state="done"[^>]*><span class="cdot" aria-hidden="true"><\/span><span class="clabel">/);
+  assert.match(html, /<div class="crow cagent node-button" role="button" tabindex="0" data-item-id="tool-1" data-tool="Agent" data-state="done"[^>]*><span class="cdot" aria-hidden="true"><\/span><span class="clabel">/);
   assert.match(html, /\.cagent\[data-state="running"\] \.cdot \{ background: var\(--gold\); \}/);
   assert.doesNotMatch(html, /class="record-disclosure/);
 });
@@ -500,7 +500,7 @@ test('semantic action rows separate type and purpose and open source-backed evid
   assert.match(webRow, /class="clabel [a-z]+">VS Code API/);
   assert.equal(rows.filter(row => row.includes('VS Code API')).length, 2, 'Repeated wrapper inputs remain distinct occurrences');
   for (const row of rows) {
-    assert.match(row, /^<button/, 'A readable row opens its evidence directly');
+    assert.match(row, /^<(button|div)\b[^>]*\bdata-item-id=/, 'A readable row opens its evidence directly');
     assert.match(row, /data-tool="(?:Skill|WebSearch|WEB)"/);
     assert.doesNotMatch(row, /class="action-symbol"/);
     assert.ok(!row.includes('functions.exec'));
@@ -1385,7 +1385,7 @@ test('only the newest open turn carries live markers: a call still out, or the a
   const panel = (key: string) => html.slice(html.indexOf(`data-turn-panel="turn:${key}"`)).split(/<section class="turn-panel|<\/main>/)[0];
   assert.match(panel('t2'), /data-last-at="2026-09-23T06:24:07.000Z"/);
   // A call still out is drawn as any other, its state said only to the screen reader; the one spinner is at the end, shown even while a call runs.
-  assert.match(panel('t2'), /<button type="button" class="crow node-button"[^>]* title="Read · read-out\.ts · 进行中[^"]*"><span class="cbranch" aria-hidden="true"><\/span>/);
+  assert.match(panel('t2'), /<div class="crow node-button" role="button"[^>]* title="Read · read-out\.ts · 进行中[^"]*"><span class="cbranch" aria-hidden="true"><\/span>/);
   assert.equal(panel('t2').match(/class="cspin"/g)?.length, 1);
   assert.match(panel('t2'), /<li class="cseg tend live-tail"[^>]*><span class="cbranch"><span class="cspin"><\/span><\/span>/);
   assert.doesNotMatch(html, /:has\(\.crow\[data-out\]/);
@@ -1482,8 +1482,8 @@ test('a question to the user sits in its place among the calls and shows what wa
   const html = renderSidecar({ projectName: 'project', nonce, session: session([bash('before'), ask, bash('after')]) });
   const rows = actionHtmlRows(html);
   assert.deepEqual(rows.map(row => /data-tool="([^"]+)"/.exec(row)![1]), ['Bash', 'Ask', 'Bash'], 'In source order, not after the calls around it');
-  const asked = /<li class="crow-item"[^>]*><button[^>]*data-tool="Ask"[\s\S]*?<\/li>/.exec(html)![0];
-  assert.match(asked, /仓库设为？<\/span><\/button><div class="cchoices"><b class="cchoice">✓ 私有 \(Recommended\)<\/b><\/div>/, 'Only what was chosen, under it on the tree');
+  const asked = /<li class="crow-item"[^>]*><div[^>]*data-tool="Ask"[\s\S]*?<\/li>/.exec(html)![0];
+  assert.match(asked, /仓库设为？<\/span><\/div><div class="cchoices"><b class="cchoice">✓ 私有 \(Recommended\)<\/b><\/div>/, 'Only what was chosen, under it on the tree');
   assert.ok(!asked.includes('公开'), 'An option not chosen is not shown as if it were an answer');
 });
 

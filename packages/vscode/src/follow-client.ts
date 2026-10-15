@@ -68,7 +68,7 @@ export const followClient = `
     // Reading an expanded call, opening evidence or choosing a turn is explicit
     // reader intent. A later result must not pull that content out of view.
     document.addEventListener('click', event => {
-      const target = event.target instanceof Element ? event.target.closest('summary, button[data-item-id], button[data-lens-turn-id]') : null;
+      const target = event.target instanceof Element ? event.target.closest('summary, button[data-item-id], [role="button"][data-item-id], button[data-lens-turn-id]') : null;
       if (target && sidecar.contains(target)) { pauseFollowing(); persist(); }
     });
     // Moving up, away from the live edge, pauses at once; moving down is judged by where it lands.

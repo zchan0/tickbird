@@ -93,7 +93,7 @@ export function announcedRow(call: SessionCall, index: number): ChapterRow {
   const view = toolView(call.tool, call.input);
   const command = call.input.command;
   return { id: `announced:${index}:${call.at}`, tool: view.name, label: view.label, count: 1, items: [], running: true, pending: true, output: false, openable: false,
-    ...(command !== undefined ? { command } : {}), ...(call.input.description ? { description: call.input.description } : {}) };
+    ...(command !== undefined ? { command } : {}), ...(call.input.description ? { description: call.input.description } : {}), input: call.input };
 }
 
 /**
