@@ -1,8 +1,8 @@
 // One release, from this checkout to GitHub and back onto this machine:
 //   npm run release -- 0.8.1        (or patch, minor, major: the next after the latest release)
 //   1. Check: on main, nothing uncommitted, nothing on GitHub this checkout lacks, and
-//      something under 未发布 in CHANGELOG.md.
-//   2. Prepare: turn 未发布 into the version's section, set the version everywhere
+//      something under Unreleased in CHANGELOG.md.
+//   2. Prepare: turn Unreleased into the version's section, set the version everywhere
 //      (set-version), run the tests, commit "0.8.1".
 //   3. Push main, retrying when GitHub drops the connection, and wait for CI on that commit.
 //   4. Tag v0.8.1, push the tag, and wait for the Release workflow to publish it, its notes
@@ -88,7 +88,7 @@ const latest = git('tag', '--list', 'v*', '--sort=-v:refname').split('\n')[0]?.s
 const version = /^\d/.test(asked) ? asked : (([major, minor, patch]) => asked === 'major' ? `${major + 1}.0.0` : asked === 'minor' ? `${major}.${minor + 1}.0` : `${major}.${minor}.${patch + 1}`)(latest.split('.').map(Number));
 const tag = `v${version}`;
 const released = git('tag', '--list', tag) !== '';
-// The version's notes: already its own section when a run before got this far, else what is under 未发布.
+// The version's notes: already its own section when a run before got this far, else what is under Unreleased.
 const changelog = readChangelog();
 const noted = section(changelog, version) !== undefined;
 if (!released && !noted && !section(changelog, UNRELEASED.slice(3))) stop(`CHANGELOG.md 的「${UNRELEASED.slice(3)}」下面是空的`, `写下 ${version} 改了什么（使用者看得到的变化），提交后再运行一次 npm run release -- ${version}。`);
@@ -99,7 +99,7 @@ if (!released) {
   if (!noted) {
     const today = new Date(), date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     writeChangelog(release(changelog, version, date));
-    done(`更新记录：「${UNRELEASED.slice(3)}」改为 ${version} · ${date}`);
+    done(`CHANGELOG.md：「${UNRELEASED.slice(3)}」改为 ${version} - ${date}`);
   }
   const current = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
   if (current !== version) {

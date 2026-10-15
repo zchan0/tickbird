@@ -1,15 +1,15 @@
-# 终端支持
+# Terminal support
 
-装了终端版后，新开的 Claude Code 或 Codex 会话旁边会自动开一栏 Tickbird，焦点留在 Agent。已经开着的会话不受影响。原理见 [TERMINAL_DESIGN.md](./TERMINAL_DESIGN.md) 第 9 节。
+With the terminal version installed, each new Claude Code or Codex session opens a Tickbird pane beside it, and the focus stays on the agent. Sessions that are already open are not affected. For how it works, see section 9 of [TERMINAL_DESIGN.md](./TERMINAL_DESIGN.md) (in Chinese).
 
-| 终端 | 自动开栏 | 说明 |
+| Terminal | Opens the pane | Notes |
 | --- | --- | --- |
-| kitty | ✅ | 要开远程控制：在 Claude Code 里运行 `/tickbird-split:kitty`，它会检查，经你同意后备份 kitty.conf 并加上两行；之后完全退出 kitty 再打开 |
-| tmux（在任何终端里） | ✅ | 不需要设置 |
-| WezTerm | ✅ 未实测 | 按 WezTerm 的文档实现（`wezterm cli split-pane`） |
-| Zellij | ✅ 未实测 | 按 Zellij 的文档实现；新栏先开在右边，再挪到左边 |
-| iTerm2（macOS） | ✅ 未实测 | 通过 AppleScript，新栏在 Agent 右边；第一次会请你允许控制 iTerm2 |
-| Ghostty（macOS，1.3 以上） | ✅ 未实测 | 通过 AppleScript（Ghostty 标为预览）；分出的是当时窗口里正在用的那个终端；第一次会请你允许控制 Ghostty |
-| 其它终端 | — | 在 Claude Code 里运行 `/tickbird-split:open`，它给出一行命令并复制到剪贴板，在新的标签页或窗口里运行即可 |
+| kitty | ✅ | Needs remote control. Run `/tickbird-split:kitty` in Claude Code: it checks, and with your consent backs up kitty.conf and adds two lines. Then quit kitty completely and open it again. |
+| tmux (in any terminal) | ✅ | No setup. |
+| WezTerm | ✅ not tested | Made from WezTerm's docs (`wezterm cli split-pane`). |
+| Zellij | ✅ not tested | Made from Zellij's docs. The pane opens on the right, then moves to the left. |
+| iTerm2 (macOS) | ✅ not tested | Through AppleScript; the pane opens to the right of the agent. The first time, macOS asks you to allow control of iTerm2. |
+| Ghostty (macOS, 1.3 or later) | ✅ not tested | Through AppleScript (a preview feature in Ghostty). It splits the terminal that has the focus in that window. The first time, macOS asks you to allow control of Ghostty. |
+| Other terminals | — | Run `/tickbird-split:open` in Claude Code. It gives you one command and copies it to the clipboard; run it in a new tab or window. |
 
-栏被关掉了，用 `/tickbird-split:open` 重新打开。不想自动开栏，在 Agent 的插件管理里停用 `tickbird-split`。
+If you close the pane, open it again with `/tickbird-split:open`. To stop the pane from opening by itself, turn off `tickbird-split` in the agent's plugin manager.

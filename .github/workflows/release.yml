@@ -43,9 +43,9 @@ jobs:
             # What this version changed, as CHANGELOG.md says it (npm run release wrote the section).
             node scripts/changelog.mjs notes "$version"
             echo
-            echo "## 安装"
+            echo "## Install"
             echo
-            echo "VS Code：\`code --install-extension tickbird-$version.vsix\`。终端版和 Agent 插件从仓库安装，见 README 的「安装」。"
+            echo "VS Code: \`code --install-extension tickbird-$version.vsix\`. The terminal version and the agents' plugins install from the repository: see Install in the README."
           } > build/notes.md
           gh release create "$GITHUB_REF_NAME" "build/tickbird-$version.vsix" build/tickbird-cli.cjs \
             --title "Tickbird $version" --notes-file build/notes.md

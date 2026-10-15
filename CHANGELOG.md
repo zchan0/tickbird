@@ -1,43 +1,43 @@
-# 更新记录
+# Changelog
 
-这里记录每一版改了什么，只写使用者看得到的变化。格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)：
+What each release changed, as users see it. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/):
 
-- 改动随提交记在「未发布」下面。
-- `npm run release` 发版时，把这一节改成版本号和日期，并把它用作 GitHub Release 的说明。
+- Changes go under Unreleased with their commits.
+- `npm run release` turns that section into the version and the date, and uses it as the GitHub Release's notes.
 
-## 未发布
+## Unreleased
 
-## 0.8.1 · 2026-10-15
+## 0.8.1 - 2026-10-15
 
-### 新增
+### Added
 
-- 终端版：拖动鼠标就能选中文字，松开时自动复制到剪贴板。终端支持剪贴板协议（kitty、iTerm2、WezTerm）时用协议，不支持时在 Mac 上用系统剪贴板。单击照常打开详情。
-- 侧栏：调用行、Agent 行和 Changes 里的文件行都能拖动选中、复制。单击照常打开详情。
+- Terminal: drag over words to select them; letting go copies them to the clipboard. Where the terminal takes the clipboard escape code (kitty, iTerm2, WezTerm) Tickbird uses it, and on a Mac the system clipboard otherwise. A click still opens the details.
+- Side bar: the words of call rows, Agent rows and files in Changes can be dragged over and copied. A click still opens the details.
 
-### 改动
+### Changed
 
-- SendMessage、Skill、Workflow 调用改成和 Agent 调用一样的写法：
-  - SendMessage：写「→ 对方 Agent 的任务」，下面一行写消息摘要。
-  - Skill：写「◆ 技能名」，下面一行写传给它的参数。
-  - Workflow：工具名旁边写名字，下面写说明和各个阶段；圆点表示状态，后台跑完时变色。
-- subagent 页的标签改为 Task（主 Agent 交给它的任务）和 Result（它交回去的结果）。
-- 侧栏字体跟随 `chat.fontSize`、`chat.fontFamily` 和 `chat.editor.*`，和 Claude Code 扩展的面板一致。其他字号按正文字号等比例缩放。
+- SendMessage, Skill and Workflow calls are set as Agent calls are:
+  - SendMessage: "→ the task of the agent it went to", the message's summary on the line under it.
+  - Skill: "◆ the skill's name", its arguments on the line under it.
+  - Workflow: its name beside the tool's name, then what it does and its phases. A dot shows its state and changes colour when the background run is done.
+- A subagent's page labels what it was given Task and what it gave back Result.
+- The side bar's fonts follow `chat.fontSize`, `chat.fontFamily` and `chat.editor.*`, as the Claude Code extension's panel does. The other sizes scale with the body size.
 
-### 修复
+### Fixed
 
-- 侧栏：Agent 的话先以草稿显示，写进记录后不再从头重新打字。提前显示的调用写进记录时，不再先消失再出现。
-- 终端：话分几段到达时，下面的调用会等这段话打完再出现。
+- Side bar: the agent's words, first shown as a draft, no longer type out again from the start when they reach the record. A call shown early no longer goes away and comes back when its record comes.
+- Terminal: when the agent's words come in several parts, the calls under them wait until the words are all typed.
 
-## 0.8.0 · 2026-10-13
+## 0.8.0 - 2026-10-13
 
-### 改动
+### Changed
 
-- 两个版本用同一套版式：你的请求是页面上唯一凸起的部分；调用直接排在页面上；Prompt、Final Answer、Changes 是灰色小标签。
-- 颜色从文字色和背景色混出一组灰阶。指针或光标所在的那一行不另外上色：灰字变成正文色，正文色的字加下划线。
-- 动效两边一致：Agent 的话以打字机效果出现，下面的调用随后依次淡入；等待时是一个呼吸的金色圆点。
+- Both versions share one layout: your request is the only raised part of the page; calls sit on the page itself; Prompt, Final Answer and Changes are small grey labels.
+- Colours are one ladder of greys mixed from the text and background colours. The line under the pointer or the cursor gets no colour of its own: grey text turns the body colour, and body-colour text is underlined.
+- Motion is the same in both: the agent's words type out, the calls under them fade in one after another, and while waiting a gold dot breathes.
 
-### 修复
+### Fixed
 
-- Agent 执行的斜杠命令按输入的命令显示，不再露出 `<command-message>` 标签。
+- A slash command the agent runs shows as the command typed, no longer as raw `<command-message>` tags.
 
-更早的版本见 [GitHub Releases](https://github.com/zchan0/tickbird/releases)。
+Earlier versions: see [GitHub Releases](https://github.com/zchan0/tickbird/releases).

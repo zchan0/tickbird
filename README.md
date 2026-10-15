@@ -55,8 +55,6 @@ Also install the `tickbird-state` plugin for your agent (the terminal version in
 
 ## Docs
 
-These are in Chinese for now:
-
 - [Usage](./docs/USAGE.md): keys, what opens when you click a step, live updates and following.
 - [Terminal support](./docs/TERMINALS.md): which terminals open the pane by themselves.
 - [Development](./docs/DEVELOPMENT.md): build from source, tests, releases.

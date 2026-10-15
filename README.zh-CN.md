@@ -53,10 +53,12 @@ code --install-extension tickbird-<版本>.vsix
 
 ## 文档
 
+以下文档是英文的：
+
 - [使用说明](./docs/USAGE.md)：按键、点开调用看到什么、实时和跟随，以及安装时可能遇到的情况。
 - [终端支持](./docs/TERMINALS.md)：各终端能不能自动开栏。
 - [开发](./docs/DEVELOPMENT.md)：从源码构建、测试、发版。
-- [更新记录](./CHANGELOG.md)
+- [更新记录（Changelog）](./CHANGELOG.md)
 
 ## 许可
 

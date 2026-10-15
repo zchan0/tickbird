@@ -1,63 +1,65 @@
-# 使用说明
+# Usage
 
-[README](../README.zh-CN.md) 里是简短的安装步骤。这里是装好之后的细节：每个版本怎么看、怎么操作，以及安装时可能遇到的情况。
+The [README](../README.md) has the short install steps. This page has the details for after you install: how to read each version, how to use it, and what you can run into while you install.
 
-## 安装时可能遇到的
+Some text on the page is in Chinese for now. Where this page names it, the English meaning follows in parentheses.
 
-- Claude Code 2.1.275 以前的版本分两步：`/plugin marketplace add zchan0/tickbird`，再 `/plugin install tickbird-split@tickbird`。
-- Codex 第一次启动会提示 **Hooks need review**，选 Trust all（或执行 `/hooks`，按 `t`）。不信任时 Codex 静默跳过这些 hook。
-- VS Code 版：再给 Agent 装上 `tickbird-state`（装了终端版就已经有了）：Claude Code 里 `/plugin install tickbird-state --marketplace zchan0/tickbird`；Codex 里同上面的 `marketplace add` 和 `plugin add tickbird-state@tickbird`。没有它，侧栏仍能手动选择会话，但不会自动跟随本窗口的会话，也不显示 Needs approval。
-- 终端版各终端能不能自动开栏，见 [TERMINALS.md](./TERMINALS.md)。
+## While you install
 
-## 更新与卸载
+- Claude Code before 2.1.275 installs in two steps: `/plugin marketplace add zchan0/tickbird`, then `/plugin install tickbird-split@tickbird`.
+- The first time Codex starts, it asks **Hooks need review**. Choose Trust all (or run `/hooks` and press `t`). If you do not trust them, Codex skips these hooks without a word.
+- VS Code: also install `tickbird-state` for the agent (the terminal version installs it already). In Claude Code: `/plugin install tickbird-state --marketplace zchan0/tickbird`. In Codex: the same `marketplace add` as in the README, then `plugin add tickbird-state@tickbird`. Without it, you can still choose a session by hand in the side bar, but it does not follow this window's session and does not show Needs approval.
+- Which terminals open the pane by themselves: see [TERMINALS.md](./TERMINALS.md).
 
-- 插件：在 Agent 的插件管理里更新或卸载（Claude Code 的 `/plugin`，Codex 的 `/plugins`）。两个 Agent 都只在插件版本号变化时取更新。
-- VS Code 版：装新的 `.vsix`；卸载在扩展面板里。
+## Update and uninstall
 
-插件做什么：`tickbird-state` 是一组只写会话状态的 hook（会话属于哪个窗口、是否在等你批准、屏幕上正在显示的长回答），写到本机文件；不显示界面，不改变 Agent 的行为。`tickbird-split` 在会话开始时开一栏，运行 Tickbird 只读地显示这个会话。
+- Plugins: update or uninstall them in the agent's plugin manager (`/plugin` in Claude Code, `/plugins` in Codex). Both agents get an update only when the plugin's version number changes.
+- VS Code: install the new `.vsix`. Uninstall it in the Extensions view.
 
-VS Code 版和终端版是同一套排法：一页一轮，调用挂在工具名下面的树杈上，一轮结束后 Final Answer 和改动各收成一行放在末尾。
+What the plugins do: `tickbird-state` is a set of hooks that only write the session's state to a file on your machine: which window the session belongs to, whether it waits for your approval, and the long answer on the agent's screen. It shows nothing and does not change how the agent works. `tickbird-split` opens a pane when a session starts, and runs Tickbird in it to show that session, read-only.
 
-## VS Code 版
+The VS Code version and the terminal version lay out a turn the same way: one turn to a page, the calls hung under each tool's name on a tree, and at the end of a turn the Final Answer and the changes, each folded to one line.
 
-1. 点活动栏的 Tickbird 图标（或执行 `Tickbird: Open Process Observer`），左侧主侧栏出现视图。它不占编辑器组，其它扩展打开文件也不会把它盖住。
-2. 视图标题栏：切换会话、刷新，`…` 里是覆盖记录；标题后面是会话名（只用 Agent 保存的名字）。切换会话的选单显示标题、来源、短 ID、更新时间和最近一句对话，可以搜索；只列当前项目的主会话。
-3. 一页一轮。顶栏写「第 n 轮 / 共 N 轮 · 开始时间」，‹ › 或 `[` `]` 翻到上一轮、下一轮，☰ 或 `t` 打开目录（每轮一项，写着它的请求）。
-4. 一轮从上到下：
-   - **Prompt**：你的请求，铺在一块比页面浅一级的底色上，是页面上唯一凸起的部分。一轮中途发的消息也这样标。
-   - **Agent 调用**（subagent）不在调用带上，单独成块：工具名一行（几个描述有共同前缀时，前缀写在这一行，如 `Agent · Name brainstorm`）；每个 subagent 一个圆点，颜色就是状态（黄 运行中、绿 完成、红 失败、灰 已停止），后面是它的描述，正文色；下面一行灰字写它的情况：后台、用时、tokens、调用次数（tokens 和完成时的调用次数来自结束通知，运行中显示已用时间和已做的调用）。和别的 Agent 打交道的调用也这样写：**SendMessage** 写「→ 对方 Agent 的任务」，下面灰字是消息摘要；**Skill** 写「◆ 技能名」，下面是传给它的参数；**Workflow** 工具名旁边写它的名字，圆点后面写它做什么，下面挂着各个阶段，最后一行写后台和用时。
-   - **Agent 的话**，下面是它随后的调用，直接排在页面上：工具名（Bash、Read、Edit、Search…）单独一行，调用用树杈挂在下面，同一工具连续调用只写一次名字。调用内容统一灰色；颜色只给失败（红，`exit 1`、`rejected` 等）、改动行数（绿 / 红）和等你回答的提问（金色 `?`）。命令写的是 Agent 给它的说明，或从命令本身读出来的动作；命令改了文件时，后面接着写改了哪些文件。
-   - **向用户提问**（Ask）在发生的位置成行，下面是选中的答案。
-   - **Final Answer**：一轮结束后收成一行，点开看全文；放不下时把它滚到顶部。
-   - **Changes**：本轮改过的文件数和总行数，点开每个文件一行。脚本改的文件也算进来，没有行数。
-5. **点开一条调用**，打开它指向的东西：
-   - Read（含 `cat`、`sed -n` 这类只读命令）：在编辑器里打开文件，选中当时读的那几行。文件改过、那几行挪了位置时选中新位置；那几行已经不在了，就打开当时的记录。
-   - 读的图片、本地文件、网址：用 VS Code 或浏览器打开。
-   - Edit / Write，以及 Changes 里的文件：在编辑器区打开 diff，带记录里的行号，改动的词用更亮的颜色标出（Claude Code 的配色）。同一文件在这一轮改过几次时，用 ‹ › 或 `<` `>` 切换。
-   - Agent（Claude Code 的 subagent）：子任务自己留了记录时，打开它的那一轮：交给它的任务标为 Task（终端版折叠成前 3 行，⏎ 或点击展开、再按收起，`y` 复制全文），下面是它的话和调用，它交回去的结果标为 Result，展开显示。子任务还在跑时跟着它的记录更新，末尾一个金色圆点在呼吸。几个 subagent 之间用 `[` `]`（终端版）切换，或在面板里点另一行（VS Code 版，「保留此页」可以并排看）。Codex 的子任务暂不支持。
-   - 其它调用：打开详情页，标题是面板里那一行的说法，下面是输入和返回。
-   - 详情页会被下一次打开复用；点「保留此页」后不再被覆盖。
-6. **实时**：选定会话后自动读取新写入的记录。
-   - 一轮在运行时，页面末尾一个金色圆点在呼吸，不论是调用在跑还是 Agent 在想下一步；调用行本身不动。10 分钟没有新记录时显示「无新记录」。
-   - 后台任务（后台运行的 Agent、Bash）：一轮结束后还有任务没返回时，末尾灰字写「N background tasks running」，只在 Agent 还报告状态时显示。任务返回后，通知在这一轮里成为一行，Agent 接着说的话成为新的 Final Answer，之前的回答回到过程里。
-   - 新内容依次出现：先出 Agent 的话，话出完再出它下面的调用。
-   - 跟随：默认跟随最新一轮的末尾，一轮结束后停在末尾。向上滚动、点开调用或翻到旧的一轮会暂停，顶栏出现「↓ 跟随」，点它回到最新一轮。看旧的一轮时开始了新的一轮，底部提示 **New turn**。
-   - 是否在运行：Claude Code 以它自己维护的 `~/.claude/sessions/<pid>.json`（busy / idle）为准；Codex 以会话里的回合结束 / 中断事件为准。
-   - **装了 `tickbird-state` 时**（`npm run install:vscode` 会装上）：自动跟随本窗口最近活跃的会话；Agent 停下等你批准时，末尾显示 **Needs approval** 和要批准的工具、文件；Claude Code 的话在写进会话记录之前就先显示出来。手动选了别的会话就暂停跟随，提示条里可以恢复。
-7. 调用、Agent 和 Changes 里的文件都能拖动选中文字，用 Cmd+C 复制；单击照常打开。
-8. 「覆盖记录」列出每条来源记录的去向：显示、合并、排除或待支持。
+## VS Code
 
-## 终端版
+1. Click the Tickbird icon in the activity bar (or run `Tickbird: Open Process Observer`). The view opens in the primary side bar. It takes no editor group, so files that other extensions open do not cover it.
+2. The view's title bar: choose a session, refresh, and under `…` the coverage records. After the title is the session's name (only the name the agent saved). The session list shows each session's title, source, short ID, last update and latest message, and you can search it. It lists the main sessions of the current project only.
+3. One turn to a page. The page head says 「第 n 轮 / 共 N 轮 · start time」 (turn n of N). ‹ › or `[` `]` go to the turn before and after; ☰ or `t` open the contents, one entry a turn, each with its request.
+4. A turn, top to bottom:
+   - **Prompt**: your request, on a sheet one step lighter than the page: the only raised part of the page. Messages you send during the turn are set the same way.
+   - **Agent calls** (subagents) are a block of their own: the tool's name on one line (when the descriptions share a lead, the lead goes on this line, as in `Agent · Name brainstorm`). Each subagent has a dot whose colour is its state (yellow running, green done, red failed, grey stopped), then its description in the body colour. Under it, in grey: background or not, how long, tokens and the number of calls (tokens and the final count of calls come from its notification; while it runs, the time so far and the calls so far). Calls that deal with another agent are set the same way. **SendMessage**: → the task of the agent it went to, the message's summary in grey under it. **Skill**: ◆ the skill's name, its arguments under it. **Workflow**: its name beside the tool's name, what it does after the dot, its phases hung under that, and a last line with background and time.
+   - **The agent's words**, and under them the calls that came after, on the page itself: the tool's name (Bash, Read, Edit, Search…) on its own line, the calls hung under it on a tree. Several calls of one tool in a row show the name once. Calls are grey. Colour marks only a failure (red: `exit 1`, `rejected` and so on), the lines a change added and removed (green and red), and a question that waits for your answer (a gold `?`). A command shows the agent's own description of it, or what the command does as read from the command; when a command changes files, the files follow.
+   - **A question to you** (Ask) is a line where it was asked, with the answers you chose under it.
+   - **Final Answer**: when the turn is over, it folds to one line. Click it to read all of it; if it does not fit, the page scrolls it to the top.
+   - **Changes**: how many files the turn changed and the lines in all. Click it for one line a file. Files a script changed are included, without line counts.
+5. **Click a call** to open what it points to:
+   - Read (and read-only commands such as `cat` and `sed -n`): opens the file in the editor with the lines it read selected. If the file changed and those lines moved, the new place is selected; if the lines are gone, the record of that time opens.
+   - An image, a local file or a web address it read: opens in VS Code or the browser.
+   - Edit and Write, and files in Changes: open a diff in the editor area, with the line numbers from the record and the changed words in a brighter colour (Claude Code's colours). If the turn changed a file more than once, switch between the changes with ‹ › or `<` `>`.
+   - Agent (a Claude Code subagent): if the subagent kept its own record, its turn opens. What it was given is labelled Task (folded to its first 3 lines in the terminal; ⏎ or a click opens and folds it, `y` copies all of it), then its words and calls, then what it gave back, labelled Result, open. While the subagent runs, the page follows its record, with a gold dot breathing at the end. Go from subagent to subagent with `[` `]` (terminal) or click another row (VS Code; 「保留此页」 (keep this page) lets you see two side by side). Codex subagents are not supported yet.
+   - Other calls: open a detail page. Its title is what the row says, with the input and the return under it.
+   - The next call you open uses the same detail page. Click 「保留此页」 (keep this page) to keep it.
+6. **Live**: once a session is chosen, new records are read as they are written.
+   - While a turn runs, a gold dot breathes at the end of the page, whether a call runs or the agent works out its next step. The call rows do not move. After 10 minutes with no new record, it says 「无新记录」 (no new records).
+   - Background tasks (agents and Bash commands that run in the background): when the turn ends with tasks still out, a grey line at the end says "N background tasks running", but only while the agent still reports its state. When a task reports back, its notification becomes a row in the turn, what the agent says next becomes the new Final Answer, and the answer before goes back into the process.
+   - New content comes in one part after another: the agent's words first, then the calls under them.
+   - Following: by default the page follows the end of the newest turn, and stays at the end when the turn is over. Scrolling up, opening a call or going to an older turn pauses it, and 「↓ 跟随」 (follow) shows in the page head; click it to go back to the newest turn. If a new turn starts while you read an older one, **New turn** shows at the bottom.
+   - Whether the agent runs: for Claude Code, the `~/.claude/sessions/<pid>.json` file that Claude Code keeps (busy or idle); for Codex, the turn-end and interrupt events in the session.
+   - **With `tickbird-state` installed** (`npm run install:vscode` installs it): the view follows the session most recently active in this window. When the agent stops for your approval, **Needs approval** shows at the end with the tool and file to approve. Claude Code's words show before they reach the transcript. If you choose another session by hand, following pauses; the notice bar can turn it back on.
+7. You can drag over the words of calls, Agent rows and files in Changes, and copy them with Cmd+C. A click still opens them.
+8. The coverage records list where each source record went: shown, merged, left out, or not yet supported.
 
-在 kitty 或 tmux 里新开 Claude Code 或 Codex 会话，旁边自动开一栏（约 48 列）。内容和排法同 VS Code 版。按 `?` 看全部按键，常用的：
+## Terminal
 
-| 按键 | 作用 |
+In kitty or tmux, a new Claude Code or Codex session opens a pane beside it (about 48 columns). What it shows and how it lays it out are as in the VS Code version. Press `?` for all the keys. The common ones:
+
+| Key | What it does |
 | --- | --- |
-| `j` `k` / `↓` `↑` | 选择调用或答复（选中后暂停跟随） |
-| `⏎` | 打开详情；展开或收起 Final Answer、Changes |
-| `[` `]` | 上一轮 / 下一轮；详情里是上一条 / 下一条调用 |
-| `<` `>` | 详情里：同一文件的上一次 / 下一次修改 |
-| `g` `G` | 开头 / 末尾（`G` 回到最新一轮并恢复跟随） |
-| `t` `o` `y` | 目录 / 在编辑器打开 / 复制 |
-| `a` `q` | 切回 Agent / 退出 |
-| 拖动 | 选中文字，松开就复制到剪贴板（单击照常打开） |
+| `j` `k` / `↓` `↑` | Select a call or the answer (selecting pauses following) |
+| `⏎` | Open the details; open or fold Final Answer and Changes |
+| `[` `]` | The turn before / after; in a detail, the call before / after |
+| `<` `>` | In a detail: the change before / after to the same file |
+| `g` `G` | Start / end (`G` goes back to the newest turn and follows it again) |
+| `t` `o` `y` | Contents / open in the editor / copy |
+| `a` `q` | Back to the agent / quit |
+| Drag | Select words; let go to copy them to the clipboard (a click still opens) |
