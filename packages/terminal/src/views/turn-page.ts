@@ -2,7 +2,7 @@ import type { Provider, SessionData, TimelineItem } from '../../../core/src/mode
 import type { TurnGroup } from '../../../core/src/timeline';
 import type { ChapterRow, TurnSegment } from '../../../core/src/chapters';
 import type { LiveExtras } from '../../../core/src/live-extras';
-import { plainPasted } from '../../../core/src/pasted';
+import { pastedSegments, plainPasted } from '../../../core/src/pasted';
 import { backgroundLine, clock, publicBody, rowView, turnView, type TurnView } from '../../../core/src/turn-view';
 import { partnerOf, partnerRun } from '../../../core/src/agent-line';
 import { symbol, type Capabilities } from '../caps';
@@ -185,7 +185,7 @@ export function headerLines(ctx: PageContext, aside: Span[] = []): Line[] {
 }
 
 const requestText = (item: TimelineItem | undefined, group: TurnGroup): string =>
-  plainPasted(item ? publicBody(item) : group.request).trim() || t('(no request recorded for this turn)', '（未取得本轮请求）');
+  (plainPasted(item ? publicBody(item) : group.request).trim() ? item ? publicBody(item) : group.request : '') || t('(no request recorded for this turn)', '（未取得本轮请求）');
 
 /**
  * Every word on the page starts in this column: the header, the labels' words,
@@ -217,7 +217,11 @@ function promptLines(text: string, ctx: PageContext): Line[] {
   // Typed, not written as a document: each line as it was typed, wrapped beside the bar, no list indents.
   const room = Math.max(8, ctx.width - MARGIN - 1 - (tint ? MARGIN - 1 : 0));
   const bold = (line: Span[]): Span[] => line.map(span => ({ ...span, style: { ...span.style, bold: true } }));
-  const words = text.replace(/\r/g, '').split('\n').flatMap(source => source.trim() ? wrapSpans(inlineSpans(source.trimEnd()), room).map(line => [...lead, ...bold(spans(line))]) : [lead.slice(0, 1)]);
+  const typed = (part: string): Line[] => part.replace(/\r/g, '').split('\n').flatMap(source => source.trim() ? wrapSpans(inlineSpans(source.trimEnd()), room).map(line => [...lead, ...bold(spans(line))]) : [lead.slice(0, 1)]);
+  // A paste or the editor's selection: its label in grey, its lines as they were, not bold, not read as markdown.
+  const quoted = (label: string, part: string): Line[] => [[...lead, { text: label, style: quiet(ctx) }],
+    ...part.replace(/\r/g, '').replace(/^\n+|\s+$/g, '').split('\n').flatMap(source => source.trim() ? wrapSpans([{ text: source.trimEnd() }], room).map(line => [...lead, ...spans(line)]) : [lead.slice(0, 1)])];
+  const words = pastedSegments(text).flatMap((segment, index) => [...(index ? [lead.slice(0, 1)] : []), ...(segment.pasted ? quoted(segment.label ?? '', segment.text) : typed(segment.text.replace(/^\s*\n|\s+$/g, '')))]);
   const max = ctx.promptMax;
   const lines: Line[] = [heading(ctx.subagentPage ? 'Task' : 'Prompt', quiet(ctx)), ...(max && words.length > max ? [...words.slice(0, max), [...lead, { text: '… ', style: quiet(ctx) }, { text: symbol(ctx.caps, '▾'), style: { ...quiet(ctx), bold: true } }]] : words)];
   // A line of the band's own above and below: room around the words.

@@ -18,11 +18,11 @@ export function renderMarkdown(text: string): string {
   return `<div class="markdown">${markdown.render(text)}</div>`;
 }
 
-/** A request as the user sent it: pasted text is set apart, its transport tags dropped. */
+/** A request as the user sent it: pasted text and the editor's selection are set apart, their transport tags dropped. */
 export function renderUserText(text: string): string {
   const segments = pastedSegments(text);
   if (!segments.some(segment => segment.pasted)) return renderMarkdown(text);
   return `<div class="markdown">${segments.map(segment => segment.pasted
-    ? `<div class="pasted"><div class="pasted-label">粘贴的内容 · ${segment.text.split(/\r?\n/).length} 行</div>${renderMarkdown(segment.text)}</div>`
+    ? `<div class="pasted"><div class="pasted-label">${escape(segment.label ?? '')}</div>${segment.path === undefined ? renderMarkdown(segment.text) : renderCode(segment.text, /\.([A-Za-z0-9]+)$/.exec(segment.path)?.[1]?.toLowerCase())}</div>`
     : renderMarkdown(segment.text)).join('')}</div>`;
 }

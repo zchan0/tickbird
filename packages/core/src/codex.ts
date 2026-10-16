@@ -48,6 +48,29 @@ const emptyReturn = (value: unknown, transport?: Transport): boolean => {
 };
 const hiddenBlock = (type: string): boolean => /^(reasoning|Reasoning|analysis|encrypted_content|thinking|redacted_thinking)$/.test(type);
 const injection = (text: string): boolean => /^\s*(?:<(?:environment_context|codex_internal_context|permissions(?:_| )instructions|collaboration_mode|skills_instructions|skill|recommended_plugins|user_instructions|system_reminder|turn_aborted)\b|# AGENTS\.md instructions(?: for\b|[ \t]*\r?\n\s*<INSTRUCTIONS>))/.test(text);
+// Codex's IDE extension and app put what goes with a request first, under their own
+// headings (the open tabs, the files the user mentioned, a ChatGPT conversation), and
+// the request after "## My request:".
+const CONTEXT_HEAD = /^(?:# Context from my IDE setup:|# Files mentioned by the user:|## Referenced ChatGPT conversation:|<in-app-browser-context\b)/m;
+// The app's browser state, sent with each request; not the user's words.
+const BROWSER_STATE = /<in-app-browser-context\b[^>]*>[\s\S]*?<\/in-app-browser-context>\s*/g;
+// A pasted image goes as its own block between these two; the tags only name it.
+const imageWrapper = (text: string): boolean => /^\s*(?:<image name=[^\n]*>|<\/image>)\s*$/.test(text);
+/** An answer to a question this record does not hold (asked from a script, say): the questions and the answers, without the transport tags. */
+const unmatchedReply = (raw: string): string | undefined => {
+  const body = /^\s*<send_user_message_question_reply>\s*([\s\S]*?)\s*<\/send_user_message_question_reply>\s*$/.exec(raw)?.[1];
+  if (body === undefined) return undefined;
+  try {
+    const replies = JSON.parse(body);
+    if (!Array.isArray(replies) || !replies.length) return undefined;
+    return replies.map(obj).map(reply => [str(reply.question), `→ ${str(reply.answer)}`].filter(line => line.trim() && line !== '→ ').join('\n')).join('\n\n') || undefined;
+  } catch { return undefined; }
+};
+/** A command the user ran with `!`: the command and what it printed, for the agent to see. */
+const userShellCommand = (raw: string): { command: string; result: string } | undefined => {
+  const match = /^\s*<user_shell_command>\s*<command>\r?\n?([\s\S]*?)\r?\n?<\/command>\s*(?:<result>\r?\n?([\s\S]*?)\s*<\/result>\s*)?<\/user_shell_command>\s*$/.exec(raw);
+  return match && match[1].trim() ? { command: match[1].trim(), result: match[2] ?? '' } : undefined;
+};
 const citeBody = (text: string): string => text.replace(/\s*<oai-mem-citation>[\s\S]*?<\/oai-mem-citation>\s*$/, '').trim();
 // Only the standalone, identified CUA bootstrap document is internal runtime
 // context. Quoted text, ordinary tool output and mixed documentation/UI blocks
@@ -287,6 +310,7 @@ export function* createCodexParser(input: ParserContext): SessionParser {
     if (role !== 'assistant' && role !== 'user') { unsupported(entry, `${role || 'unknown'}:message`, '未识别的消息角色。'); excludeContents(entry, p.content, '未识别角色的内容不作通用展示。'); return; }
     const originalContent = Array.isArray(p.content) ? p.content : [{ type: 'text', text: str(p.message) }];
     const content = originalContent.filter((b, index) => {
+      if (role === 'user' && imageWrapper(str(obj(b).text))) { cover(entry, 'user:image-wrapper', 'excluded', '图片前后的标签只给图片命名；图片本身照常显示。', undefined, index); return false; }
       if (role !== 'user' || !injection(str(obj(b).text))) return true;
       cover(entry, str(obj(b).type) || 'user:injected-context', 'excluded', '自动附带技能或环境块，不计为新的用户请求。', undefined, index);
       return false;
@@ -303,10 +327,13 @@ export function* createCodexParser(input: ParserContext): SessionParser {
     if (asked?.kind === 'question') { addSource(asked, entry); cover(entry, 'assistant:async-question', 'merged', '异步提问的展示消息，与同 ID 的提问调用合并。', asked); return; }
     // The answer to an async question comes back as a user message; it belongs to that question.
     if (role === 'user' && questionReply(entry, raw)) return;
-    let request = raw; let context = '';
-    if (role === 'user' && /^# Context from my IDE setup:/m.test(raw)) {
+    // A command run with `!` reads as it was typed. Its run is its own row; only when no row has it is the output kept, in the details.
+    const shell = role === 'user' ? userShellCommand(raw) : undefined;
+    const shellRan = shell && data.items.some(item => item.turnId === turn && item.kind === 'tool' && item.detail?.blocks.some(block => block.label === '当时命令' && block.text?.trim() === shell.command));
+    let request = shell ? `! ${shell.command}` : role === 'user' ? unmatchedReply(raw) ?? raw : raw; let context = '';
+    if (role === 'user' && CONTEXT_HEAD.test(raw)) {
       const split = /^## My request:\s*$/m.exec(raw);
-      if (split) { context = raw.slice(0, split.index).trim(); request = raw.slice(split.index + split[0].length).trim(); }
+      if (split) { context = raw.slice(0, split.index).trim(); request = raw.slice(split.index + split[0].length).replace(BROWSER_STATE, '').trim(); }
       else { cover(entry, 'user:ide-context', 'excluded', '只有 IDE 上下文，没有实际用户请求。'); excludeContents(entry, content, '仅 IDE 上下文。'); return; }
     }
     const citation = Boolean(p.memory_citation) || /<oai-mem-citation>/.test(raw);
@@ -333,6 +360,10 @@ export function* createCodexParser(input: ParserContext): SessionParser {
     const coverageBefore = data.coverage.length;
     const detailBlocks = blocks(entry, content, item, '正文');
     for (const c of data.coverage.slice(coverageBefore)) if (c.source.block !== undefined) c.source.block = originalContent.indexOf(content[c.source.block - 1]) + 1;
+    if (shell) {
+      detailBlocks.splice(0, detailBlocks.length, textBlock('用户请求', request), ...(shellRan || !shell.result.trim() ? [] : [textBlock('命令输出', shell.result, 'code')]));
+      cover(entry, 'user:shell-command', 'displayed', shellRan ? '用户用 ! 运行的命令；执行和输出见同回合的命令记录。' : '用户用 ! 运行的命令；来源没有单独的执行记录，输出保留在详情中。', item);
+    }
     if (context) {
       const media = detailBlocks.filter(b => b.kind !== 'text');
       detailBlocks.splice(0, detailBlocks.length, textBlock('用户请求', request), textBlock('随请求附带的 IDE 背景', context), ...media);
@@ -342,7 +373,7 @@ export function* createCodexParser(input: ParserContext): SessionParser {
       const citationEntries = obj(p.memory_citation).entries;
       if (Array.isArray(citationEntries)) detailBlocks.push(textBlock('记录中的记忆引用', citationEntries.map(e => { const c = obj(e); return `${str(c.path)}:${Number(c.lineStart) || '?'}-${Number(c.lineEnd) || '?'} ${str(c.note)}`; }).join('\n')));
     }
-    if (kind === 'answer' || context || request !== item.summary || detailBlocks.some(b => b.kind !== 'text') || p.memory_citation) append(item, detailBlocks);
+    if (kind === 'answer' || context || (shell && !shellRan) || request !== item.summary || detailBlocks.some(b => b.kind !== 'text') || p.memory_citation) append(item, detailBlocks);
     else if (item.availability === 'partial') append(item, detailBlocks, '部分内容块不可显示；已保留可取得的公开文本。');
     if (item.availability === 'partial' && !item.detail) item.availability = 'unavailable';
     cover(entry, `${role}:${phase || 'message'}`, kind === 'answer' ? 'original-chat' : 'displayed', kind === 'answer' ? '完整回答以原聊天为主，此处保留历史详情入口。' : '显示公开消息；短正文已完整显示时不重复提供详情。', item);

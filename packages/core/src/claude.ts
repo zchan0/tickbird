@@ -2,7 +2,7 @@ import { claudeExitPrefix } from './outcome';
 import type { CoverageRecord, EvidenceBlock, ItemKind, ParseInput, SessionData, SourceRef, TimelineItem } from './model';
 import { explicitSessionTitle } from './session-title';
 import { interruptionPlaceholder, parseSnapshot, sourceTimestamp, type ParserContext, type SessionParser } from './jsonl';
-import { plainPasted } from './pasted';
+import { editorContext, openedFileOnly, plainPasted } from './pasted';
 
 type Obj = Record<string, any>;
 const object = (value: unknown): Obj => value && typeof value === 'object' && !Array.isArray(value) ? value as Obj : {};
@@ -298,13 +298,20 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
       else cover(source, type, 'excluded', '无可取得的消息内容块。');
       continue;
     }
+    if (type === 'user' && r.isCompactSummary === true) {
+      // After a compaction Claude Code writes the summary of what came before for the agent: not a request, and no new turn.
+      cover(source, 'user:compact-summary', 'excluded', '压缩后写给 Agent 的前文摘要，不是用户请求；压缩本身以边界提示显示。'); continue;
+    }
     if (r.isMeta === true || r.sourceToolUseID) {
       cover(source, `${type}:injected`, 'excluded', '技能或运行上下文注入，不是用户新要求，不显示指令正文。');
       values.forEach((b, i) => cover({ ...source, block: i + 1 }, string(object(b).type) || 'content-block', 'excluded', '自动注入正文不作公开展示。')); continue;
     }
     // Screenshots pasted with a request belong to that request, whichever block comes first.
     const pasted: Array<{ value: unknown; ref: SourceRef }> = [];
-    values.forEach((value, index) => {
+    // The editor's selection is recorded before the words it came with; the words lead the request.
+    const inOrder = values.map((value, index) => ({ value, index }))
+      .sort((a, b) => Number(type === 'user' && editorContext(string(object(a.value).text))) - Number(type === 'user' && editorContext(string(object(b.value).text))));
+    inOrder.forEach(({ value, index }) => {
       const block = object(value); const blockType = string(block.type) || 'unknown';
       const ref = { ...source, block: index + 1 };
       if (type === 'user' && blockType === 'image') { pasted.push({ value, ref }); return; }
@@ -480,6 +487,7 @@ export function* createClaudeParser(input: ParserContext): SessionParser {
           cover(ref, 'user:interruption-placeholder', 'displayed', '系统生成的中断占位文字只作为回合中断边界，不计作新用户请求。', item); return;
         }
         if (!raw.trim()) { cover(ref, 'text:empty-or-injected', 'excluded', '正文为空或仅有自动提醒。'); return; }
+        if (type === 'user' && openedFileOnly(raw)) { cover(ref, 'user:ide-opened-file', 'excluded', '编辑器中打开的文件，随请求自动附带，不是用户写的话。'); return; }
         if (type === 'user' && injected(raw)) { cover(ref, 'user:injected', 'excluded', '命令、技能或环境注入，不是用户新问题。'); return; }
         if (type === 'user' && /^\s*<task-notification>/.test(raw)) { taskNotification(ref, raw); return; }
         const apiError = r.isApiErrorMessage === true;

@@ -12,6 +12,12 @@ What each release changed, as users see it. The format follows [Keep a Changelog
 - The pages speak English, or Chinese where your language is Chinese: the turn page, the contents, the keys and messages in the terminal; the side bar, the session list and the detail page's toolbar in VS Code. Detail pages still have some Chinese text.
 - Choose the language yourself with `TICKBIRD_LANG=en|zh` (terminal) or the `tickbird.language` setting (VS Code).
 
+### Fixed
+
+- The summary Claude Code writes after compacting the context no longer shows as a request of its own, with a turn of its own. The turn it came in goes on.
+- Lines you select in VS Code and send with a request (Claude Code in VS Code) show under your words, set apart under the file's name and the line numbers, no longer as raw `<ide_selection>` tags. The file open in the editor is left out. A paste in the terminal is set apart the same way.
+- Codex: the files you mention, the app's browser and a referenced ChatGPT conversation are no longer shown as part of your request, and an answer to a question asked from a script no longer shows its tags. A command you run with `!` reads as you typed it (`! ls src`); its output stays with its Bash row.
+
 ## 0.8.1 - 2026-10-15
 
 ### Added
